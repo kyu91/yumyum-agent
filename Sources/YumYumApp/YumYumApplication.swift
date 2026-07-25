@@ -5,6 +5,7 @@ import YumYumCore
 @main
 @MainActor
 struct YumYumApplication: App {
+    @NSApplicationDelegateAdaptor(YumYumAppDelegate.self) private var appDelegate
     @StateObject private var viewModel: YumYumAppViewModel
 
     init() {
@@ -17,6 +18,9 @@ struct YumYumApplication: App {
     var body: some Scene {
         Window("YumYum", id: "main") {
             YumYumContentView(viewModel: viewModel)
+                .background {
+                    MainWindowActionInstaller(appDelegate: appDelegate)
+                }
         }
         .defaultSize(width: 600, height: 680)
         .windowResizability(.contentMinSize)
@@ -25,7 +29,7 @@ struct YumYumApplication: App {
         }
 
         MenuBarExtra("YumYum", systemImage: "takeoutbag.and.cup.and.straw.fill") {
-            YumYumMenu(viewModel: viewModel)
+            YumYumMenu(viewModel: viewModel, appDelegate: appDelegate)
         }
     }
 
@@ -52,15 +56,42 @@ struct YumYumApplication: App {
     }
 }
 
+private struct MainWindowActionInstaller: View {
+    @Environment(\.openWindow) private var openWindow
+
+    let appDelegate: YumYumAppDelegate
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .onAppear {
+                appDelegate.setOpenMainWindowAction {
+                    openWindow(id: "main")
+                }
+            }
+            .accessibilityHidden(true)
+    }
+}
+
 private struct YumYumMenu: View {
     @Environment(\.openWindow) private var openWindow
     @ObservedObject var viewModel: YumYumAppViewModel
+    @ObservedObject var appDelegate: YumYumAppDelegate
 
     var body: some View {
         Button("YumYum 열기") {
             NSApplication.shared.activate(ignoringOtherApps: true)
             openWindow(id: "main")
         }
+
+        Toggle(
+            "플로팅 펫 보이기",
+            isOn: Binding(
+                get: { appDelegate.petVisibility.isVisible },
+                set: { appDelegate.setPetVisible($0) }
+            )
+        )
+        .accessibilityHint("화면 우하단의 YumYum 펫 표시 여부를 전환합니다")
 
         Divider()
 
