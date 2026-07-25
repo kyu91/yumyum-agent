@@ -1,6 +1,6 @@
-# YumYum Phase 0 App Shell
+# YumYum Hermes Connection
 
-YumYum의 macOS 로컬 Hermes 연결을 검증하기 위한 Swift 기반 기술 골격과 실행 가능한 SwiftUI 제품 셸이다. 실제 Hermes 작업, 네트워크, 캘린더, 자격증명에는 접근하지 않는다.
+YumYum의 macOS 로컬 Hermes 연결을 검증하기 위한 Swift 기반 기술 골격과 실행 가능한 SwiftUI 앱이다. 사용자가 지정한 Hermes 실행 파일의 `--version`만 확인하며 ACP, 네트워크, 캘린더, 자격증명 및 외부 변경 기능에는 접근하지 않는다.
 
 ## 요구 환경
 
@@ -10,7 +10,7 @@ YumYum의 macOS 로컬 Hermes 연결을 검증하기 위한 Swift 기반 기술 
 
 패키지는 외부 의존성이 없으며 다음 product를 제공한다.
 
-- `YumYumCore`: 실행 파일 탐색, version probe, process 실행, ACP capability gate, 외부 변경 toolset policy
+- `YumYumCore`: 명시 경로 연결 확인, 실행 파일 탐색, version probe, process 실행, ACP capability gate, 외부 변경 toolset policy
 - `YumYum`: SwiftUI App lifecycle과 메뉴바 진입점을 갖춘 macOS 14+ GUI executable
 - `yumyum-probe`: 명시적으로 지정한 실행 파일에만 `--version`을 전달하는 최소 CLI
 - `yumyum-process-fixture`: 테스트용 결정적 자식 프로세스
@@ -42,7 +42,16 @@ open .build/YumYum.app
 
 기본 빌드는 release 설정을 사용하고 `.build/YumYum.app`을 만든다. debug 번들이 필요하면 `CONFIGURATION=debug ./scripts/build-app.sh`로 실행한다. 이 번들은 로컬 실행 검증용이며 배포 서명이나 공증을 수행하지 않는다.
 
-앱의 Hermes 경로 필드는 사용자가 직접 입력하는 절대 경로 문자열만 받는다. 자동 탐색이나 파일 선택기를 제공하지 않으며 입력값을 저장하거나 실행하지 않는다. `안전한 Fixture Probe 실행` 버튼은 앱이 정한 `yumyum-process-fixture`에 `--version`만 전달하고, 대기·실행 중·성공·오류 상태를 표시한다.
+앱을 열면 Hermes 경로는 비어 있다. 다음 순서로 연결을 확인한다.
+
+1. Hermes 실행 파일의 절대 경로를 직접 입력한다. 예: `/Users/username/.local/bin/hermes`
+2. `연결 확인`을 누른다.
+3. 앱에서 실행 중, 성공과 버전 원문, 경로 오류, 실행 오류 또는 시간 초과 상태를 확인한다.
+4. 실행 중 중단하려면 `취소`를 누른다.
+
+입력 경로는 자동 탐색하거나 저장하지 않는다. 절대 경로 형식일 때만 버튼이 활성화되며, 연결 확인 시 해당 파일의 실행 가능 여부를 검증한 다음 shell 없이 `--version` argv 하나만 직접 전달한다. 명시 경로가 실패해도 `PATH` 후보로 폴백하지 않는다.
+
+하단 `개발 진단`의 `Fixture Probe 실행`은 실제 Hermes와 분리된 `yumyum-process-fixture`를 점검하기 위한 보조 기능이다.
 
 현재 개발 머신의 독립 Command Line Tools에는 XCTest 모듈이 없고 `Testing.framework` 검색 경로도 SwiftPM에 자동 전달되지 않는다. 이 환경에서 활성 Swift Testing 회귀 스위트를 실행하려면 다음 우회를 사용한다.
 
@@ -76,11 +85,12 @@ swift run yumyum-probe --hermes "$PWD/.build/debug/yumyum-process-fixture"
 
 인자 없이 실행하면 `PATH`를 검색하거나 어떤 프로세스도 probe하지 않고 usage와 exit status `64`를 반환한다. 실제 실행 파일을 확인하려면 사용자가 절대 경로를 명시해야 한다.
 
-## Phase 0 경계
+## 현재 안전 경계
 
-- GUI의 Hermes 경로 입력값은 형식만 확인하며 실제 파일 확인, 실행 또는 저장에 사용하지 않는다.
-- GUI fixture probe는 사용자 입력과 분리된 고정 이름의 패키지 fixture만 허용한다.
-- GUI와 메뉴바는 실제 Hermes, 네트워크, 캘린더, 자격증명 및 외부 변경 기능을 비활성화 상태로 표시한다.
+- GUI의 Hermes 경로 입력값은 저장하지 않으며 앱을 시작할 때 항상 비어 있다.
+- GUI 연결 확인은 명시한 Hermes 실행 파일의 `--version`만 실행한다. 로딩, 성공, 경로 오류, 실행 오류, 시간 초과를 구분하고 실행 중 취소를 지원한다.
+- GUI fixture probe는 사용자 입력과 분리된 고정 이름의 패키지 fixture만 허용하며 개발 진단으로만 제공한다.
+- GUI와 메뉴바는 연결 확인 외 ACP, 네트워크, 캘린더, 자격증명 및 외부 변경 기능을 비활성화 상태로 표시한다.
 - `HermesExecutableLocator`는 명시적 절대 경로를 우선하며, 명시 경로가 실패해도 `PATH`로 폴백하지 않는다.
 - `PATH` 탐색은 호출자가 허용한 디렉터리와 실제 `PATH`의 교집합에서만 `hermes`를 찾는다. 빈 항목과 상대 디렉터리는 무시한다.
 - `ProcessRunner`는 Foundation `Process`에 executable URL과 argv를 직접 전달한다. shell을 시작하거나 명령 문자열을 평가하지 않는다.
@@ -93,7 +103,7 @@ swift run yumyum-probe --hermes "$PWD/.build/debug/yumyum-process-fixture"
 
 - `scripts/build-app.sh`가 만드는 번들은 로컬 개발용으로 서명·공증·샌드박스·배포 패키징을 검증하지 않았다.
 - fixture는 고정 이름과 앱이 결정한 경로로 제한하지만 번들 또는 빌드 산출물 자체의 서명·무결성은 검증하지 않는다.
-- 실제 Hermes의 공식 설치 경로, 최소 버전, `--version` 출력과 exit status는 검증하지 않았다.
+- 실제 Hermes의 공식 설치 경로와 최소 지원 버전 정책은 정하지 않았다.
 - `hermes acp` 구문, capability 탐지 방식, 구조화 출력, 승인, 취소 계약은 검증하지 않았다. ACP command를 실제 호출해서는 안 된다.
 - 기본 `PATH` allowlist(`/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin`)가 실제 Hermes 배포 경로와 일치하는지 검증하지 않았다.
 - 실행 가능 파일의 소유자, 서명, symlink 최종 대상 신뢰성은 검증하지 않는다.
