@@ -1,6 +1,6 @@
-# YumYum Hermes Connection
+# YumYum Floating Pet and Hermes Connection
 
-YumYum의 macOS 로컬 Hermes 연결을 검증하기 위한 Swift 기반 기술 골격과 실행 가능한 SwiftUI 앱이다. 사용자가 지정한 Hermes 실행 파일의 `--version`만 확인하며 ACP, 네트워크, 캘린더, 자격증명 및 외부 변경 기능에는 접근하지 않는다.
+YumYum의 macOS 플로팅 펫과 로컬 Hermes 연결을 검증하기 위한 Swift 기반 기술 골격 및 실행 가능한 SwiftUI 앱이다. 사용자가 지정한 Hermes 실행 파일의 `--version`만 확인하며 ACP, 네트워크, 캘린더, 자격증명 및 외부 변경 기능에는 접근하지 않는다.
 
 ## 요구 환경
 
@@ -10,8 +10,8 @@ YumYum의 macOS 로컬 Hermes 연결을 검증하기 위한 Swift 기반 기술 
 
 패키지는 외부 의존성이 없으며 다음 product를 제공한다.
 
-- `YumYumCore`: 명시 경로 연결 확인, 실행 파일 탐색, version probe, process 실행, ACP capability gate, 외부 변경 toolset policy
-- `YumYum`: SwiftUI App lifecycle과 메뉴바 진입점을 갖춘 macOS 14+ GUI executable
+- `YumYumCore`: 플로팅 펫 위치·표시 정책, 명시 경로 연결 확인, 실행 파일 탐색, version probe, process 실행, ACP capability gate, 외부 변경 toolset policy
+- `YumYum`: SwiftUI App lifecycle, 네이티브 플로팅 패널과 메뉴바 진입점을 갖춘 macOS 14+ GUI executable
 - `yumyum-probe`: 명시적으로 지정한 실행 파일에만 `--version`을 전달하는 최소 CLI
 - `yumyum-process-fixture`: 테스트용 결정적 자식 프로세스
 
@@ -31,7 +31,14 @@ swift build --product yumyum-process-fixture
 swift run YumYum
 ```
 
-기본 창을 닫아도 메뉴바의 YumYum 아이콘에서 창을 다시 열거나 앱을 종료할 수 있다.
+앱을 실행하면 마우스가 있는 화면의 사용 가능 영역 우하단에 96×96pt YumYum 펫이 표시된다. 메뉴바와 Dock을 제외한 `visibleFrame`에서 우측·하단 20pt 간격을 두며, 모든 Space와 fullscreen 앱 위에서도 보조 패널로 표시된다.
+
+- 펫 클릭: YumYum 앱을 활성화하고 기본 창 열기
+- 펫 드래그: 현재 실행 중 원하는 위치로 이동
+- 메뉴바 `플로팅 펫 보이기`: 펫 표시·숨김 전환
+- 디스플레이 연결·해제 또는 해상도 변경: 현재 펫 위치를 사용 가능 화면 안으로 자동 보정
+
+펫 위치와 표시 여부는 저장하지 않는다. 앱을 다시 실행하면 표시 상태로 시작하고 현재 마우스 화면의 우하단에 다시 배치된다. 펫에는 VoiceOver 라벨·실행 액션·조작 힌트가 있으며, Reduce Motion이 켜지면 hover 전환 애니메이션을 사용하지 않는다.
 
 로컬 개발용 `.app` 번들은 추가 의존성 없이 만들 수 있다.
 
@@ -88,6 +95,8 @@ swift run yumyum-probe --hermes "$PWD/.build/debug/yumyum-process-fixture"
 ## 현재 안전 경계
 
 - GUI의 Hermes 경로 입력값은 저장하지 않으며 앱을 시작할 때 항상 비어 있다.
+- 플로팅 펫은 별도 이미지·외부 의존성 없이 Canvas와 SF Symbol로 그리며 위치·표시 상태를 저장하지 않는다.
+- 플로팅 패널은 Hermes 연결 상태나 실행 경로를 변경하지 않으며, 클릭 시 기본 창을 여는 동작만 수행한다.
 - GUI 연결 확인은 명시한 Hermes 실행 파일의 `--version`만 실행한다. 로딩, 성공, 경로 오류, 실행 오류, 시간 초과를 구분하고 실행 중 취소를 지원한다.
 - GUI fixture probe는 사용자 입력과 분리된 고정 이름의 패키지 fixture만 허용하며 개발 진단으로만 제공한다.
 - GUI와 메뉴바는 연결 확인 외 ACP, 네트워크, 캘린더, 자격증명 및 외부 변경 기능을 비활성화 상태로 표시한다.
@@ -110,5 +119,5 @@ swift run yumyum-probe --hermes "$PWD/.build/debug/yumyum-process-fixture"
 - timeout과 cancellation은 직접 자식만 종료한다. 자손 process group, launchd, XPC 정리는 Phase 0 범위 밖이다.
 - 출력은 메모리에 누적하므로 무제한 출력을 내는 자식에 대한 상한과 backpressure가 없다.
 - 환경을 별도로 지정하지 않으면 Foundation `Process`의 기본 상속 동작을 따른다. Hermes용 환경변수 최소화와 비밀정보 노출 정책은 미검증이다.
-- macOS 14 및 15 실기기 회귀와 Intel Mac 동작은 확인하지 않았다.
-- 현재 개발 머신에서는 XCTest를 실행하지 못했고 Swift Testing 스위트만 위 우회 명령으로 실행했다.
+- 현재 실기 확인은 Apple Silicon macOS 26.5.2에서 수행했다. 최소 지원 버전인 macOS 14·15와 Intel Mac 동작은 별도 확인하지 않았다.
+- 현재 개발 머신에서는 XCTest를 실행하지 못했고 46개 Swift Testing 테스트만 위 우회 명령으로 실행했다.
