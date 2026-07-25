@@ -9,6 +9,7 @@ let package = Package(
     ],
     products: [
         .library(name: "YumYumCore", targets: ["YumYumCore"]),
+        .executable(name: "YumYum", targets: ["YumYumApp"]),
         .executable(name: "yumyum-probe", targets: ["YumYumProbe"]),
         .executable(
             name: "yumyum-process-fixture",
@@ -17,6 +18,10 @@ let package = Package(
     ],
     targets: [
         .target(name: "YumYumCore"),
+        .executableTarget(
+            name: "YumYumApp",
+            dependencies: ["YumYumCore"]
+        ),
         .executableTarget(
             name: "YumYumProbe",
             dependencies: ["YumYumCore"]
