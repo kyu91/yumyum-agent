@@ -84,4 +84,28 @@ struct QuickMenuLayoutTests {
         )
         #expect(tinyFrame == tinyDisplay)
     }
+
+    @Test
+    func clampsTheTallChatBubbleOnNegativeAndVerticallyArrangedDisplays() {
+        let lower = CGRect(x: -1_440, y: -900, width: 1_440, height: 900)
+        let upper = CGRect(x: -1_440, y: 0, width: 1_440, height: 900)
+        let bubbleSize = CGSize(width: 400, height: 520)
+        let layout = QuickMenuLayout()
+
+        let lowerBubble = layout.panelFrame(
+            petFrame: CGRect(x: -120, y: -880, width: 96, height: 96),
+            panelSize: bubbleSize,
+            visibleFrames: [upper, lower]
+        )
+        let upperBubble = layout.panelFrame(
+            petFrame: CGRect(x: -1_420, y: 790, width: 96, height: 96),
+            panelSize: bubbleSize,
+            visibleFrames: [lower, upper]
+        )
+
+        #expect(lower.contains(lowerBubble))
+        #expect(upper.contains(upperBubble))
+        #expect(lowerBubble.size == bubbleSize)
+        #expect(upperBubble.size == bubbleSize)
+    }
 }
