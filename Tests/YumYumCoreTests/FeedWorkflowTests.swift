@@ -45,6 +45,60 @@ struct FeedWorkflowTests {
     }
 
     @Test
+    func structuredPromptEventsFlowThroughFeedSubmission() async throws {
+        let expected: [PromptResponseEvent] = [
+            .textDelta("부분"),
+            .textSnapshot("교정된 부분"),
+            .completed(PromptResponse(text: "최종 응답")),
+        ]
+        let feedback = RecordingFeedFeedback()
+        let workflow = FeedWorkflow(
+            sender: EventPromptSender(events: expected),
+            feedback: feedback
+        )
+
+        var received: [PromptResponseEvent] = []
+        for try await event in workflow.submitEvents(
+            FeedInput(text: "질문"),
+            reduceMotion: true
+        ) {
+            received.append(event)
+        }
+
+        #expect(received == expected)
+        #expect(await feedback.statuses.contains(.sending))
+        #expect(await feedback.statuses.last == .completed("최종 응답"))
+    }
+
+    @Test
+    func firstCompletionIsTerminalAndSuppressesDuplicateOrStaleEvents() async throws {
+        let feedback = RecordingFeedFeedback()
+        let workflow = FeedWorkflow(
+            sender: EventPromptSender(events: [
+                .textDelta("부분"),
+                .completed(PromptResponse(text: "첫 완료")),
+                .completed(PromptResponse(text: "중복 완료")),
+                .textDelta("늦은 변경"),
+            ]),
+            feedback: feedback
+        )
+
+        var received: [PromptResponseEvent] = []
+        for try await event in workflow.submitEvents(
+            FeedInput(text: "질문"),
+            reduceMotion: true
+        ) {
+            received.append(event)
+        }
+
+        #expect(received == [
+            .textDelta("부분"),
+            .completed(PromptResponse(text: "첫 완료")),
+        ])
+        #expect(await feedback.statuses.last == .completed("첫 완료"))
+    }
+
+    @Test
     func invalidInputsNeverAnimateOrSendAPromptRequest() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -242,6 +296,25 @@ private actor OrderedPromptSender: PromptSending {
         requests.append(request)
         await events.append(.send)
         return PromptResponse(text: "answer")
+    }
+}
+
+private struct EventPromptSender: PromptSending {
+    let events: [PromptResponseEvent]
+
+    func send(_ request: PromptRequest) async throws -> PromptResponse {
+        PromptResponse(text: "legacy response")
+    }
+
+    func sendEvents(
+        _ request: PromptRequest
+    ) -> AsyncThrowingStream<PromptResponseEvent, Error> {
+        AsyncThrowingStream { continuation in
+            for event in events {
+                continuation.yield(event)
+            }
+            continuation.finish()
+        }
     }
 }
 

@@ -39,7 +39,12 @@ struct AgentDiscoveryTests {
         )
         #expect(
             installations.compactMap(\.version)
-                == ["Hermes 1.0.0", "OpenCode 2.0.0", "codex-cli 3.0.0", "4.0.0 (Claude Code)"]
+                == [
+                    "Hermes 1.0.0",
+                    "OpenCode 1.18.5",
+                    "codex-cli 0.144.6",
+                    "2.1.211 (Claude Code)",
+                ]
         )
 
         let invocations = await runner.invocations
@@ -63,11 +68,15 @@ struct AgentDiscoveryTests {
     func rejectsAgentsWhenARuntimeCriticalFlagIsMissingFromHelp() async throws {
         let cases: [(AgentDefinitionID, String)] = [
             (.openCode, "--pure"),
+            (.openCode, "json"),
             (.codex, "--ask-for-approval"),
-            (.codex, "--ephemeral"),
+            (.codex, "--json"),
+            (.codex, "resume"),
             (.codex, "--skip-git-repo-check"),
-            (.claudeCode, "--safe-mode"),
-            (.claudeCode, "--output-format"),
+            (.claudeCode, "stream-json"),
+            (.claudeCode, "--include-partial-messages"),
+            (.claudeCode, "--session-id"),
+            (.claudeCode, "--resume"),
         ]
 
         for (definitionID, missingFlag) in cases {
@@ -121,9 +130,9 @@ private actor DiscoveryProcessRunner: ProcessRunning {
         if command.arguments == ["--version"] {
             output = [
                 "hermes": "Hermes 1.0.0\n",
-                "opencode": "OpenCode 2.0.0\n",
-                "codex": "codex-cli 3.0.0\n",
-                "claude": "4.0.0 (Claude Code)\n",
+                "opencode": "OpenCode 1.18.5\n",
+                "codex": "codex-cli 0.144.6\n",
+                "claude": "2.1.211 (Claude Code)\n",
             ][name] ?? ""
         } else if name == "codex", command.arguments == ["--help"] {
             output = helpOutput(
@@ -132,9 +141,9 @@ private actor DiscoveryProcessRunner: ProcessRunning {
         } else {
             output = helpOutput([
                 "hermes": "Start Hermes Agent in ACP mode\n--check\n",
-                "opencode": "opencode run [message..]\n--pure\n--file\n--format\n",
-                "codex": "Run Codex non-interactively\n--ephemeral\n--image\n--sandbox\n--skip-git-repo-check\n",
-                "claude": "--safe-mode\n--print\n--output-format\n--permission-mode\n--no-session-persistence\n",
+                "opencode": "opencode run [message..]\n--pure\n--file\n--format <format> default json\n",
+                "codex": "Run Codex non-interactively\nresume\n--json\n--image\n--sandbox\n--skip-git-repo-check\n",
+                "claude": "--print\n--verbose\n--output-format text json stream-json\n--include-partial-messages\n--permission-mode\n--session-id\n--resume\n",
             ][name] ?? "")
         }
 

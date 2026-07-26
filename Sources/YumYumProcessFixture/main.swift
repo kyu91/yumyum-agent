@@ -35,6 +35,27 @@ case "arguments":
     )
     FileHandle.standardOutput.write(payload)
 
+case "stdin-chunks":
+    let input = FileHandle.standardInput.readDataToEndOfFile()
+    write("first:", to: .standardOutput)
+    usleep(50_000)
+    FileHandle.standardOutput.write(input)
+
+case "stdin-backpressure":
+    write("ready\n", to: .standardOutput)
+    usleep(300_000)
+    let input = FileHandle.standardInput.readDataToEndOfFile()
+    write("read:\(input.count)\n", to: .standardOutput)
+
+case "acp":
+    let descendant = Process()
+    descendant.executableURL = URL(fileURLWithPath: CommandLine.arguments[0])
+    descendant.arguments = ["hold-pipes-open"]
+    descendant.standardOutput = FileHandle.standardOutput
+    descendant.standardError = FileHandle.standardError
+    try descendant.run()
+    sleep(60)
+
 case "ignore-term":
     signal(SIGTERM, SIG_IGN)
     write("ready\n", to: .standardOutput)
@@ -46,6 +67,7 @@ case "exit-with-descendant-holding-pipes":
     let descendant = Process()
     descendant.executableURL = URL(fileURLWithPath: CommandLine.arguments[0])
     descendant.arguments = ["hold-pipes-open"]
+    descendant.standardInput = FileHandle.standardInput
     descendant.standardOutput = FileHandle.standardOutput
     descendant.standardError = FileHandle.standardError
     try descendant.run()

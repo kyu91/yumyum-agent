@@ -23,6 +23,18 @@ public struct ProcessRunner: ProcessRunning, Sendable {
         _ command: ProcessCommand,
         timeout: Duration? = nil
     ) async throws -> ProcessRunResult {
+        try await runStreaming(
+            command,
+            timeout: timeout,
+            onStandardOutput: { _ in }
+        )
+    }
+
+    public func runStreaming(
+        _ command: ProcessCommand,
+        timeout: Duration? = nil,
+        onStandardOutput: @escaping @Sendable (Data) -> Void
+    ) async throws -> ProcessRunResult {
         let process = Process()
         process.executableURL = command.executableURL
         process.arguments = command.arguments
@@ -33,6 +45,8 @@ public struct ProcessRunner: ProcessRunning, Sendable {
 
         let standardOutputPipe = Pipe()
         let standardErrorPipe = Pipe()
+        let standardInputPipe = command.standardInput.map { _ in Pipe() }
+        process.standardInput = standardInputPipe
         process.standardOutput = standardOutputPipe
         process.standardError = standardErrorPipe
 
@@ -40,6 +54,9 @@ public struct ProcessRunner: ProcessRunning, Sendable {
             process: process,
             terminationGracePeriod: terminationGracePeriod
         )
+        let standardInputWriter = standardInputPipe.map {
+            PipeWriter(fileHandle: $0.fileHandleForWriting)
+        }
         let observedTermination = AsyncLatch<ProcessTermination>()
         let completion = AsyncLatch<Completion>()
 
@@ -66,6 +83,9 @@ public struct ProcessRunner: ProcessRunning, Sendable {
                 try process.run()
             } catch {
                 process.terminationHandler = nil
+                if let standardInputPipe {
+                    closeAllHandles(standardInputPipe)
+                }
                 closeAllHandles(standardOutputPipe)
                 closeAllHandles(standardErrorPipe)
                 throw ProcessRunnerError.launchFailed(
@@ -81,17 +101,37 @@ public struct ProcessRunner: ProcessRunning, Sendable {
             let outputBudget = ProcessOutputBudget(limit: command.outputByteLimit)
             let standardOutputReader = PipeReader(
                 fileHandle: standardOutputPipe.fileHandleForReading,
-                outputBudget: outputBudget
+                outputBudget: outputBudget,
+                onChunk: onStandardOutput
             )
             let standardErrorReader = PipeReader(
                 fileHandle: standardErrorPipe.fileHandleForReading,
-                outputBudget: outputBudget
+                outputBudget: outputBudget,
+                onChunk: { _ in }
             )
             let standardOutputTask = Task.detached {
                 try standardOutputReader.readToEnd()
             }
             let standardErrorTask = Task.detached {
                 try standardErrorReader.readToEnd()
+            }
+            let standardInputTask = standardInputPipe.map { pipe in
+                try? pipe.fileHandleForReading.close()
+                return Task.detached {
+                    do {
+                        try standardInputWriter?.write(command.standardInput ?? Data())
+                        return Result<Void, ProcessRunnerError>.success(())
+                    } catch {
+                        let error = ProcessRunnerError.outputReadFailed(
+                            stream: .standardOutput,
+                            reason: String(describing: error)
+                        )
+                        if completion.resolve(.inputFailed) {
+                            controller.requestStop()
+                        }
+                        return .failure(error)
+                    }
+                }
             }
 
             let timeoutTask = timeout.map { timeout in
@@ -114,10 +154,11 @@ public struct ProcessRunner: ProcessRunning, Sendable {
                 await timeoutTask.value
             }
 
-            if completedBy == .timedOut {
+            if completedBy == .timedOut || completedBy == .inputFailed {
                 controller.requestStop()
             }
             let termination = await observedTermination.wait()
+            standardInputWriter?.requestStop()
 
             let outputDrainTask = Task.detached {
                 do {
@@ -129,6 +170,7 @@ public struct ProcessRunner: ProcessRunning, Sendable {
                 standardErrorReader.requestStop()
             }
 
+            let standardInput = await standardInputTask?.value
             let standardOutput = await read(
                 standardOutputTask,
                 stream: .standardOutput
@@ -144,6 +186,9 @@ public struct ProcessRunner: ProcessRunning, Sendable {
             if Task.isCancelled {
                 throw CancellationError()
             }
+            if case let .failure(error) = standardInput {
+                throw error
+            }
             if case let .failure(error) = standardOutput {
                 throw error
             }
@@ -157,6 +202,7 @@ public struct ProcessRunner: ProcessRunning, Sendable {
                 termination: completedBy == .timedOut ? .timedOut : termination
             )
         } onCancel: {
+            standardInputWriter?.requestStop()
             controller.requestStop()
         }
     }
@@ -180,20 +226,100 @@ public struct ProcessRunner: ProcessRunning, Sendable {
     }
 }
 
+private final class PipeWriter: @unchecked Sendable {
+    private let lock = NSLock()
+    private let fileHandle: FileHandle
+    private var stopRequested = false
+
+    init(fileHandle: FileHandle) {
+        self.fileHandle = fileHandle
+    }
+
+    func requestStop() {
+        lock.withLock { stopRequested = true }
+    }
+
+    func write(_ data: Data) throws {
+        defer { try? fileHandle.close() }
+        guard !data.isEmpty else {
+            return
+        }
+
+        let fileDescriptor = fileHandle.fileDescriptor
+        guard fcntl(fileDescriptor, F_SETNOSIGPIPE, 1) != -1 else {
+            throw currentPOSIXError()
+        }
+        let flags = fcntl(fileDescriptor, F_GETFL)
+        guard flags != -1,
+              fcntl(fileDescriptor, F_SETFL, flags | O_NONBLOCK) != -1 else {
+            throw currentPOSIXError()
+        }
+
+        var offset = 0
+        while offset < data.count {
+            if shouldStop {
+                return
+            }
+            let byteCount = data.withUnsafeBytes { bytes in
+                Darwin.write(
+                    fileDescriptor,
+                    bytes.baseAddress?.advanced(by: offset),
+                    bytes.count - offset
+                )
+            }
+            if byteCount > 0 {
+                offset += Int(byteCount)
+                continue
+            }
+            if byteCount == -1, errno == EINTR {
+                continue
+            }
+            guard byteCount == -1, errno == EAGAIN || errno == EWOULDBLOCK else {
+                throw currentPOSIXError()
+            }
+
+            var descriptor = pollfd(
+                fd: fileDescriptor,
+                events: Int16(POLLOUT | POLLHUP | POLLERR),
+                revents: 0
+            )
+            let pollResult = Darwin.poll(&descriptor, 1, 20)
+            if pollResult == -1, errno != EINTR {
+                throw currentPOSIXError()
+            }
+        }
+    }
+
+    private var shouldStop: Bool {
+        lock.withLock { stopRequested }
+    }
+
+    private func currentPOSIXError() -> NSError {
+        NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+    }
+}
+
 private enum Completion: Sendable {
     case terminated
     case timedOut
+    case inputFailed
 }
 
 private final class PipeReader: @unchecked Sendable {
     private let lock = NSLock()
     private let fileHandle: FileHandle
     private let outputBudget: ProcessOutputBudget
+    private let onChunk: @Sendable (Data) -> Void
     private var stopRequested = false
 
-    init(fileHandle: FileHandle, outputBudget: ProcessOutputBudget) {
+    init(
+        fileHandle: FileHandle,
+        outputBudget: ProcessOutputBudget,
+        onChunk: @escaping @Sendable (Data) -> Void
+    ) {
         self.fileHandle = fileHandle
         self.outputBudget = outputBudget
+        self.onChunk = onChunk
     }
 
     func requestStop() {
@@ -221,7 +347,11 @@ private final class PipeReader: @unchecked Sendable {
             if byteCount > 0 {
                 let bytesRead = Int(byteCount)
                 let bytesToKeep = outputBudget.reserve(upTo: bytesRead)
-                output.append(contentsOf: buffer.prefix(bytesToKeep))
+                let chunk = Data(buffer.prefix(bytesToKeep))
+                output.append(chunk)
+                if !chunk.isEmpty {
+                    onChunk(chunk)
+                }
                 if shouldStop {
                     return output
                 }

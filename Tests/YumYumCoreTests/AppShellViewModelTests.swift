@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import YumYumCore
+@testable import YumYumApp
 
 @Suite
 struct AppShellViewModelTests {
@@ -33,6 +34,48 @@ struct AppShellViewModelTests {
 
         await viewModel.refreshAgents(trigger: .quickMenuOpened)
         #expect(viewModel.agentSnapshot.selectedInstallation == codex)
+    }
+
+    @Test
+    @MainActor
+    func selectionChangesResetConnectorsAndShutdownClosesThem() async throws {
+        let codex = AgentInstallation(
+            definitionID: .codex,
+            path: "/safe/codex",
+            version: "codex-cli 0.144.6",
+            runtimeContract: .codexExec,
+            availability: .available
+        )
+        let claude = AgentInstallation(
+            definitionID: .claudeCode,
+            path: "/safe/claude",
+            version: "2.1.12",
+            runtimeContract: .claudePrint,
+            availability: .available
+        )
+        let registry = AgentRegistry(
+            discovery: StaticAgentDiscovery(installations: [codex, claude]),
+            persistence: EmptyAgentSelectionPersistence()
+        )
+        let codexConnector = LifecycleConnector(definitionID: .codex)
+        let claudeConnector = LifecycleConnector(definitionID: .claudeCode)
+        let viewModel = YumYumAppViewModel(
+            fixtureProbe: ImmediateFixtureProbe(result: .success("unused")),
+            agentRegistry: registry,
+            connectors: [codexConnector, claudeConnector]
+        )
+        await viewModel.refreshAgents(trigger: .appStart)
+
+        try await viewModel.selectAgent(.codex, path: "/safe/codex")
+        try await viewModel.selectAgent(.claudeCode, path: "/safe/claude")
+        let appDelegate = YumYumAppDelegate()
+        appDelegate.configure(viewModel: viewModel)
+        await appDelegate.shutdown()
+
+        #expect(await codexConnector.resetCount == 2)
+        #expect(await claudeConnector.resetCount == 2)
+        #expect(await codexConnector.closeCount == 1)
+        #expect(await claudeConnector.closeCount == 1)
     }
 
     @Test
@@ -346,5 +389,30 @@ private actor CancellableHermesConnectionChecker: HermesConnectionChecking {
             throw CancellationError()
         }
         return "unused"
+    }
+}
+
+private actor LifecycleConnector: AgentConnecting {
+    nonisolated let definitionID: AgentDefinitionID
+    private(set) var resetCount = 0
+    private(set) var closeCount = 0
+
+    init(definitionID: AgentDefinitionID) {
+        self.definitionID = definitionID
+    }
+
+    func send(
+        _ request: PromptRequest,
+        executableURL: URL
+    ) async throws -> PromptResponse {
+        PromptResponse(text: "unused")
+    }
+
+    func reset() {
+        resetCount += 1
+    }
+
+    func close() {
+        closeCount += 1
     }
 }

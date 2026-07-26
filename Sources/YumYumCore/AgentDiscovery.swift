@@ -318,7 +318,7 @@ private extension AgentDefinitionID {
             [AgentHelpContract(
                 arguments: ["run", "--help"],
                 requiredFragments: [
-                    "opencode run [message..]", "--pure", "--file", "--format",
+                    "opencode run [message..]", "--pure", "--file", "--format", "json",
                 ]
             )]
         case .codex:
@@ -330,8 +330,8 @@ private extension AgentDefinitionID {
                 AgentHelpContract(
                     arguments: ["exec", "--help"],
                     requiredFragments: [
-                        "Run Codex non-interactively", "--ephemeral", "--image",
-                        "--sandbox", "--skip-git-repo-check",
+                        "Run Codex non-interactively", "resume", "--json",
+                        "--image", "--sandbox", "--skip-git-repo-check",
                     ]
                 ),
             ]
@@ -339,8 +339,9 @@ private extension AgentDefinitionID {
             [AgentHelpContract(
                 arguments: ["--help"],
                 requiredFragments: [
-                    "--safe-mode", "--print", "--output-format", "--permission-mode",
-                    "--no-session-persistence",
+                    "--print", "--verbose", "--output-format",
+                    "stream-json", "--include-partial-messages", "--permission-mode",
+                    "--session-id", "--resume",
                 ]
             )]
         }

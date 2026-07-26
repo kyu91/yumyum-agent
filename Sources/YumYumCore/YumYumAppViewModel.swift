@@ -50,19 +50,21 @@ public final class YumYumAppViewModel: ObservableObject {
     public init(
         fixtureProbe: any FixtureProbing,
         connectionChecker: any HermesConnectionChecking = HermesConnectionService(),
-        agentRegistry: AgentRegistry = AgentRegistry()
+        agentRegistry: AgentRegistry = AgentRegistry(),
+        connectors: [any AgentConnecting]? = nil
     ) {
         self.fixtureProbe = fixtureProbe
         self.connectionChecker = connectionChecker
         self.agentRegistry = agentRegistry
+        let runtimeConnectors = connectors ?? [
+            HermesACPConnector(transport: ACPProcessTransport()),
+            OpenCodeConnector(),
+            CodexConnector(),
+            ClaudeCodeConnector(),
+        ]
         agentRuntime = AgentRuntime(
             selection: agentRegistry,
-            connectors: [
-                HermesACPConnector(transport: ACPProcessTransport()),
-                OpenCodeConnector(),
-                CodexConnector(),
-                ClaudeCodeConnector(),
-            ]
+            connectors: runtimeConnectors
         )
         fixturePath = fixtureProbe.fixturePath
     }
@@ -81,7 +83,15 @@ public final class YumYumAppViewModel: ObservableObject {
         _ definitionID: AgentDefinitionID,
         path: String
     ) async throws {
-        agentSnapshot = try await agentRegistry.select(definitionID, path: path)
+        let snapshot = try await agentRegistry.select(definitionID, path: path)
+        if snapshot.selection != agentSnapshot.selection {
+            await agentRuntime.reset()
+        }
+        agentSnapshot = snapshot
+    }
+
+    public func shutdown() async {
+        await agentRuntime.close()
     }
 
     public func addExplicitAgentPath(

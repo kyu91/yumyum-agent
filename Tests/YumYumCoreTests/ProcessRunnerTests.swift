@@ -79,6 +79,55 @@ struct ProcessRunnerTests {
     }
 
     @Test
+    func writesStandardInputAndReportsOutputChunks() async throws {
+        let input = Data("payload".utf8)
+        let chunks = LockedChunks()
+
+        let result = try await ProcessRunner().runStreaming(
+            ProcessCommand(
+                executableURL: fixtureURL,
+                arguments: ["stdin-chunks"],
+                standardInput: input
+            ),
+            timeout: .seconds(2),
+            onStandardOutput: { chunks.append($0) }
+        )
+
+        #expect(String(decoding: result.standardOutput, as: UTF8.self) == "first:payload")
+        #expect(chunks.data() == result.standardOutput)
+        #expect(chunks.count() >= 1)
+        #expect(result.termination == .exited(status: 0))
+    }
+
+    @Test
+    func drainsOutputBeforeAChildStartsReadingBackpressuredInput() async throws {
+        let firstChunk = AsyncTestSignal()
+        let runTask = Task {
+            try await ProcessRunner().runStreaming(
+                ProcessCommand(
+                    executableURL: fixtureURL,
+                    arguments: ["stdin-backpressure"],
+                    standardInput: Data(repeating: 0x49, count: 1_048_576)
+                ),
+                timeout: .seconds(2),
+                onStandardOutput: { _ in firstChunk.signal() }
+            )
+        }
+
+        let streamedBeforeInputRead = await firstChunk.wait(
+            timeout: .milliseconds(150)
+        )
+        let result = try await runTask.value
+
+        #expect(streamedBeforeInputRead)
+        #expect(
+            String(decoding: result.standardOutput, as: UTF8.self)
+                == "ready\nread:1048576\n"
+        )
+        #expect(result.termination == .exited(status: 0))
+    }
+
+    @Test
     func timeoutTerminatesThenForceKillsUncooperativeChild() async throws {
         let runner = ProcessRunner(terminationGracePeriod: .milliseconds(100))
         let clock = ContinuousClock()
@@ -138,11 +187,70 @@ struct ProcessRunnerTests {
         #expect(result.standardError.isEmpty)
     }
 
+    @Test
+    func directChildExitStopsLargeInputWhileDescendantHoldsInheritedPipes() async throws {
+        let clock = ContinuousClock()
+        let start = clock.now
+
+        let result = try await ProcessRunner().run(
+            ProcessCommand(
+                executableURL: fixtureURL,
+                arguments: ["exit-with-descendant-holding-pipes"],
+                standardInput: Data(repeating: 0x49, count: 8_388_608)
+            ),
+            timeout: .seconds(5)
+        )
+
+        #expect(clock.now - start < .seconds(2))
+        #expect(result.termination == .exited(status: 0))
+        #expect(String(decoding: result.standardOutput, as: UTF8.self) == "parent-exited\n")
+        #expect(result.standardError.isEmpty)
+    }
+
     private var fixtureURL: URL {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .appendingPathComponent(".build/debug/yumyum-process-fixture")
+    }
+}
+
+private final class LockedChunks: @unchecked Sendable {
+    private let lock = NSLock()
+    private var chunks: [Data] = []
+
+    func append(_ data: Data) {
+        lock.withLock { chunks.append(data) }
+    }
+
+    func data() -> Data {
+        lock.withLock { chunks.reduce(into: Data()) { $0.append($1) } }
+    }
+
+    func count() -> Int {
+        lock.withLock { chunks.count }
+    }
+}
+
+private final class AsyncTestSignal: @unchecked Sendable {
+    private let lock = NSLock()
+    private var signalled = false
+
+    func signal() {
+        lock.withLock { signalled = true }
+    }
+
+    func wait(timeout: Duration) async -> Bool {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: timeout)
+        while !value, clock.now < deadline {
+            await Task.yield()
+        }
+        return value
+    }
+
+    private var value: Bool {
+        lock.withLock { signalled }
     }
 }

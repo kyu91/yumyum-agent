@@ -14,6 +14,9 @@ final class YumYumAppDelegate: NSObject, NSApplicationDelegate, ObservableObject
     private weak var viewModel: YumYumAppViewModel?
     private var mainWindow: NSWindow?
     private var openMainWindowAction: (@MainActor () -> Void)?
+    private var runtimeShutdownTask: Task<Void, Never>?
+    private var didShutdownRuntime = false
+    private var terminationReplyPending = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NotificationCenter.default.addObserver(
@@ -38,6 +41,44 @@ final class YumYumAppDelegate: NSObject, NSApplicationDelegate, ObservableObject
         NotificationCenter.default.removeObserver(self)
         quickMenuController?.prepareForTermination()
         shortcutController = nil
+        Task { @MainActor [weak self] in
+            await self?.shutdown()
+        }
+    }
+
+    func applicationShouldTerminate(
+        _ sender: NSApplication
+    ) -> NSApplication.TerminateReply {
+        guard viewModel != nil, !didShutdownRuntime else {
+            return .terminateNow
+        }
+        guard !terminationReplyPending else {
+            return .terminateLater
+        }
+        terminationReplyPending = true
+        Task { @MainActor [weak self] in
+            await self?.shutdown()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
+    func shutdown() async {
+        if let runtimeShutdownTask {
+            await runtimeShutdownTask.value
+            return
+        }
+        quickMenuController?.prepareForTermination()
+        shortcutController = nil
+        let viewModel = viewModel
+        let task = Task { @MainActor in
+            if let viewModel {
+                await viewModel.shutdown()
+            }
+        }
+        runtimeShutdownTask = task
+        await task.value
+        didShutdownRuntime = true
     }
 
     func setPetVisible(_ isVisible: Bool) {

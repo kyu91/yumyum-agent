@@ -29,15 +29,18 @@ public struct PromptAttachment: Equatable, Sendable {
 public struct PromptRequest: Equatable, Sendable {
     public let id: UUID
     public let text: String
+    public let currentTurnText: String?
     public let attachments: [PromptAttachment]
 
     public init(
         id: UUID = UUID(),
         text: String,
+        currentTurnText: String? = nil,
         attachments: [PromptAttachment] = []
     ) {
         self.id = id
         self.text = text
+        self.currentTurnText = currentTurnText
         self.attachments = attachments
     }
 }
@@ -47,6 +50,33 @@ public struct PromptResponse: Equatable, Sendable {
 
     public init(text: String) {
         self.text = text
+    }
+}
+
+public enum PromptResponseEvent: Equatable, Sendable {
+    case textDelta(String)
+    case textSnapshot(String)
+    case completed(PromptResponse)
+}
+
+public typealias PromptResponseEventStream = AsyncThrowingStream<
+    PromptResponseEvent,
+    Error
+>
+
+func completedPromptResponseEvents(
+    _ operation: @escaping @Sendable () async throws -> PromptResponse
+) -> PromptResponseEventStream {
+    AsyncThrowingStream { continuation in
+        let task = Task {
+            do {
+                continuation.yield(.completed(try await operation()))
+                continuation.finish()
+            } catch {
+                continuation.finish(throwing: error)
+            }
+        }
+        continuation.onTermination = { _ in task.cancel() }
     }
 }
 
@@ -80,6 +110,31 @@ public protocol AgentConnecting: Sendable {
         _ request: PromptRequest,
         executableURL: URL
     ) async throws -> PromptResponse
+
+    func sendEvents(
+        _ request: PromptRequest,
+        executableURL: URL
+    ) -> PromptResponseEventStream
+
+    func reset() async
+    func close() async
+}
+
+public extension AgentConnecting {
+    func sendEvents(
+        _ request: PromptRequest,
+        executableURL: URL
+    ) -> PromptResponseEventStream {
+        completedPromptResponseEvents {
+            try await send(request, executableURL: executableURL)
+        }
+    }
+
+    func reset() async {}
+
+    func close() async {
+        await reset()
+    }
 }
 
 public protocol HermesACPTransporting: Sendable {
@@ -90,6 +145,38 @@ public protocol HermesACPTransporting: Sendable {
         timeout: Duration,
         outputByteLimit: Int
     ) async throws -> PromptResponse
+
+    func sendEvents(
+        _ request: PromptRequest,
+        executableURL: URL,
+        environment: [String: String],
+        timeout: Duration,
+        outputByteLimit: Int
+    ) -> PromptResponseEventStream
+
+    func close() async
+}
+
+public extension HermesACPTransporting {
+    func sendEvents(
+        _ request: PromptRequest,
+        executableURL: URL,
+        environment: [String: String],
+        timeout: Duration,
+        outputByteLimit: Int
+    ) -> PromptResponseEventStream {
+        completedPromptResponseEvents {
+            try await send(
+                request,
+                executableURL: executableURL,
+                environment: environment,
+                timeout: timeout,
+                outputByteLimit: outputByteLimit
+            )
+        }
+    }
+
+    func close() async {}
 }
 
 public enum AgentRuntimeError: Error, Equatable, LocalizedError, Sendable {
@@ -136,6 +223,48 @@ public struct AgentRuntime: Sendable {
             executableURL: URL(fileURLWithPath: path).standardizedFileURL
         )
     }
+
+    public func sendEvents(_ request: PromptRequest) -> PromptResponseEventStream {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    let installation = try await selection.validatedSelection()
+                    guard let connector = connectors[installation.definitionID] else {
+                        throw AgentRuntimeError.connectorUnavailable(
+                            installation.definitionID
+                        )
+                    }
+                    guard let path = installation.path,
+                          NSString(string: path).isAbsolutePath else {
+                        throw AgentRuntimeError.invalidSelectedPath(installation.path)
+                    }
+                    let events = connector.sendEvents(
+                        request,
+                        executableURL: URL(fileURLWithPath: path).standardizedFileURL
+                    )
+                    for try await event in events {
+                        continuation.yield(event)
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    public func reset() async {
+        for connector in connectors.values {
+            await connector.reset()
+        }
+    }
+
+    public func close() async {
+        for connector in connectors.values {
+            await connector.close()
+        }
+    }
 }
 
 public struct HermesACPConnector: AgentConnecting, Sendable {
@@ -169,6 +298,29 @@ public struct HermesACPConnector: AgentConnecting, Sendable {
             outputByteLimit: outputByteLimit
         )
     }
+
+    public func sendEvents(
+        _ request: PromptRequest,
+        executableURL: URL
+    ) -> PromptResponseEventStream {
+        transport.sendEvents(
+            request,
+            executableURL: executableURL,
+            environment: AgentProcessEnvironment.make(
+                executableDirectory: executableURL.deletingLastPathComponent()
+            ),
+            timeout: timeout,
+            outputByteLimit: outputByteLimit
+        )
+    }
+
+    public func reset() async {
+        await transport.close()
+    }
+
+    public func close() async {
+        await transport.close()
+    }
 }
 
 public struct OpenCodeConnector: AgentConnecting, Sendable {
@@ -192,113 +344,184 @@ public struct OpenCodeConnector: AgentConnecting, Sendable {
         _ request: PromptRequest,
         executableURL: URL
     ) async throws -> PromptResponse {
-        var arguments = ["run", "--pure", "--format", "default"]
-        for attachment in request.attachments {
-            arguments.append(contentsOf: ["--file", attachment.url.path])
-        }
-        arguments.append(promptText(for: request))
-        return try await runCLI(
+        try await runOpenCodeStreaming(
+            request,
             executableURL: executableURL,
-            arguments: arguments,
             processRunner: processRunner,
             timeout: timeout,
-            outputByteLimit: outputByteLimit
+            outputByteLimit: outputByteLimit,
+            onEvent: { _ in }
         )
     }
+
+    public func sendEvents(
+        _ request: PromptRequest,
+        executableURL: URL
+    ) -> PromptResponseEventStream {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    let response = try await runOpenCodeStreaming(
+                        request,
+                        executableURL: executableURL,
+                        processRunner: processRunner,
+                        timeout: timeout,
+                        outputByteLimit: outputByteLimit,
+                        onEvent: { continuation.yield($0) }
+                    )
+                    continuation.yield(.completed(response))
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
 }
 
 public struct CodexConnector: AgentConnecting, Sendable {
     public let definitionID = AgentDefinitionID.codex
 
-    private let processRunner: any ProcessRunning
-    private let timeout: Duration
-    private let outputByteLimit: Int
+    private let session: CodexStreamingSession
 
     public init(
         processRunner: any ProcessRunning = ProcessRunner(),
         timeout: Duration = .seconds(120),
         outputByteLimit: Int = 2_097_152
     ) {
-        self.processRunner = processRunner
-        self.timeout = timeout
-        self.outputByteLimit = outputByteLimit
+        session = CodexStreamingSession(
+            processRunner: processRunner,
+            timeout: timeout,
+            outputByteLimit: outputByteLimit
+        )
     }
 
     public func send(
         _ request: PromptRequest,
         executableURL: URL
     ) async throws -> PromptResponse {
-        var arguments = [
-            "--ask-for-approval", "untrusted",
-            "exec",
-            "--ephemeral",
-            "--sandbox", "read-only",
-            "--skip-git-repo-check",
-        ]
-        let images = request.attachments.filter { $0.kind == .image }
-        for image in images {
-            arguments.append(contentsOf: ["--image", image.url.path])
-        }
-        arguments.append(
-            promptText(
-                for: request,
-                visibleAttachments: request.attachments.filter { $0.kind != .image }
-            )
-        )
-        return try await runCLI(
+        try await session.send(
+            request,
             executableURL: executableURL,
-            arguments: arguments,
-            processRunner: processRunner,
-            timeout: timeout,
-            outputByteLimit: outputByteLimit
+            onEvent: { _ in }
         )
+    }
+
+    public func sendEvents(
+        _ request: PromptRequest,
+        executableURL: URL
+    ) -> PromptResponseEventStream {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    _ = try await session.send(
+                        request,
+                        executableURL: executableURL,
+                        onEvent: { continuation.yield($0) },
+                        acceptCompletion: { response in
+                            guard !Task.isCancelled else {
+                                return false
+                            }
+                            switch continuation.yield(.completed(response)) {
+                            case .enqueued:
+                                return true
+                            case .dropped, .terminated:
+                                return false
+                            @unknown default:
+                                return false
+                            }
+                        }
+                    )
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    public func reset() async {
+        await session.reset()
     }
 }
 
 public struct ClaudeCodeConnector: AgentConnecting, Sendable {
     public let definitionID = AgentDefinitionID.claudeCode
 
-    private let processRunner: any ProcessRunning
-    private let timeout: Duration
-    private let outputByteLimit: Int
+    private let session: ClaudeStreamingSession
 
     public init(
         processRunner: any ProcessRunning = ProcessRunner(),
         timeout: Duration = .seconds(120),
         outputByteLimit: Int = 2_097_152
     ) {
-        self.processRunner = processRunner
-        self.timeout = timeout
-        self.outputByteLimit = outputByteLimit
+        session = ClaudeStreamingSession(
+            processRunner: processRunner,
+            timeout: timeout,
+            outputByteLimit: outputByteLimit
+        )
     }
 
     public func send(
         _ request: PromptRequest,
         executableURL: URL
     ) async throws -> PromptResponse {
-        let arguments = [
-            "--safe-mode",
-            "--print",
-            "--output-format", "text",
-            "--permission-mode", "plan",
-            "--no-session-persistence",
-            promptText(for: request, visibleAttachments: request.attachments),
-        ]
-        return try await runCLI(
+        try await session.send(
+            request,
             executableURL: executableURL,
-            arguments: arguments,
-            processRunner: processRunner,
-            timeout: timeout,
-            outputByteLimit: outputByteLimit
+            onEvent: { _ in }
         )
+    }
+
+    public func sendEvents(
+        _ request: PromptRequest,
+        executableURL: URL
+    ) -> PromptResponseEventStream {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    _ = try await session.send(
+                        request,
+                        executableURL: executableURL,
+                        onEvent: { continuation.yield($0) },
+                        acceptCompletion: { response in
+                            guard !Task.isCancelled else {
+                                return false
+                            }
+                            switch continuation.yield(.completed(response)) {
+                            case .enqueued:
+                                return true
+                            case .dropped, .terminated:
+                                return false
+                            @unknown default:
+                                return false
+                            }
+                        }
+                    )
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    public func reset() async {
+        await session.reset()
     }
 }
 
-private func promptText(
+func promptText(
     for request: PromptRequest,
+    text: String? = nil,
     visibleAttachments: [PromptAttachment] = []
 ) -> String {
-    let trimmed = request.text.trimmingCharacters(in: .whitespacesAndNewlines)
+    let trimmed = (text ?? request.text)
+        .trimmingCharacters(in: .whitespacesAndNewlines)
     var prompt = trimmed.isEmpty ? "선택한 첨부 파일을 분석해 주세요." : trimmed
     guard !visibleAttachments.isEmpty else {
         return prompt
@@ -309,50 +532,4 @@ private func promptText(
         prompt += "\n- \(attachment.url.path)"
     }
     return prompt
-}
-
-private func runCLI(
-    executableURL: URL,
-    arguments: [String],
-    processRunner: any ProcessRunning,
-    timeout: Duration,
-    outputByteLimit: Int
-) async throws -> PromptResponse {
-    let result: ProcessRunResult
-    do {
-        result = try await processRunner.run(
-            ProcessCommand(
-                executableURL: executableURL,
-                arguments: arguments,
-                environment: AgentProcessEnvironment.make(
-                    executableDirectory: executableURL.deletingLastPathComponent()
-                ),
-                currentDirectoryURL: FileManager.default.temporaryDirectory,
-                outputByteLimit: outputByteLimit
-            ),
-            timeout: timeout
-        )
-    } catch is CancellationError {
-        throw CancellationError()
-    } catch {
-        throw AgentConnectorError.launchFailed(String(describing: error))
-    }
-
-    if result.timedOut {
-        throw AgentConnectorError.timedOut
-    }
-    let standardOutput = String(decoding: result.standardOutput, as: UTF8.self)
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-    let standardError = String(decoding: result.standardError, as: UTF8.self)
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-    guard result.exitStatus == 0 else {
-        throw AgentConnectorError.failed(
-            exitStatus: result.exitStatus,
-            message: standardError.isEmpty ? standardOutput : standardError
-        )
-    }
-    guard !standardOutput.isEmpty else {
-        throw AgentConnectorError.emptyResponse
-    }
-    return PromptResponse(text: standardOutput)
 }

@@ -27,6 +27,7 @@ public enum CaptureTemporaryFileCleanup {
 
 public struct FeedInput: Equatable, Sendable {
     public let text: String
+    public let currentTurnText: String?
     public let fileURLs: [URL]
     public let temporaryFileURLs: Set<URL>
     public let cleanupTemporaryFilesAfterSubmit: Bool
@@ -34,12 +35,14 @@ public struct FeedInput: Equatable, Sendable {
 
     public init(
         text: String = "",
+        currentTurnText: String? = nil,
         fileURLs: [URL] = [],
         temporaryFileURLs: Set<URL> = [],
         cleanupTemporaryFilesAfterSubmit: Bool = true,
         sourceRect: CGRect? = nil
     ) {
         self.text = text
+        self.currentTurnText = currentTurnText
         self.fileURLs = fileURLs
         self.temporaryFileURLs = temporaryFileURLs
         self.cleanupTemporaryFilesAfterSubmit = cleanupTemporaryFilesAfterSubmit
@@ -75,10 +78,16 @@ public enum FeedValidationError: Error, Equatable, LocalizedError, Sendable {
 
 public struct ValidatedFeed: Equatable, Sendable {
     public let text: String
+    public let currentTurnText: String?
     public let attachments: [PromptAttachment]
 
-    public init(text: String, attachments: [PromptAttachment]) {
+    public init(
+        text: String,
+        currentTurnText: String? = nil,
+        attachments: [PromptAttachment]
+    ) {
         self.text = text
+        self.currentTurnText = currentTurnText
         self.attachments = attachments
     }
 }
@@ -160,7 +169,13 @@ public struct FeedValidator: Sendable {
                 )
             )
         }
-        return ValidatedFeed(text: text, attachments: attachments)
+        return ValidatedFeed(
+            text: text,
+            currentTurnText: input.currentTurnText?.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            ),
+            attachments: attachments
+        )
     }
 
     private func attachmentKind(forExtension fileExtension: String) -> PromptAttachmentKind? {
@@ -217,15 +232,40 @@ public enum FeedMouthPresentation: Equatable, Sendable {
 
 public protocol PromptSending: Sendable {
     func send(_ request: PromptRequest) async throws -> PromptResponse
+    func sendEvents(_ request: PromptRequest) -> PromptResponseEventStream
 }
 
 extension AgentRuntime: PromptSending {}
+
+public extension PromptSending {
+    func sendEvents(_ request: PromptRequest) -> PromptResponseEventStream {
+        completedPromptResponseEvents {
+            try await send(request)
+        }
+    }
+}
 
 public protocol FeedSubmitting: Sendable {
     func submit(
         _ input: FeedInput,
         reduceMotion: Bool
     ) async throws -> PromptResponse
+
+    func submitEvents(
+        _ input: FeedInput,
+        reduceMotion: Bool
+    ) -> PromptResponseEventStream
+}
+
+public extension FeedSubmitting {
+    func submitEvents(
+        _ input: FeedInput,
+        reduceMotion: Bool
+    ) -> PromptResponseEventStream {
+        completedPromptResponseEvents {
+            try await submit(input, reduceMotion: reduceMotion)
+        }
+    }
 }
 
 public protocol FeedFeedback: Sendable {
@@ -261,6 +301,39 @@ public actor FeedWorkflow: FeedSubmitting {
     public func submit(
         _ input: FeedInput,
         reduceMotion: Bool
+    ) async throws -> PromptResponse {
+        try await performSubmit(
+            input,
+            reduceMotion: reduceMotion,
+            emit: { _ in }
+        )
+    }
+
+    public nonisolated func submitEvents(
+        _ input: FeedInput,
+        reduceMotion: Bool
+    ) -> PromptResponseEventStream {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    _ = try await self.performSubmit(
+                        input,
+                        reduceMotion: reduceMotion,
+                        emit: { continuation.yield($0) }
+                    )
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    private func performSubmit(
+        _ input: FeedInput,
+        reduceMotion: Bool,
+        emit: @escaping @Sendable (PromptResponseEvent) -> Void
     ) async throws -> PromptResponse {
         let generation = UUID()
         defer {
@@ -347,6 +420,7 @@ public actor FeedWorkflow: FeedSubmitting {
 
         let request = PromptRequest(
             text: validated.text,
+            currentTurnText: validated.currentTurnText,
             attachments: validated.attachments
         )
         await feedback.setStatus(
@@ -354,8 +428,19 @@ public actor FeedWorkflow: FeedSubmitting {
         )
         do {
             try Task.checkCancellation()
-            let response = try await sender.send(request)
+            var response: PromptResponse?
+            for try await event in sender.sendEvents(request) {
+                try Task.checkCancellation()
+                emit(event)
+                if case let .completed(finalResponse) = event {
+                    response = finalResponse
+                    break
+                }
+            }
             try Task.checkCancellation()
+            guard let response else {
+                throw AgentConnectorError.emptyResponse
+            }
             await feedback.setMouthPresentation(.resting)
             await feedback.setStatus(
                 FeedStatusUpdate(

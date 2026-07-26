@@ -60,6 +60,101 @@ struct ChatBubbleStateTests {
     }
 
     @Test
+    func assistantDeltaUpdatesOnlyTheCurrentSubmission() throws {
+        var state = ChatBubbleState()
+        state.draftText = "질문"
+        let submission = try state.beginSend(id: UUID())
+
+        state.appendAssistantDelta("무시할 응답", submissionID: UUID())
+
+        #expect(state.messages[1].text.isEmpty)
+        #expect(state.messages[1].isLoading)
+
+        state.appendAssistantDelta("부분 응답", submissionID: submission.id)
+
+        #expect(state.messages[1].text == "부분 응답")
+        #expect(!state.messages[1].isLoading)
+        #expect(state.phase == .sending(submission.id))
+    }
+
+    @Test
+    func responseEventsFinalizeTheSameAssistantRowAndPhase() throws {
+        var state = ChatBubbleState()
+        state.draftText = "질문"
+        let submission = try state.beginSend(id: UUID())
+        let assistantID = state.messages[1].id
+
+        state.applyResponseEvent(
+            .textDelta("부분"),
+            submissionID: submission.id
+        )
+        state.applyResponseEvent(
+            .textSnapshot("교정된 부분"),
+            submissionID: submission.id
+        )
+        state.applyResponseEvent(
+            .textDelta(" 응답"),
+            submissionID: submission.id
+        )
+
+        #expect(state.messages[1].id == assistantID)
+        #expect(state.messages[1].text == "교정된 부분 응답")
+        #expect(!state.messages[1].isLoading)
+        #expect(state.phase == .sending(submission.id))
+
+        state.applyResponseEvent(
+            .completed(PromptResponse(text: "최종 응답")),
+            submissionID: submission.id
+        )
+
+        #expect(state.messages.count == 2)
+        #expect(state.messages[1].id == assistantID)
+        #expect(state.messages[1].text == "최종 응답")
+        #expect(!state.messages[1].isLoading)
+        #expect(state.phase == .idle)
+    }
+
+    @Test
+    func responseEventsForCompletedOrCancelledSubmissionsAreIgnored() throws {
+        var state = ChatBubbleState()
+        state.draftText = "완료할 질문"
+        let completed = try state.beginSend(id: UUID())
+        state.applyResponseEvent(
+            .completed(PromptResponse(text: "완료된 응답")),
+            submissionID: completed.id
+        )
+
+        state.applyResponseEvent(
+            .textDelta(" 늦은 변경"),
+            submissionID: completed.id
+        )
+        #expect(state.messages.last?.text == "완료된 응답")
+
+        state.draftText = "취소할 질문"
+        let cancelled = try state.beginSend(id: UUID())
+        state.applyResponseEvent(
+            .textSnapshot("이전 요청의 늦은 응답"),
+            submissionID: completed.id
+        )
+        #expect(state.messages.last?.text.isEmpty == true)
+        #expect(state.messages.last?.isLoading == true)
+
+        state.cancelSend(id: cancelled.id)
+        let messagesAfterCancellation = state.messages
+        state.applyResponseEvent(
+            .textDelta("취소 후 늦은 변경"),
+            submissionID: cancelled.id
+        )
+        state.applyResponseEvent(
+            .completed(PromptResponse(text: "취소 후 늦은 완료")),
+            submissionID: cancelled.id
+        )
+
+        #expect(state.phase == .cancelled)
+        #expect(state.messages == messagesAfterCancellation)
+    }
+
+    @Test
     func followUpSubmissionIncludesConversationTextContextButNoAttachmentPath() throws {
         var state = ChatBubbleState()
         state.draftText = "첫 질문"
@@ -71,6 +166,7 @@ struct ChatBubbleStateTests {
             )
         )
         let first = try state.beginSend(id: UUID())
+        #expect(first.input.currentTurnText == "첫 질문")
         state.completeSend(id: first.id, response: "첫 답변")
 
         state.draftText = "후속 질문"
@@ -79,6 +175,7 @@ struct ChatBubbleStateTests {
         #expect(followUp.input.text.contains("사용자: 첫 질문"))
         #expect(followUp.input.text.contains("어시스턴트: 첫 답변"))
         #expect(followUp.input.text.hasSuffix("사용자: 후속 질문"))
+        #expect(followUp.input.currentTurnText == "후속 질문")
         #expect(!followUp.input.text.contains("/private/tmp"))
         #expect(state.messages.map(\.role) == [.user, .assistant, .user, .assistant])
     }
@@ -433,6 +530,123 @@ struct ChatBubbleSessionTests {
         await submitter.succeed(at: 0, text: "처리 완료")
         await session.waitForCurrentSend()
     }
+
+    @Test
+    @MainActor
+    func streamFailureRemovesPartialAssistantContentFromFollowUpContext() async {
+        let submitter = ControlledEventFeedSubmitter()
+        let session = ChatBubbleSession(submitter: submitter)
+        session.setDraftText("실패할 질문")
+        #expect(session.send(reduceMotion: false))
+        await submitter.waitForSubmissionCount(1)
+
+        await submitter.yield(.textDelta("실패 전 부분 응답"), at: 0)
+        await waitUntil { session.state.messages.last?.text == "실패 전 부분 응답" }
+        await submitter.fail(
+            at: 0,
+            error: SensitiveSubmitError("stderr: token=TEST_ONLY")
+        )
+        await session.waitForCurrentSend()
+
+        #expect(
+            session.state.phase
+                == .failed("입력을 처리하지 못했습니다. 다시 시도해 주세요.")
+        )
+        #expect(!session.state.messages.contains { $0.text == "실패 전 부분 응답" })
+
+        session.setDraftText("후속 질문")
+        #expect(session.send(reduceMotion: false))
+        await submitter.waitForSubmissionCount(2)
+        let followUp = await submitter.inputs[1]
+        #expect(!followUp.text.contains("실패할 질문"))
+        #expect(!followUp.text.contains("실패 전 부분 응답"))
+        #expect(followUp.text == "사용자: 후속 질문")
+
+        await submitter.yield(
+            .completed(PromptResponse(text: "후속 응답")),
+            at: 1
+        )
+        await submitter.finish(at: 1)
+        await session.waitForCurrentSend()
+    }
+
+    @Test
+    @MainActor
+    func streamCancellationRemovesPartialAssistantContentFromFollowUpContext() async {
+        let submitter = ControlledEventFeedSubmitter()
+        let session = ChatBubbleSession(submitter: submitter)
+        session.setDraftText("취소될 질문")
+        #expect(session.send(reduceMotion: false))
+        await submitter.waitForSubmissionCount(1)
+
+        await submitter.yield(.textSnapshot("취소 전 부분 응답"), at: 0)
+        await waitUntil { session.state.messages.last?.text == "취소 전 부분 응답" }
+        await submitter.fail(at: 0, error: CancellationError())
+        await session.waitForCurrentSend()
+
+        #expect(session.state.phase == .cancelled)
+        #expect(!session.state.messages.contains { $0.text == "취소 전 부분 응답" })
+
+        session.setDraftText("새 질문")
+        #expect(session.send(reduceMotion: false))
+        await submitter.waitForSubmissionCount(2)
+        let followUp = await submitter.inputs[1]
+        #expect(!followUp.text.contains("취소될 질문"))
+        #expect(!followUp.text.contains("취소 전 부분 응답"))
+        #expect(followUp.text == "사용자: 새 질문")
+
+        await submitter.yield(
+            .completed(PromptResponse(text: "새 응답")),
+            at: 1
+        )
+        await submitter.finish(at: 1)
+        await session.waitForCurrentSend()
+    }
+
+    @Test
+    @MainActor
+    func completedOnlySubmitterRetainsItsExistingBehavior() async {
+        let submitter = ImmediateFeedSubmitter(
+            result: .success(PromptResponse(text: "기존 완료 응답"))
+        )
+        let session = ChatBubbleSession(submitter: submitter)
+        session.setDraftText("기존 요청")
+
+        #expect(session.send(reduceMotion: true))
+        await session.waitForCurrentSend()
+
+        #expect(await submitter.inputs.count == 1)
+        #expect(session.state.phase == .idle)
+        #expect(session.state.messages.map(\.text) == ["기존 요청", "기존 완료 응답"])
+        #expect(session.state.messages.last?.isLoading == false)
+        #expect(!session.canRetry)
+    }
+
+    @Test
+    @MainActor
+    func completionEndsTheSendBeforeDuplicateCompletionOrTrailingFailure() async {
+        let submitter = ControlledEventFeedSubmitter()
+        let session = ChatBubbleSession(submitter: submitter)
+        session.setDraftText("질문")
+        #expect(session.send(reduceMotion: true))
+        await submitter.waitForSubmissionCount(1)
+
+        await submitter.yield(
+            .completed(PromptResponse(text: "첫 완료")),
+            at: 0
+        )
+        await submitter.yield(
+            .completed(PromptResponse(text: "중복 완료")),
+            at: 0
+        )
+        await submitter.yield(.textDelta("늦은 변경"), at: 0)
+        await submitter.fail(at: 0, error: TestSendError.retryable)
+        await session.waitForCurrentSend()
+
+        #expect(session.state.phase == .idle)
+        #expect(session.state.messages.map(\.text) == ["질문", "첫 완료"])
+        #expect(!session.canRetry)
+    }
 }
 
 private actor ImmediateFeedSubmitter: FeedSubmitting {
@@ -550,6 +764,68 @@ private actor CancellableFeedSubmitter: FeedSubmitting {
         guard !cancelled else { return }
         await withCheckedContinuation { cancelWaiters.append($0) }
     }
+}
+
+private actor ControlledEventFeedSubmitter: FeedSubmitting {
+    private var continuations: [
+        AsyncThrowingStream<PromptResponseEvent, Error>.Continuation
+    ] = []
+    private var countWaiters: [(Int, CheckedContinuation<Void, Never>)] = []
+    private(set) var inputs: [FeedInput] = []
+
+    func submit(_ input: FeedInput, reduceMotion: Bool) async throws -> PromptResponse {
+        throw TestSendError.retryable
+    }
+
+    nonisolated func submitEvents(
+        _ input: FeedInput,
+        reduceMotion: Bool
+    ) -> AsyncThrowingStream<PromptResponseEvent, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                await self.register(input: input, continuation: continuation)
+            }
+        }
+    }
+
+    func waitForSubmissionCount(_ count: Int) async {
+        guard continuations.count < count else { return }
+        await withCheckedContinuation { continuation in
+            countWaiters.append((count, continuation))
+        }
+    }
+
+    func yield(_ event: PromptResponseEvent, at index: Int) {
+        continuations[index].yield(event)
+    }
+
+    func finish(at index: Int) {
+        continuations[index].finish()
+    }
+
+    func fail(at index: Int, error: any Error) {
+        continuations[index].finish(throwing: error)
+    }
+
+    private func register(
+        input: FeedInput,
+        continuation: AsyncThrowingStream<PromptResponseEvent, Error>.Continuation
+    ) {
+        inputs.append(input)
+        continuations.append(continuation)
+        let ready = countWaiters.filter { continuations.count >= $0.0 }
+        countWaiters.removeAll { continuations.count >= $0.0 }
+        ready.forEach { $0.1.resume() }
+    }
+}
+
+@MainActor
+private func waitUntil(_ condition: () -> Bool) async {
+    for _ in 0..<100 {
+        if condition() { return }
+        await Task.yield()
+    }
+    Issue.record("Timed out waiting for chat state")
 }
 
 private func makeTemporaryCapture() throws -> URL {

@@ -6,19 +6,22 @@ public struct ProcessCommand: Equatable, Sendable {
     public let environment: [String: String]?
     public let currentDirectoryURL: URL?
     public let outputByteLimit: Int?
+    public let standardInput: Data?
 
     public init(
         executableURL: URL,
         arguments: [String] = [],
         environment: [String: String]? = nil,
         currentDirectoryURL: URL? = nil,
-        outputByteLimit: Int? = nil
+        outputByteLimit: Int? = nil,
+        standardInput: Data? = nil
     ) {
         self.executableURL = executableURL
         self.arguments = arguments
         self.environment = environment
         self.currentDirectoryURL = currentDirectoryURL
         self.outputByteLimit = outputByteLimit
+        self.standardInput = standardInput
     }
 }
 
@@ -57,4 +60,24 @@ public struct ProcessRunResult: Equatable, Sendable {
 
 public protocol ProcessRunning: Sendable {
     func run(_ command: ProcessCommand, timeout: Duration?) async throws -> ProcessRunResult
+
+    func runStreaming(
+        _ command: ProcessCommand,
+        timeout: Duration?,
+        onStandardOutput: @escaping @Sendable (Data) -> Void
+    ) async throws -> ProcessRunResult
+}
+
+public extension ProcessRunning {
+    func runStreaming(
+        _ command: ProcessCommand,
+        timeout: Duration?,
+        onStandardOutput: @escaping @Sendable (Data) -> Void
+    ) async throws -> ProcessRunResult {
+        let result = try await run(command, timeout: timeout)
+        if !result.standardOutput.isEmpty {
+            onStandardOutput(result.standardOutput)
+        }
+        return result
+    }
 }

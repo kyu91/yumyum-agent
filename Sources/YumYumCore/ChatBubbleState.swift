@@ -163,6 +163,7 @@ public struct ChatBubbleState: Sendable {
         let requestText = conversationText(currentUserText: text)
         let input = FeedInput(
             text: requestText,
+            currentTurnText: text,
             fileURLs: attachments.map(\.url),
             temporaryFileURLs: Set(
                 attachments.lazy.filter(\.isTemporary).map(\.url)
@@ -204,6 +205,7 @@ public struct ChatBubbleState: Sendable {
         let uniqueAttachments = attachments.filter { seen.insert($0.url).inserted }
         let input = FeedInput(
             text: conversationText(currentUserText: ""),
+            currentTurnText: "",
             fileURLs: uniqueAttachments.map(\.url),
             temporaryFileURLs: Set(
                 uniqueAttachments.lazy.filter(\.isTemporary).map(\.url)
@@ -225,10 +227,46 @@ public struct ChatBubbleState: Sendable {
         return ChatSubmission(id: id, input: input)
     }
 
+    public mutating func appendAssistantDelta(
+        _ delta: String,
+        submissionID: UUID
+    ) {
+        guard phase == .sending(submissionID),
+              !delta.isEmpty,
+              let index = messages.lastIndex(where: { $0.role == .assistant }) else {
+            return
+        }
+        messages[index].text.append(delta)
+        messages[index].isLoading = false
+    }
+
+    public mutating func applyResponseEvent(
+        _ event: PromptResponseEvent,
+        submissionID: UUID
+    ) {
+        guard phase == .sending(submissionID) else {
+            return
+        }
+        switch event {
+        case let .textDelta(delta):
+            appendAssistantDelta(delta, submissionID: submissionID)
+        case let .textSnapshot(snapshot):
+            guard let index = messages.lastIndex(where: {
+                $0.role == .assistant
+            }) else {
+                return
+            }
+            messages[index].text = snapshot
+            messages[index].isLoading = false
+        case let .completed(response):
+            completeSend(id: submissionID, response: response.text)
+        }
+    }
+
     public mutating func completeSend(id: UUID, response: String) {
         guard phase == .sending(id),
               let index = messages.lastIndex(where: {
-                  $0.role == .assistant && $0.isLoading
+                  $0.role == .assistant
               }) else {
             return
         }
@@ -243,7 +281,7 @@ public struct ChatBubbleState: Sendable {
             return
         }
         excludeLatestUserMessageFromContext()
-        messages.removeAll { $0.role == .assistant && $0.isLoading }
+        removeCurrentAssistantMessage()
         phase = .cancelled
     }
 
@@ -252,7 +290,7 @@ public struct ChatBubbleState: Sendable {
             return
         }
         excludeLatestUserMessageFromContext()
-        messages.removeAll { $0.role == .assistant && $0.isLoading }
+        removeCurrentAssistantMessage()
         phase = .failed(UserFacingErrorRedactor.sanitize(message))
     }
 
@@ -347,5 +385,14 @@ public struct ChatBubbleState: Sendable {
             return
         }
         excludedMessageIDs.remove(message.id)
+    }
+
+    private mutating func removeCurrentAssistantMessage() {
+        guard let index = messages.lastIndex(where: {
+            $0.role == .assistant
+        }) else {
+            return
+        }
+        messages.remove(at: index)
     }
 }

@@ -40,6 +40,35 @@ struct AgentConnectorTests {
     }
 
     @Test
+    func runtimeForwardsStructuredConnectorEvents() async throws {
+        let selected = AgentInstallation(
+            definitionID: .openCode,
+            path: "/selected/opencode",
+            version: "1.18.5",
+            runtimeContract: .openCodeRun,
+            availability: .available
+        )
+        let expected: [PromptResponseEvent] = [
+            .textDelta("부분"),
+            .textSnapshot("교정된 부분"),
+            .completed(PromptResponse(text: "최종 응답")),
+        ]
+        let runtime = AgentRuntime(
+            selection: RuntimeSelection(installation: selected),
+            connectors: [
+                RuntimeEventConnector(definitionID: .openCode, events: expected),
+            ]
+        )
+
+        var received: [PromptResponseEvent] = []
+        for try await event in runtime.sendEvents(PromptRequest(text: "hello")) {
+            received.append(event)
+        }
+
+        #expect(received == expected)
+    }
+
+    @Test
     func eachAgentUsesItsVerifiedDedicatedLocalContract() async throws {
         let executableDirectory = URL(fileURLWithPath: "/safe/bin", isDirectory: true)
         let request = PromptRequest(
@@ -89,7 +118,7 @@ struct AgentConnectorTests {
         #expect(
             openCode.arguments
                 == [
-                    "run", "--pure", "--format", "default",
+                    "run", "--pure", "--format", "json",
                     "--file", "/selected/screen.png",
                     "--file", "/selected/code.swift",
                     "이 자료를 설명해줘",
@@ -99,21 +128,35 @@ struct AgentConnectorTests {
         let codex = invocations[1].command
         #expect(codex.executableURL.path == "/safe/bin/codex")
         #expect(codex.arguments.prefix(7) == [
-            "--ask-for-approval", "untrusted", "exec", "--ephemeral", "--sandbox", "read-only",
+            "--ask-for-approval", "untrusted", "exec", "--json", "--sandbox", "read-only",
             "--skip-git-repo-check",
         ])
         #expect(codex.arguments.contains("--image"))
         #expect(codex.arguments.contains("/selected/screen.png"))
-        #expect(codex.arguments.last?.contains("/selected/code.swift") == true)
+        let codexInput = String(
+            decoding: try #require(codex.standardInput),
+            as: UTF8.self
+        )
+        #expect(codexInput.contains("이 자료를 설명해줘"))
+        #expect(codexInput.contains("/selected/code.swift"))
+        #expect(!codex.arguments.contains { $0.contains("이 자료를 설명해줘") })
 
         let claude = invocations[2].command
         #expect(claude.executableURL.path == "/safe/bin/claude")
         #expect(claude.arguments.prefix(7) == [
-            "--safe-mode", "--print", "--output-format", "text",
-            "--permission-mode", "plan", "--no-session-persistence",
+            "--print", "--verbose", "--output-format", "stream-json",
+            "--include-partial-messages", "--permission-mode", "plan",
         ])
-        #expect(claude.arguments.last?.contains("/selected/screen.png") == true)
-        #expect(claude.arguments.last?.contains("/selected/code.swift") == true)
+        #expect(claude.arguments.contains("--session-id"))
+        #expect(!claude.arguments.contains("--safe-mode"))
+        let claudeInput = String(
+            decoding: try #require(claude.standardInput),
+            as: UTF8.self
+        )
+        #expect(claudeInput.contains("이 자료를 설명해줘"))
+        #expect(claudeInput.contains("/selected/screen.png"))
+        #expect(claudeInput.contains("/selected/code.swift"))
+        #expect(!claude.arguments.contains { $0.contains("이 자료를 설명해줘") })
 
         for invocation in invocations {
             #expect(invocation.timeout == .seconds(120))
@@ -124,6 +167,458 @@ struct AgentConnectorTests {
             #expect(invocation.command.executableURL.path != "/bin/sh")
         }
     }
+
+    @Test
+    func codexStreamsFragmentedExecJSONAndResumesTheExactSession() async throws {
+        let runner = StructuredConnectorProcessRunner()
+        let connector = CodexConnector(processRunner: runner)
+        let executable = URL(fileURLWithPath: "/safe/bin/codex")
+
+        let first = try await collectConnectorEvents(
+            connector.sendEvents(
+                PromptRequest(
+                    text: "사용자: 첫 질문",
+                    currentTurnText: "첫 질문"
+                ),
+                executableURL: executable
+            )
+        )
+        let second = try await collectConnectorEvents(
+            connector.sendEvents(
+                PromptRequest(
+                    text: "사용자: 첫 질문\n어시스턴트: 첫 응답\n사용자: 둘째 질문",
+                    currentTurnText: "둘째 질문",
+                    attachments: [
+                        PromptAttachment(
+                            url: URL(fileURLWithPath: "/selected/follow-up.png"),
+                            kind: .image,
+                            byteCount: 12
+                        ),
+                    ]
+                ),
+                executableURL: executable
+            )
+        )
+
+        #expect(first == [
+            .textSnapshot("안녕"),
+            .textSnapshot("안녕하세요 👋"),
+            .completed(PromptResponse(text: "안녕하세요 👋")),
+        ])
+        #expect(second == [
+            .textSnapshot("둘째 응답"),
+            .completed(PromptResponse(text: "둘째 응답")),
+        ])
+        #expect(first.filter(\.isCompletion).count == 1)
+        #expect(second.filter(\.isCompletion).count == 1)
+
+        let commands = await runner.commands(for: "codex")
+        #expect(commands.count == 2)
+        #expect(commands[0].arguments.contains("--json"))
+        #expect(commands[0].arguments.contains("exec"))
+        #expect(!commands[0].arguments.contains("resume"))
+        #expect(!commands[0].arguments.contains("--ephemeral"))
+        #expect(commands[0].standardInput == Data("사용자: 첫 질문".utf8))
+        #expect(commands[1].arguments == [
+            "--ask-for-approval", "untrusted", "exec",
+            "--json", "--sandbox", "read-only", "--skip-git-repo-check",
+            "--image", "/selected/follow-up.png",
+            "resume", "codex-session-1",
+        ])
+        #expect(!commands[1].arguments.contains("--ephemeral"))
+        #expect(commands[1].standardInput == Data("둘째 질문".utf8))
+    }
+
+    @Test
+    func claudeStreamsFragmentedPartialMessagesAndResumesTheExactSession() async throws {
+        let runner = StructuredConnectorProcessRunner()
+        let connector = ClaudeCodeConnector(processRunner: runner)
+        let executable = URL(fileURLWithPath: "/safe/bin/claude")
+
+        let first = try await collectConnectorEvents(
+            connector.sendEvents(
+                PromptRequest(
+                    text: "사용자: 첫 질문",
+                    currentTurnText: "첫 질문"
+                ),
+                executableURL: executable
+            )
+        )
+        let second = try await collectConnectorEvents(
+            connector.sendEvents(
+                PromptRequest(
+                    text: "사용자: 첫 질문\n어시스턴트: 첫 응답\n사용자: 둘째 질문",
+                    currentTurnText: "둘째 질문",
+                    attachments: [
+                        PromptAttachment(
+                            url: URL(fileURLWithPath: "/selected/follow-up.swift"),
+                            kind: .source,
+                            byteCount: 24
+                        ),
+                    ]
+                ),
+                executableURL: executable
+            )
+        )
+
+        #expect(first == [
+            .textDelta("안녕"),
+            .textDelta("하세요 🌊"),
+            .completed(PromptResponse(text: "안녕하세요 🌊")),
+        ])
+        #expect(second == [
+            .textDelta("둘째 응답"),
+            .completed(PromptResponse(text: "둘째 응답")),
+        ])
+        #expect(first.filter(\.isCompletion).count == 1)
+        #expect(second.filter(\.isCompletion).count == 1)
+
+        let commands = await runner.commands(for: "claude")
+        #expect(commands.count == 2)
+        let sessionIDIndex = try #require(
+            commands[0].arguments.firstIndex(of: "--session-id")
+        )
+        let sessionID = commands[0].arguments[sessionIDIndex + 1]
+        #expect(UUID(uuidString: sessionID) != nil)
+        #expect(commands[0].arguments.contains("stream-json"))
+        #expect(commands[0].arguments.contains("--include-partial-messages"))
+        #expect(!commands[0].arguments.contains("--safe-mode"))
+        #expect(!commands[0].arguments.contains("--resume"))
+        #expect(!commands[0].arguments.contains("--no-session-persistence"))
+        #expect(commands[0].standardInput == Data("사용자: 첫 질문".utf8))
+        let resumeIndex = try #require(
+            commands[1].arguments.firstIndex(of: "--resume")
+        )
+        #expect(commands[1].arguments[resumeIndex + 1] == sessionID)
+        #expect(!commands[1].arguments.contains("--session-id"))
+        #expect(commands[1].arguments.contains("stream-json"))
+        #expect(commands[1].arguments.contains("--include-partial-messages"))
+        let resumedInput = String(
+            decoding: try #require(commands[1].standardInput),
+            as: UTF8.self
+        )
+        #expect(resumedInput.contains("둘째 질문"))
+        #expect(resumedInput.contains("/selected/follow-up.swift"))
+        #expect(!resumedInput.contains("첫 질문"))
+        #expect(!resumedInput.contains("첫 응답"))
+    }
+
+    @Test
+    func openCodeContinuesAcrossToolCallStepsUntilVerifiedTerminalFinish() async throws {
+        let runner = StructuredConnectorProcessRunner()
+        let connector = OpenCodeConnector(processRunner: runner)
+        let executable = URL(fileURLWithPath: "/safe/bin/opencode")
+
+        let first = try await collectConnectorEvents(
+            connector.sendEvents(
+                PromptRequest(text: "첫 질문"),
+                executableURL: executable
+            )
+        )
+        let second = try await collectConnectorEvents(
+            connector.sendEvents(
+                PromptRequest(
+                    text: "사용자: 첫 질문\n어시스턴트: 첫 응답\n사용자: 둘째 질문",
+                    currentTurnText: "둘째 질문"
+                ),
+                executableURL: executable
+            )
+        )
+
+        #expect(first == [
+            .textSnapshot("첫"),
+            .textSnapshot("첫 응답"),
+            .completed(PromptResponse(text: "첫 응답")),
+        ])
+        #expect(second == [
+            .textSnapshot("둘째 응답"),
+            .completed(PromptResponse(text: "둘째 응답")),
+        ])
+        #expect(first.filter(\.isCompletion).count == 1)
+        #expect(second.filter(\.isCompletion).count == 1)
+
+        let commands = await runner.commands(for: "opencode")
+        #expect(commands.count == 2)
+        for command in commands {
+            #expect(command.arguments.prefix(4) == ["run", "--pure", "--format", "json"])
+            #expect(!command.arguments.contains("--session"))
+            #expect(!command.arguments.contains("--continue"))
+        }
+        #expect(
+            commands[1].arguments.last
+                == "사용자: 첫 질문\n어시스턴트: 첫 응답\n사용자: 둘째 질문"
+        )
+    }
+
+    @Test
+    func codexAndClaudeDiscardUncommittedSessionsAfterProcessCrash() async throws {
+        let codexRunner = CrashRecoveryProcessRunner()
+        let codex = CodexConnector(processRunner: codexRunner)
+        let codexURL = URL(fileURLWithPath: "/safe/bin/codex")
+
+        do {
+            _ = try await collectConnectorEvents(
+                codex.sendEvents(
+                    PromptRequest(text: "중단될 Codex 요청"),
+                    executableURL: codexURL
+                )
+            )
+            Issue.record("Expected the first Codex process to crash")
+        } catch let error as AgentConnectorError {
+            #expect(error == .failed(exitStatus: 70, message: "fixture crash"))
+        } catch {
+            Issue.record("Unexpected Codex error: \(error)")
+        }
+        let recoveredCodex = try await collectConnectorEvents(
+            codex.sendEvents(
+                PromptRequest(text: "복구된 Codex 요청"),
+                executableURL: codexURL
+            )
+        )
+        #expect(recoveredCodex == [
+            .textSnapshot("Codex 복구"),
+            .completed(PromptResponse(text: "Codex 복구")),
+        ])
+        let codexCommands = await codexRunner.commands(for: "codex")
+        #expect(codexCommands.count == 2)
+        #expect(!codexCommands[1].arguments.contains("resume"))
+
+        let claudeRunner = CrashRecoveryProcessRunner()
+        let claude = ClaudeCodeConnector(processRunner: claudeRunner)
+        let claudeURL = URL(fileURLWithPath: "/safe/bin/claude")
+
+        do {
+            _ = try await collectConnectorEvents(
+                claude.sendEvents(
+                    PromptRequest(text: "중단될 Claude 요청"),
+                    executableURL: claudeURL
+                )
+            )
+            Issue.record("Expected the first Claude process to crash")
+        } catch let error as AgentConnectorError {
+            #expect(error == .failed(exitStatus: 70, message: "fixture crash"))
+        } catch {
+            Issue.record("Unexpected Claude error: \(error)")
+        }
+        let recoveredClaude = try await collectConnectorEvents(
+            claude.sendEvents(
+                PromptRequest(text: "복구된 Claude 요청"),
+                executableURL: claudeURL
+            )
+        )
+        #expect(recoveredClaude == [
+            .textDelta("Claude 복구"),
+            .completed(PromptResponse(text: "Claude 복구")),
+        ])
+        let claudeCommands = await claudeRunner.commands(for: "claude")
+        #expect(claudeCommands.count == 2)
+        let firstSessionIndex = try #require(
+            claudeCommands[0].arguments.firstIndex(of: "--session-id")
+        )
+        let secondSessionIndex = try #require(
+            claudeCommands[1].arguments.firstIndex(of: "--session-id")
+        )
+        #expect(
+            claudeCommands[0].arguments[firstSessionIndex + 1]
+                != claudeCommands[1].arguments[secondSessionIndex + 1]
+        )
+        #expect(!claudeCommands[1].arguments.contains("--resume"))
+    }
+
+    @Test
+    func codexAndClaudeRejectSessionCommitWhenCompletionDeliveryLosesRace() async throws {
+        let runner = StructuredConnectorProcessRunner()
+        let executableDirectory = URL(fileURLWithPath: "/safe/bin", isDirectory: true)
+        let codex = CodexStreamingSession(
+            processRunner: runner,
+            timeout: .seconds(1),
+            outputByteLimit: 4_096
+        )
+
+        do {
+            _ = try await codex.send(
+                PromptRequest(text: "취소된 Codex 요청"),
+                executableURL: executableDirectory.appendingPathComponent("codex"),
+                onEvent: { _ in },
+                acceptCompletion: { _ in false }
+            )
+            Issue.record("Expected rejected Codex completion delivery to cancel")
+        } catch {
+            #expect(error is CancellationError)
+        }
+        _ = try await codex.send(
+            PromptRequest(text: "새 Codex 요청"),
+            executableURL: executableDirectory.appendingPathComponent("codex"),
+            onEvent: { _ in }
+        )
+        let codexCommands = await runner.commands(for: "codex")
+        #expect(codexCommands.count == 2)
+        #expect(!codexCommands[1].arguments.contains("resume"))
+
+        let claude = ClaudeStreamingSession(
+            processRunner: runner,
+            timeout: .seconds(1),
+            outputByteLimit: 4_096
+        )
+        do {
+            _ = try await claude.send(
+                PromptRequest(text: "취소된 Claude 요청"),
+                executableURL: executableDirectory.appendingPathComponent("claude"),
+                onEvent: { _ in },
+                acceptCompletion: { _ in false }
+            )
+            Issue.record("Expected rejected Claude completion delivery to cancel")
+        } catch {
+            #expect(error is CancellationError)
+        }
+        _ = try await claude.send(
+            PromptRequest(text: "새 Claude 요청"),
+            executableURL: executableDirectory.appendingPathComponent("claude"),
+            onEvent: { _ in }
+        )
+        let claudeCommands = await runner.commands(for: "claude")
+        #expect(claudeCommands.count == 2)
+        #expect(!claudeCommands[1].arguments.contains("--resume"))
+    }
+
+    @Test
+    func runtimeLifecycleDiscardsStructuredSessionsAndClosesIdleHermes() async throws {
+        let runner = StructuredConnectorProcessRunner()
+        let executableDirectory = URL(fileURLWithPath: "/safe/bin", isDirectory: true)
+        let codex = CodexConnector(processRunner: runner)
+        _ = try await codex.send(
+            PromptRequest(text: "첫 Codex 요청"),
+            executableURL: executableDirectory.appendingPathComponent("codex")
+        )
+        await codex.reset()
+        _ = try await codex.send(
+            PromptRequest(text: "새 Codex 요청"),
+            executableURL: executableDirectory.appendingPathComponent("codex")
+        )
+        let codexCommands = await runner.commands(for: "codex")
+        #expect(codexCommands.count == 2)
+        #expect(!codexCommands[1].arguments.contains("resume"))
+
+        let claude = ClaudeCodeConnector(processRunner: runner)
+        _ = try await claude.send(
+            PromptRequest(text: "첫 Claude 요청"),
+            executableURL: executableDirectory.appendingPathComponent("claude")
+        )
+        await claude.reset()
+        _ = try await claude.send(
+            PromptRequest(text: "새 Claude 요청"),
+            executableURL: executableDirectory.appendingPathComponent("claude")
+        )
+        let claudeCommands = await runner.commands(for: "claude")
+        #expect(claudeCommands.count == 2)
+        #expect(!claudeCommands[1].arguments.contains("--resume"))
+
+        let hermesTransport = RecordingHermesTransport()
+        let hermesRuntime = AgentRuntime(
+            selection: RuntimeSelection(
+                installation: AgentInstallation(
+                    definitionID: .hermes,
+                    path: "/safe/bin/hermes",
+                    version: "1.0.0",
+                    runtimeContract: .hermesACP,
+                    availability: .available
+                )
+            ),
+            connectors: [HermesACPConnector(transport: hermesTransport)]
+        )
+        _ = try await hermesRuntime.send(PromptRequest(text: "Hermes 요청"))
+
+        await hermesRuntime.reset()
+        await hermesRuntime.close()
+
+        #expect(await hermesTransport.closeCount == 2)
+    }
+
+    @Test
+    func codexCancellationSuppressesLateEventsAndStartsAFreshSession() async throws {
+        let runner = ControlledStreamingProcessRunner()
+        let connector = CodexConnector(processRunner: runner)
+        let executable = URL(fileURLWithPath: "/safe/bin/codex")
+        let cancelledEvents = LockedConnectorEvents()
+
+        let cancelled = Task {
+            do {
+                for try await event in connector.sendEvents(
+                    PromptRequest(text: "취소할 요청"),
+                    executableURL: executable
+                ) {
+                    cancelledEvents.append(event)
+                }
+            } catch {
+                #expect(error is CancellationError)
+            }
+        }
+        await runner.waitForInvocationCount(1)
+        await runner.emit(
+            [
+                #"{"type":"thread.started","thread_id":"cancelled-codex"}"#,
+                #"{"type":"item.updated","item":{"id":"item-1","type":"agent_message","text":"취소 전 부분"}}"#,
+            ].joined(separator: "\n") + "\n",
+            at: 0
+        )
+        await cancelledEvents.waitForCount(1)
+        cancelled.cancel()
+        await runner.waitForCancellationCount(1)
+        await cancelled.value
+
+        await runner.emit(
+            [
+                #"{"type":"item.updated","item":{"id":"item-1","type":"agent_message","text":"취소 후 늦은 변경"}}"#,
+                #"{"type":"turn.completed","usage":{}}"#,
+            ].joined(separator: "\n") + "\n",
+            at: 0
+        )
+
+        let recoveredTask = Task {
+            try await collectConnectorEvents(
+                connector.sendEvents(
+                    PromptRequest(text: "새 요청"),
+                    executableURL: executable
+                )
+            )
+        }
+        await runner.waitForInvocationCount(2)
+        let recoveredOutput = [
+            #"{"type":"thread.started","thread_id":"fresh-codex"}"#,
+            #"{"type":"item.completed","item":{"id":"item-2","type":"agent_message","text":"새 응답"}}"#,
+            #"{"type":"turn.completed","usage":{}}"#,
+        ].joined(separator: "\n") + "\n"
+        await runner.emit(recoveredOutput, at: 1)
+        await runner.succeed(output: recoveredOutput, at: 1)
+
+        #expect(cancelledEvents.values() == [.textSnapshot("취소 전 부분")])
+        #expect(try await recoveredTask.value == [
+            .textSnapshot("새 응답"),
+            .completed(PromptResponse(text: "새 응답")),
+        ])
+        let commands = await runner.commands
+        #expect(commands.count == 2)
+        #expect(!commands[1].arguments.contains("resume"))
+    }
+}
+
+private extension PromptResponseEvent {
+    var isCompletion: Bool {
+        if case .completed = self {
+            return true
+        }
+        return false
+    }
+}
+
+private func collectConnectorEvents(
+    _ stream: PromptResponseEventStream
+) async throws -> [PromptResponseEvent] {
+    var events: [PromptResponseEvent] = []
+    for try await event in stream {
+        events.append(event)
+    }
+    return events
 }
 
 private actor RuntimeSelection: AgentSelectionValidating {
@@ -163,6 +658,30 @@ private actor RuntimeConnector: AgentConnecting {
     }
 }
 
+private struct RuntimeEventConnector: AgentConnecting {
+    let definitionID: AgentDefinitionID
+    let events: [PromptResponseEvent]
+
+    func send(
+        _ request: PromptRequest,
+        executableURL: URL
+    ) async throws -> PromptResponse {
+        PromptResponse(text: "legacy response")
+    }
+
+    func sendEvents(
+        _ request: PromptRequest,
+        executableURL: URL
+    ) -> AsyncThrowingStream<PromptResponseEvent, Error> {
+        AsyncThrowingStream { continuation in
+            for event in events {
+                continuation.yield(event)
+            }
+            continuation.finish()
+        }
+    }
+}
+
 private actor ConnectorProcessRunner: ProcessRunning {
     struct Invocation: Sendable {
         let command: ProcessCommand
@@ -173,11 +692,356 @@ private actor ConnectorProcessRunner: ProcessRunning {
 
     func run(_ command: ProcessCommand, timeout: Duration?) async throws -> ProcessRunResult {
         invocations.append(Invocation(command: command, timeout: timeout))
+        let output: String
+        switch command.executableURL.lastPathComponent {
+        case "opencode":
+            output = [
+                #"{"type":"step_start","sessionID":"contract-session"}"#,
+                #"{"type":"text","sessionID":"contract-session","part":{"id":"part-1","type":"text","text":"완료"}}"#,
+                #"{"type":"step_finish","sessionID":"contract-session","part":{"type":"step-finish","reason":"stop"}}"#,
+            ].joined(separator: "\n") + "\n"
+        case "codex":
+            output = [
+                #"{"type":"thread.started","thread_id":"contract-session"}"#,
+                #"{"type":"item.completed","item":{"id":"item-1","type":"agent_message","text":"완료"}}"#,
+                #"{"type":"turn.completed","usage":{}}"#,
+            ].joined(separator: "\n") + "\n"
+        case "claude":
+            let sessionIndex = command.arguments.firstIndex(of: "--session-id")
+            let sessionID = sessionIndex.map { command.arguments[$0 + 1] } ?? ""
+            output = [
+                #"{"type":"system","subtype":"init","session_id":"\#(sessionID)"}"#,
+                #"{"type":"result","subtype":"success","is_error":false,"session_id":"\#(sessionID)","result":"완료"}"#,
+            ].joined(separator: "\n") + "\n"
+        default:
+            output = "완료"
+        }
         return ProcessRunResult(
-            standardOutput: Data("완료".utf8),
+            standardOutput: Data(output.utf8),
             standardError: Data(),
             termination: .exited(status: 0)
         )
+    }
+}
+
+private actor StructuredConnectorProcessRunner: ProcessRunning {
+    private var recordedCommands: [ProcessCommand] = []
+    private var invocationCounts: [String: Int] = [:]
+
+    func run(
+        _ command: ProcessCommand,
+        timeout: Duration?
+    ) async throws -> ProcessRunResult {
+        let output = scriptedOutput(for: command)
+        recordedCommands.append(command)
+        return ProcessRunResult(
+            standardOutput: output,
+            standardError: Data(),
+            termination: .exited(status: 0)
+        )
+    }
+
+    func runStreaming(
+        _ command: ProcessCommand,
+        timeout: Duration?,
+        onStandardOutput: @escaping @Sendable (Data) -> Void
+    ) async throws -> ProcessRunResult {
+        let output = scriptedOutput(for: command)
+        recordedCommands.append(command)
+        for chunk in fragmented(output) {
+            onStandardOutput(chunk)
+            await Task.yield()
+        }
+        return ProcessRunResult(
+            standardOutput: output,
+            standardError: Data(),
+            termination: .exited(status: 0)
+        )
+    }
+
+    func commands(for executableName: String) -> [ProcessCommand] {
+        recordedCommands.filter { $0.executableURL.lastPathComponent == executableName }
+    }
+
+    private func scriptedOutput(for command: ProcessCommand) -> Data {
+        let executable = command.executableURL.lastPathComponent
+        let invocation = invocationCounts[executable, default: 0]
+        invocationCounts[executable] = invocation + 1
+        switch executable {
+        case "opencode":
+            return openCodeOutput(invocation: invocation)
+        case "codex":
+            return codexOutput(invocation: invocation)
+        case "claude":
+            return claudeOutput(command: command, invocation: invocation)
+        default:
+            return Data()
+        }
+    }
+
+    private func openCodeOutput(invocation: Int) -> Data {
+        let values = invocation == 0 ? ["첫", "첫 응답"] : ["둘째 응답"]
+        var lines = [
+            #"{"type":"step_start","sessionID":"opencode-session-\#(invocation)"}"#,
+        ]
+        if invocation == 0 {
+            lines.append(
+                #"{"type":"step_start","sessionID":"stale-opencode-session"}"#
+            )
+            lines.append(
+                #"{"type":"step_finish","sessionID":"opencode-session-0","part":{"type":"step-finish","reason":"tool-calls"}}"#
+            )
+            lines.append(
+                #"{"type":"step_start","sessionID":"opencode-session-0"}"#
+            )
+        }
+        lines.append(contentsOf: values.map { value in
+            #"{"type":"text","sessionID":"opencode-session-\#(invocation)","part":{"id":"part-1","type":"text","text":"\#(value)"}}"#
+        })
+        lines.append(
+            #"{"type":"step_finish","sessionID":"opencode-session-\#(invocation)","part":{"type":"step-finish","reason":"stop"}}"#
+        )
+        return Data((lines.joined(separator: "\n") + "\n").utf8)
+    }
+
+    private func codexOutput(invocation: Int) -> Data {
+        let lines: [String]
+        if invocation == 0 {
+            lines = [
+                #"{"type":"thread.started","thread_id":"codex-session-1"}"#,
+                #"{"type":"item.started","item":{"id":"item-1","type":"agent_message","text":""}}"#,
+                #"{"type":"item.updated","item":{"id":"item-1","type":"agent_message","text":"안녕"}}"#,
+                #"{"type":"item.completed","item":{"id":"item-1","type":"agent_message","text":"안녕하세요 👋"}}"#,
+                #"{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":2}}"#,
+            ]
+        } else {
+            lines = [
+                #"{"type":"thread.started","thread_id":"codex-session-1"}"#,
+                #"{"type":"item.completed","item":{"id":"item-2","type":"agent_message","text":"둘째 응답"}}"#,
+                #"{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":2}}"#,
+            ]
+        }
+        return Data((lines.joined(separator: "\n") + "\n").utf8)
+    }
+
+    private func claudeOutput(command: ProcessCommand, invocation: Int) -> Data {
+        let sessionID: String
+        if let index = command.arguments.firstIndex(of: "--session-id"),
+           command.arguments.indices.contains(index + 1) {
+            sessionID = command.arguments[index + 1]
+        } else if let index = command.arguments.firstIndex(of: "--resume"),
+                  command.arguments.indices.contains(index + 1) {
+            sessionID = command.arguments[index + 1]
+        } else {
+            sessionID = "00000000-0000-0000-0000-000000000001"
+        }
+        let deltas = invocation == 0 ? ["안녕", "하세요 🌊"] : ["둘째 응답"]
+        let result = deltas.joined()
+        var lines = [
+            #"{"type":"system","subtype":"init","session_id":"\#(sessionID)"}"#,
+        ]
+        lines.append(contentsOf: deltas.map { delta in
+            #"{"type":"stream_event","session_id":"\#(sessionID)","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"\#(delta)"}}}"#
+        })
+        lines.append(
+            #"{"type":"assistant","session_id":"\#(sessionID)","message":{"role":"assistant","content":[{"type":"text","text":"\#(result)"}]}}"#
+        )
+        lines.append(
+            #"{"type":"result","subtype":"success","is_error":false,"session_id":"\#(sessionID)","result":"\#(result)"}"#
+        )
+        return Data((lines.joined(separator: "\n") + "\n").utf8)
+    }
+
+    private func fragmented(_ data: Data) -> [Data] {
+        let widths = [1, 2, 5, 3, 8, 1, 13]
+        var chunks: [Data] = []
+        var offset = 0
+        var widthIndex = 0
+        while offset < data.count {
+            let width = min(widths[widthIndex % widths.count], data.count - offset)
+            chunks.append(data.subdata(in: offset..<(offset + width)))
+            offset += width
+            widthIndex += 1
+        }
+        return chunks
+    }
+}
+
+private actor CrashRecoveryProcessRunner: ProcessRunning {
+    private var recordedCommands: [ProcessCommand] = []
+    private var invocationCounts: [String: Int] = [:]
+
+    func run(
+        _ command: ProcessCommand,
+        timeout: Duration?
+    ) async throws -> ProcessRunResult {
+        try await runStreaming(
+            command,
+            timeout: timeout,
+            onStandardOutput: { _ in }
+        )
+    }
+
+    func runStreaming(
+        _ command: ProcessCommand,
+        timeout: Duration?,
+        onStandardOutput: @escaping @Sendable (Data) -> Void
+    ) async throws -> ProcessRunResult {
+        recordedCommands.append(command)
+        let executable = command.executableURL.lastPathComponent
+        let invocation = invocationCounts[executable, default: 0]
+        invocationCounts[executable] = invocation + 1
+        let output: Data
+        if executable == "codex" {
+            let sessionID = invocation == 0 ? "crashed-codex" : "recovered-codex"
+            var lines = [
+                #"{"type":"thread.started","thread_id":"\#(sessionID)"}"#,
+            ]
+            if invocation > 0 {
+                lines.append(
+                    #"{"type":"item.completed","item":{"id":"item-1","type":"agent_message","text":"Codex 복구"}}"#
+                )
+                lines.append(#"{"type":"turn.completed","usage":{}}"#)
+            }
+            output = Data((lines.joined(separator: "\n") + "\n").utf8)
+        } else {
+            let sessionIndex = command.arguments.firstIndex(of: "--session-id")
+            let sessionID = sessionIndex.map { command.arguments[$0 + 1] } ?? ""
+            var lines = [
+                #"{"type":"system","subtype":"init","session_id":"\#(sessionID)"}"#,
+            ]
+            if invocation > 0 {
+                lines.append(
+                    #"{"type":"stream_event","session_id":"\#(sessionID)","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Claude 복구"}}}"#
+                )
+                lines.append(
+                    #"{"type":"result","subtype":"success","is_error":false,"session_id":"\#(sessionID)","result":"Claude 복구"}"#
+                )
+            }
+            output = Data((lines.joined(separator: "\n") + "\n").utf8)
+        }
+        onStandardOutput(output)
+        return ProcessRunResult(
+            standardOutput: output,
+            standardError: invocation == 0 ? Data("fixture crash".utf8) : Data(),
+            termination: .exited(status: invocation == 0 ? 70 : 0)
+        )
+    }
+
+    func commands(for executableName: String) -> [ProcessCommand] {
+        recordedCommands.filter { $0.executableURL.lastPathComponent == executableName }
+    }
+}
+
+private final class LockedConnectorEvents: @unchecked Sendable {
+    private let lock = NSLock()
+    private var events: [PromptResponseEvent] = []
+
+    func append(_ event: PromptResponseEvent) {
+        lock.withLock { events.append(event) }
+    }
+
+    func values() -> [PromptResponseEvent] {
+        lock.withLock { events }
+    }
+
+    func waitForCount(_ count: Int) async {
+        for _ in 0..<10_000 {
+            if values().count >= count {
+                return
+            }
+            await Task.yield()
+        }
+        Issue.record("Timed out waiting for connector events")
+    }
+}
+
+private actor ControlledStreamingProcessRunner: ProcessRunning {
+    private(set) var commands: [ProcessCommand] = []
+    private var callbacks: [@Sendable (Data) -> Void] = []
+    private var continuations: [
+        CheckedContinuation<ProcessRunResult, any Error>?
+    ] = []
+    private var cancelled: Set<Int> = []
+    private var cancellationCount = 0
+
+    func run(
+        _ command: ProcessCommand,
+        timeout: Duration?
+    ) async throws -> ProcessRunResult {
+        try await runStreaming(
+            command,
+            timeout: timeout,
+            onStandardOutput: { _ in }
+        )
+    }
+
+    func runStreaming(
+        _ command: ProcessCommand,
+        timeout: Duration?,
+        onStandardOutput: @escaping @Sendable (Data) -> Void
+    ) async throws -> ProcessRunResult {
+        let index = commands.count
+        commands.append(command)
+        callbacks.append(onStandardOutput)
+        continuations.append(nil)
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                if cancelled.contains(index) {
+                    continuation.resume(throwing: CancellationError())
+                } else {
+                    continuations[index] = continuation
+                }
+            }
+        } onCancel: {
+            Task { await self.cancel(at: index) }
+        }
+    }
+
+    func emit(_ value: String, at index: Int) {
+        callbacks[index](Data(value.utf8))
+    }
+
+    func succeed(output: String, at index: Int) {
+        guard let continuation = continuations[index] else {
+            return
+        }
+        continuations[index] = nil
+        continuation.resume(returning: ProcessRunResult(
+            standardOutput: Data(output.utf8),
+            standardError: Data(),
+            termination: .exited(status: 0)
+        ))
+    }
+
+    func waitForInvocationCount(_ count: Int) async {
+        for _ in 0..<10_000 {
+            if commands.count >= count {
+                return
+            }
+            await Task.yield()
+        }
+        Issue.record("Timed out waiting for process invocation")
+    }
+
+    func waitForCancellationCount(_ count: Int) async {
+        for _ in 0..<10_000 {
+            if cancellationCount >= count {
+                return
+            }
+            await Task.yield()
+        }
+        Issue.record("Timed out waiting for process cancellation")
+    }
+
+    private func cancel(at index: Int) {
+        cancelled.insert(index)
+        cancellationCount += 1
+        guard let continuation = continuations[index] else {
+            return
+        }
+        continuations[index] = nil
+        continuation.resume(throwing: CancellationError())
     }
 }
 
@@ -188,6 +1052,7 @@ private actor RecordingHermesTransport: HermesACPTransporting {
     }
 
     private(set) var invocation: Invocation?
+    private(set) var closeCount = 0
 
     func send(
         _ request: PromptRequest,
@@ -198,5 +1063,9 @@ private actor RecordingHermesTransport: HermesACPTransporting {
     ) async throws -> PromptResponse {
         invocation = Invocation(request: request, executableURL: executableURL)
         return PromptResponse(text: "완료")
+    }
+
+    func close() {
+        closeCount += 1
     }
 }
