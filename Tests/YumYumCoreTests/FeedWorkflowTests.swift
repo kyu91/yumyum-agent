@@ -33,11 +33,11 @@ struct FeedWorkflowTests {
                 == [
                     .status(.validating),
                     .status(.animating(temporaryImage.lastPathComponent)),
-                    .mouth(true),
+                    .mouth(.reducedMotion),
                     .animation(label: temporaryImage.lastPathComponent, reduceMotion: true),
-                    .mouth(false),
                     .status(.sending),
                     .send,
+                    .mouth(.resting),
                     .status(.completed("answer")),
                 ]
         )
@@ -82,7 +82,7 @@ struct FeedWorkflowTests {
         }
 
         #expect(await sender.requests.isEmpty)
-        #expect(await feedback.mouthStates.isEmpty)
+        #expect(await feedback.mouthPresentations.isEmpty)
         #expect(await feedback.animationCount == 0)
     }
 
@@ -181,8 +181,13 @@ struct FeedWorkflowTests {
         }
 
         #expect(!FileManager.default.fileExists(atPath: temporaryImage.path))
-        #expect(await feedback.mouthStates.last == false)
-        #expect(await feedback.statuses.last == .failed("입력 처리를 취소했습니다."))
+        #expect(
+            await feedback.mouthPresentations == [.reducedMotion, .resting]
+        )
+        #expect(
+            await feedback.mouthPresentations.filter { $0 == .resting }.count == 1
+        )
+        #expect(await feedback.statuses.last == .cancelled)
     }
 
     @Test
@@ -204,7 +209,7 @@ struct FeedWorkflowTests {
             #expect(error is CancellationError)
         }
 
-        #expect(await feedback.mouthStates.allSatisfy { !$0 })
+        #expect(await feedback.mouthPresentations.isEmpty)
         #expect(await feedback.animationCount == 0)
         #expect(await sender.requests.isEmpty)
     }
@@ -212,7 +217,7 @@ struct FeedWorkflowTests {
 
 private enum FeedEvent: Equatable, Sendable {
     case status(FeedStatus)
-    case mouth(Bool)
+    case mouth(FeedMouthPresentation)
     case animation(label: String, reduceMotion: Bool)
     case send
 }
@@ -247,16 +252,16 @@ private actor OrderedFeedFeedback: FeedFeedback {
         self.events = events
     }
 
-    func setMouthOpen(_ isOpen: Bool) async {
-        await events.append(.mouth(isOpen))
+    func setMouthPresentation(_ presentation: FeedMouthPresentation) async {
+        await events.append(.mouth(presentation))
     }
 
     func animate(_ preview: FeedPreview, reduceMotion: Bool) async {
         await events.append(.animation(label: preview.label, reduceMotion: reduceMotion))
     }
 
-    func setStatus(_ status: FeedStatus) async {
-        await events.append(.status(status))
+    func setStatus(_ update: FeedStatusUpdate) async {
+        await events.append(.status(update.status))
     }
 }
 
@@ -331,39 +336,39 @@ private actor CancellationPromptSender: PromptSending {
 }
 
 private actor RecordingFeedFeedback: FeedFeedback {
-    private(set) var mouthStates: [Bool] = []
+    private(set) var mouthPresentations: [FeedMouthPresentation] = []
     private(set) var animationCount = 0
     private(set) var statuses: [FeedStatus] = []
 
-    func setMouthOpen(_ isOpen: Bool) {
-        mouthStates.append(isOpen)
+    func setMouthPresentation(_ presentation: FeedMouthPresentation) {
+        mouthPresentations.append(presentation)
     }
 
     func animate(_ preview: FeedPreview, reduceMotion: Bool) {
         animationCount += 1
     }
 
-    func setStatus(_ status: FeedStatus) {
-        statuses.append(status)
+    func setStatus(_ update: FeedStatusUpdate) {
+        statuses.append(update.status)
     }
 }
 
 private actor SuspendedValidationFeedback: FeedFeedback {
     private var validationContinuation: CheckedContinuation<Void, Never>?
     private var validationWaiters: [CheckedContinuation<Void, Never>] = []
-    private(set) var mouthStates: [Bool] = []
+    private(set) var mouthPresentations: [FeedMouthPresentation] = []
     private(set) var animationCount = 0
 
-    func setMouthOpen(_ isOpen: Bool) {
-        mouthStates.append(isOpen)
+    func setMouthPresentation(_ presentation: FeedMouthPresentation) {
+        mouthPresentations.append(presentation)
     }
 
     func animate(_ preview: FeedPreview, reduceMotion: Bool) {
         animationCount += 1
     }
 
-    func setStatus(_ status: FeedStatus) async {
-        guard status == .validating else { return }
+    func setStatus(_ update: FeedStatusUpdate) async {
+        guard update.status == .validating else { return }
         let waiters = validationWaiters
         validationWaiters.removeAll()
         waiters.forEach { $0.resume() }

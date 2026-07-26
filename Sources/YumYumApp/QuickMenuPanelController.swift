@@ -99,7 +99,7 @@ private final class EventMonitorToken: @unchecked Sendable {
 }
 
 @MainActor
-final class QuickMenuPanelController: NSObject {
+final class ChatPanelController: NSObject {
     static let panelSize = CGSize(width: 400, height: 520)
 
     private let petController: FloatingPetWindowController
@@ -112,12 +112,17 @@ final class QuickMenuPanelController: NSObject {
     private var captureTask: Task<Void, Never>?
     private var captureGeneration: UUID?
     private var captureRestoration = (panel: false, pet: false)
-    private var animationPanel: NSPanel?
+    private var fileSelectionGate = CallbackGenerationGate()
+    private var activeFilePanel: NSOpenPanel?
     private var agentNotice: String?
+
+    var onWillBeginCapture: (() -> Void)?
+    var onExplicitCancel: (() -> Void)?
 
     let panel: QuickMenuPanel
 
     var isVisible: Bool { panel.isVisible }
+    var isCapturing: Bool { captureTask != nil }
 
     init(
         petController: FloatingPetWindowController,
@@ -152,14 +157,7 @@ final class QuickMenuPanelController: NSObject {
             .ignoresCycle,
         ]
         panel.contentViewController = viewController
-        panel.onCancel = { [weak self] in
-            guard let self else { return }
-            if self.session.state.isSending {
-                self.cancelSend()
-            } else {
-                self.hide()
-            }
-        }
+        panel.onCancel = { [weak self] in self?.hide() }
 
         viewController.onClose = { [weak self] in self?.hide() }
         viewController.onCapture = { [weak self] in self?.captureScreen() }
@@ -198,33 +196,56 @@ final class QuickMenuPanelController: NSObject {
     func show() {
         guard captureTask == nil else { return }
         updateFrame()
+        session.show()
         panel.makeKeyAndOrderFront(nil)
         viewController.focusComposer()
     }
 
     func hide(restorePetAfterCapture: Bool = true) {
+        cancelFileSelection()
         cancelCapture(
             restorePanel: false,
             restorePet: restorePetAfterCapture
         )
-        session.cancelAndCleanupTemporaryFiles()
-        animationPanel?.orderOut(nil)
-        animationPanel = nil
-        petController.setMouthOpen(false)
+        session.hide()
         panel.orderOut(nil)
     }
 
     func prepareForTermination() {
+        cancelFileSelection()
         cancelCapture(restorePanel: false, restorePet: false)
         session.discardDraftAndCancel()
-        animationPanel?.orderOut(nil)
-        animationPanel = nil
         petController.setMouthOpen(false)
         panel.orderOut(nil)
         petController.hide()
     }
 
     func showCheckingStatus() {}
+
+    var isSending: Bool { session.state.isSending }
+
+    @discardableResult
+    func feedAttachments(
+        _ attachments: [ChatDraftAttachment],
+        reduceMotion: Bool
+    ) -> Bool {
+        let didStart = session.feedAttachments(
+            attachments,
+            reduceMotion: reduceMotion
+        )
+        if didStart {
+            refreshAgentStateAfterFailure()
+        }
+        return didStart
+    }
+
+    func retryLastSend() {
+        retrySend()
+    }
+
+    func scrollToLatest() {
+        viewController.scrollToLatest()
+    }
 
     func update(snapshot: AgentRegistrySnapshot) {
         if snapshot.canSend {
@@ -239,39 +260,6 @@ final class QuickMenuPanelController: NSObject {
             canRetry: session.canRetry,
             agentNotice: agentNotice
         )
-    }
-
-    func animatePreview(_ preview: FeedPreview, reduceMotion: Bool) async {
-        let sourceFrame = CGRect(
-            x: panel.frame.midX - 70,
-            y: panel.frame.midY - 16,
-            width: 140,
-            height: 32
-        )
-        let targetFrame = petController.mouthTargetFrame
-        let chip = makeAnimationPanel(label: preview.label, frame: sourceFrame)
-        animationPanel?.orderOut(nil)
-        animationPanel = chip
-        chip.orderFrontRegardless()
-
-        if reduceMotion {
-            try? await Task.sleep(for: .milliseconds(180))
-        } else {
-            await withCheckedContinuation { continuation in
-                NSAnimationContext.runAnimationGroup { context in
-                    context.duration = 0.32
-                    context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-                    chip.animator().setFrame(targetFrame, display: true)
-                    chip.animator().alphaValue = 0.15
-                } completionHandler: {
-                    continuation.resume()
-                }
-            }
-        }
-        chip.orderOut(nil)
-        if animationPanel === chip {
-            animationPanel = nil
-        }
     }
 
     @objc
@@ -293,33 +281,40 @@ final class QuickMenuPanelController: NSObject {
     }
 
     private func captureScreen() {
+        cancelFileSelection()
         guard captureTask == nil, session.beginCapture() else {
             return
         }
         let generation = UUID()
         captureGeneration = generation
-        let restorePanel = panel.isVisible
         let restorePet = petController.isVisible
-        captureRestoration = (restorePanel, restorePet)
+        captureRestoration = (false, restorePet)
+        onWillBeginCapture?()
         panel.orderOut(nil)
         petController.hide()
+        CATransaction.flush()
 
         captureTask = Task { @MainActor [weak self] in
             guard let self else { return }
+            await Task.yield()
             defer {
                 self.finishCapture(generation: generation)
             }
             do {
-                let imageURL = try await captureCoordinator.capture()
+                let result = try await captureCoordinator.capture()
                 guard !Task.isCancelled,
                       self.captureGeneration == generation,
                       self.session.state.phase == .capturing else {
-                    try? FileManager.default.removeItem(at: imageURL)
+                    try? FileManager.default.removeItem(at: result.url)
                     throw CancellationError()
                 }
                 session.finishCapture(
                     .attachment(
-                        ChatDraftAttachment(url: imageURL, isTemporary: true)
+                        ChatDraftAttachment(
+                            url: result.url,
+                            isTemporary: true,
+                            sourceRect: result.selectedRegion
+                        )
                     )
                 )
             } catch is CancellationError {
@@ -363,16 +358,16 @@ final class QuickMenuPanelController: NSObject {
         if restoration.pet {
             petController.show()
         }
-        if restoration.panel {
-            show()
-        }
     }
 
     private func chooseFiles() {
-        guard !session.state.isSending else {
+        guard !session.state.isSending, activeFilePanel == nil else {
             return
         }
+        let generation = UUID()
+        guard fileSelectionGate.begin(generation) else { return }
         let openPanel = NSOpenPanel()
+        activeFilePanel = openPanel
         openPanel.title = "대화에 첨부할 파일 선택"
         openPanel.prompt = "첨부"
         openPanel.allowsMultipleSelection = true
@@ -380,10 +375,15 @@ final class QuickMenuPanelController: NSObject {
         openPanel.canChooseFiles = true
         openPanel.resolvesAliases = false
         openPanel.allowedContentTypes = [.image, .pdf, .plainText, .sourceCode]
-        openPanel.begin { [weak self] response in
+        openPanel.begin { [weak self, weak openPanel] response in
             Task { @MainActor in
-                guard let self, response == .OK else { return }
-                for url in openPanel.urls {
+                guard let self,
+                      self.fileSelectionGate.consume(generation) else {
+                    return
+                }
+                self.activeFilePanel = nil
+                guard response == .OK, let urls = openPanel?.urls else { return }
+                for url in urls {
                     self.session.addAttachment(
                         ChatDraftAttachment(url: url, isTemporary: false)
                     )
@@ -391,6 +391,13 @@ final class QuickMenuPanelController: NSObject {
                 self.viewController.focusComposer()
             }
         }
+    }
+
+    private func cancelFileSelection() {
+        fileSelectionGate.invalidate()
+        let panel = activeFilePanel
+        activeFilePanel = nil
+        panel?.cancel(nil)
     }
 
     private func sendDraft() {
@@ -409,8 +416,7 @@ final class QuickMenuPanelController: NSObject {
 
     private func cancelSend() {
         session.cancelSend()
-        animationPanel?.orderOut(nil)
-        animationPanel = nil
+        onExplicitCancel?()
         petController.setMouthOpen(false)
     }
 
@@ -424,32 +430,6 @@ final class QuickMenuPanelController: NSObject {
         }
     }
 
-    private func makeAnimationPanel(label: String, frame: CGRect) -> NSPanel {
-        let chip = NSPanel(
-            contentRect: frame,
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered,
-            defer: false
-        )
-        chip.isOpaque = false
-        chip.backgroundColor = .clear
-        chip.hasShadow = true
-        chip.level = .popUpMenu
-        chip.ignoresMouseEvents = true
-        chip.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-
-        let labelField = NSTextField(labelWithString: label)
-        labelField.alignment = .center
-        labelField.font = .systemFont(ofSize: 12, weight: .semibold)
-        labelField.textColor = .labelColor
-        labelField.lineBreakMode = .byTruncatingMiddle
-        labelField.wantsLayer = true
-        labelField.layer?.backgroundColor = NSColor.controlBackgroundColor
-            .withAlphaComponent(0.96).cgColor
-        labelField.layer?.cornerRadius = 12
-        chip.contentView = labelField
-        return chip
-    }
 }
 
 final class QuickMenuPanel: NSPanel {
@@ -699,7 +679,7 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
             isError = false
         case let .failed(message):
             isBusy = false
-            status = message
+            status = UserFacingErrorRedactor.sanitize(message)
             isError = true
         }
 
@@ -717,6 +697,17 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
     func focusComposer() {
         guard composer.isEnabled else { return }
         view.window?.makeFirstResponder(composer)
+    }
+
+    func scrollToLatest() {
+        guard let document = transcriptScroll.documentView else { return }
+        transcriptScroll.contentView.scroll(
+            to: CGPoint(
+                x: 0,
+                y: max(0, document.bounds.height - transcriptScroll.contentSize.height)
+            )
+        )
+        transcriptScroll.reflectScrolledClipView(transcriptScroll.contentView)
     }
 
     func controlTextDidChange(_ notification: Notification) {
@@ -748,12 +739,7 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
         }
         view.layoutSubtreeIfNeeded()
         DispatchQueue.main.async { [weak self] in
-            guard let self,
-                  let document = self.transcriptScroll.documentView else { return }
-            self.transcriptScroll.contentView.scroll(
-                to: CGPoint(x: 0, y: max(0, document.bounds.height - self.transcriptScroll.contentSize.height))
-            )
-            self.transcriptScroll.reflectScrolledClipView(self.transcriptScroll.contentView)
+            self?.scrollToLatest()
         }
     }
 
@@ -906,18 +892,29 @@ private final class FlippedDocumentView: NSView {
 final class AppFeedFeedback: FeedFeedback, @unchecked Sendable {
     private weak var petController: FloatingPetWindowController?
     weak var quickMenuController: QuickMenuPanelController?
+    private var statusGate = FeedStatusGenerationGate()
 
     init(petController: FloatingPetWindowController) {
         self.petController = petController
     }
 
-    func setMouthOpen(_ isOpen: Bool) async {
-        petController?.setMouthOpen(isOpen)
+    func setMouthPresentation(_ presentation: FeedMouthPresentation) async {
+        switch presentation {
+        case .resting:
+            petController?.resetChewPresentation()
+        case .open:
+            petController?.applyChewFrame(.mouthOpen)
+        case .reducedMotion:
+            petController?.applyChewFrame(.reducedMotion)
+        }
     }
 
     func animate(_ preview: FeedPreview, reduceMotion: Bool) async {
         await quickMenuController?.animatePreview(preview, reduceMotion: reduceMotion)
     }
 
-    func setStatus(_ status: FeedStatus) async {}
+    func setStatus(_ update: FeedStatusUpdate) async {
+        guard statusGate.apply(update) else { return }
+        quickMenuController?.applyFeedStatus(update)
+    }
 }

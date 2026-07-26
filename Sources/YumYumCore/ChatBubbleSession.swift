@@ -4,6 +4,7 @@ import Foundation
 @MainActor
 public final class ChatBubbleSession: ObservableObject {
     @Published public private(set) var state: ChatBubbleState
+    @Published public private(set) var isPresented: Bool
 
     private let submitter: any FeedSubmitting
     private var sendTask: Task<Void, Never>?
@@ -15,11 +16,20 @@ public final class ChatBubbleSession: ObservableObject {
         submitter: any FeedSubmitting
     ) {
         self.state = state
+        isPresented = false
         self.submitter = submitter
     }
 
     public var canRetry: Bool {
         failedSubmission != nil && activeSubmission == nil
+    }
+
+    public func show() {
+        isPresented = true
+    }
+
+    public func hide() {
+        isPresented = false
     }
 
     public func setDraftText(_ text: String) {
@@ -58,7 +68,33 @@ public final class ChatBubbleSession: ObservableObject {
         } catch ChatBubbleStateError.busy {
             return false
         } catch {
-            state.setFailure(error.localizedDescription)
+            state.setFailure(UserFacingErrorRedactor.message(for: error))
+            return false
+        }
+        state.discardExcludedUserMessages()
+        if let failedSubmission {
+            removeTemporaryFiles(for: failedSubmission)
+        }
+        failedSubmission = nil
+        start(submission, reduceMotion: reduceMotion)
+        return true
+    }
+
+    @discardableResult
+    public func feedAttachments(
+        _ attachments: [ChatDraftAttachment],
+        reduceMotion: Bool
+    ) -> Bool {
+        guard activeSubmission == nil else {
+            return false
+        }
+        let submission: ChatSubmission
+        do {
+            submission = try state.beginAttachmentMeal(attachments)
+        } catch ChatBubbleStateError.busy {
+            return false
+        } catch {
+            state.setFailure(UserFacingErrorRedactor.message(for: error))
             return false
         }
         state.discardExcludedUserMessages()
@@ -80,7 +116,7 @@ public final class ChatBubbleSession: ObservableObject {
         do {
             try state.beginRetry(id: submission.id)
         } catch {
-            state.setFailure(error.localizedDescription)
+            state.setFailure(UserFacingErrorRedactor.message(for: error))
             return false
         }
         failedSubmission = nil
@@ -93,8 +129,6 @@ public final class ChatBubbleSession: ObservableObject {
             return
         }
         sendTask?.cancel()
-        sendTask = nil
-        activeSubmission = nil
         failedSubmission = nil
         state.cancelSend(id: submission.id)
         removeTemporaryFiles(for: submission)
@@ -160,8 +194,13 @@ public final class ChatBubbleSession: ObservableObject {
                       self.activeSubmission?.id == submission.id else {
                     return
                 }
-                let message = (error as? LocalizedError)?.errorDescription
-                    ?? "입력을 보내지 못했습니다."
+                if Task.isCancelled {
+                    self.state.cancelSend(id: submission.id)
+                    self.removeTemporaryFiles(for: submission)
+                    self.finishTask(id: submission.id)
+                    return
+                }
+                let message = UserFacingErrorRedactor.message(for: error)
                 self.failedSubmission = submission
                 self.finishTask(id: submission.id, preserveFailure: true)
                 self.state.failSend(id: submission.id, message: message)

@@ -5,7 +5,7 @@ import Testing
 @Suite
 struct ChatBubbleStateTests {
     @Test
-    func captureAndFilesOnlyJoinTheDraftUntilTheUserSends() {
+    func attachmentsAddedInsideChatRemainDraftsUntilTheUserSends() {
         var state = ChatBubbleState()
         let capture = ChatDraftAttachment(
             id: UUID(),
@@ -129,7 +129,10 @@ struct ChatBubbleStateTests {
         let beganFailedCapture = state.beginCapture()
         #expect(beganFailedCapture)
         state.finishCapture(.failed("디스플레이 캡처 실패"))
-        #expect(state.phase == .failed("디스플레이 캡처 실패"))
+        #expect(
+            state.phase
+                == .failed("화면을 캡처하지 못했습니다. 다시 시도해 주세요.")
+        )
         #expect(state.messages.map(\.text) == ["기존 답변"])
         #expect(state.draftText == "작성 중인 질문")
         #expect(state.draftAttachments == [draftAttachment])
@@ -162,7 +165,7 @@ struct ChatBubbleSessionTests {
 
     @Test
     @MainActor
-    func cancelThenImmediateResendIgnoresTheOldLateFailure() async {
+    func cancelRejectsImmediateResendUntilThePriorTaskFinishesWithoutAnOrphan() async {
         let submitter = ControlledFeedSubmitter()
         let session = ChatBubbleSession(submitter: submitter)
         session.setDraftText("첫 요청")
@@ -171,16 +174,21 @@ struct ChatBubbleSessionTests {
 
         session.cancelSend()
         session.setDraftText("두 번째 요청")
-        session.send(reduceMotion: false)
+        let immediateResendAccepted = session.send(reduceMotion: false)
+
+        #expect(!immediateResendAccepted)
+        #expect(await submitter.submissionCount == 1)
+        #expect(session.state.messages.map(\.text) == ["첫 요청"])
+        #expect(session.state.draftText == "두 번째 요청")
+
+        await submitter.fail(at: 0, error: CancellationError())
+        await session.waitForCurrentSend()
+
+        #expect(session.send(reduceMotion: false))
         await submitter.waitForSubmissionCount(2)
         #expect(!(await submitter.inputs[1].text).contains("첫 요청"))
-
         await submitter.succeed(at: 1, text: "새 응답")
         await session.waitForCurrentSend()
-        await submitter.fail(at: 0, error: TestSendError.lateFailure)
-        for _ in 0..<3 {
-            await Task.yield()
-        }
 
         #expect(session.state.phase == .idle)
         #expect(session.state.messages.last?.text == "새 응답")
@@ -189,7 +197,7 @@ struct ChatBubbleSessionTests {
 
     @Test
     @MainActor
-    func cancelThenImmediateResendIgnoresTheOldLateSuccess() async {
+    func cancelledLateSuccessNeverAppearsBeforeTheNextSend() async {
         let submitter = ControlledFeedSubmitter()
         let session = ChatBubbleSession(submitter: submitter)
         session.setDraftText("취소할 요청")
@@ -198,16 +206,13 @@ struct ChatBubbleSessionTests {
 
         session.cancelSend()
         session.setDraftText("유효한 요청")
-        session.send(reduceMotion: false)
-        await submitter.waitForSubmissionCount(2)
 
         await submitter.succeed(at: 0, text: "무시할 응답")
-        for _ in 0..<3 {
-            await Task.yield()
-        }
-        #expect(session.state.isSending)
+        await session.waitForCurrentSend()
         #expect(!session.state.messages.contains(where: { $0.text == "무시할 응답" }))
 
+        #expect(session.send(reduceMotion: false))
+        await submitter.waitForSubmissionCount(2)
         await submitter.succeed(at: 1, text: "최신 응답")
         await session.waitForCurrentSend()
         #expect(session.state.phase == .idle)
@@ -352,6 +357,82 @@ struct ChatBubbleSessionTests {
         #expect(session.canRetry)
         #expect(await submitter.inputs.count == 1)
     }
+
+    @Test
+    @MainActor
+    func rawSubmitterErrorNeverEntersChatState() async {
+        let submitter = ImmediateFeedSubmitter(
+            result: .failure(
+                SensitiveSubmitError(
+                    "stderr: token=TEST_ONLY at /Users/example/private/tool"
+                )
+            )
+        )
+        let session = ChatBubbleSession(submitter: submitter)
+        session.setDraftText("질문")
+
+        session.send(reduceMotion: false)
+        await session.waitForCurrentSend()
+
+        #expect(
+            session.state.phase
+                == .failed("입력을 처리하지 못했습니다. 다시 시도해 주세요.")
+        )
+    }
+
+    @Test
+    @MainActor
+    func hidingChatDoesNotCancelAnActiveBackgroundSend() async {
+        let submitter = ControlledFeedSubmitter()
+        let session = ChatBubbleSession(submitter: submitter)
+        session.show()
+        session.setDraftText("백그라운드에서 계속")
+        session.send(reduceMotion: false)
+        await submitter.waitForSubmissionCount(1)
+
+        session.hide()
+
+        #expect(!session.isPresented)
+        #expect(session.state.isSending)
+        #expect(await submitter.submissionCount == 1)
+
+        await submitter.succeed(at: 0, text: "숨겨진 동안 완료")
+        await session.waitForCurrentSend()
+        #expect(session.state.messages.last?.text == "숨겨진 동안 완료")
+    }
+
+    @Test
+    @MainActor
+    func immediateAttachmentMealPreservesChatDraftAndSubmitsTheSelectionOnce() async {
+        let submitter = ControlledFeedSubmitter()
+        let session = ChatBubbleSession(submitter: submitter)
+        let sourceRect = CGRect(x: -200, y: 80, width: 320, height: 180)
+        let attachments = [
+            ChatDraftAttachment(
+                url: URL(fileURLWithPath: "/private/tmp/capture.png"),
+                isTemporary: true,
+                sourceRect: sourceRect
+            ),
+            ChatDraftAttachment(
+                url: URL(fileURLWithPath: "/Users/person/report.pdf"),
+                isTemporary: false
+            ),
+        ]
+        session.setDraftText("보존할 채팅 초안")
+
+        #expect(session.feedAttachments(attachments, reduceMotion: false))
+        #expect(!session.feedAttachments(attachments, reduceMotion: false))
+        await submitter.waitForSubmissionCount(1)
+
+        let inputs = await submitter.inputs
+        #expect(inputs.count == 1)
+        #expect(inputs[0].fileURLs == attachments.map(\.url))
+        #expect(inputs[0].sourceRect == sourceRect)
+        #expect(session.state.draftText == "보존할 채팅 초안")
+
+        await submitter.succeed(at: 0, text: "처리 완료")
+        await session.waitForCurrentSend()
+    }
 }
 
 private actor ImmediateFeedSubmitter: FeedSubmitting {
@@ -371,6 +452,16 @@ private actor ImmediateFeedSubmitter: FeedSubmitting {
 private enum TestSendError: Error, Equatable, Sendable {
     case lateFailure
     case retryable
+}
+
+private struct SensitiveSubmitError: LocalizedError, Sendable {
+    let raw: String
+
+    init(_ raw: String) {
+        self.raw = raw
+    }
+
+    var errorDescription: String? { raw }
 }
 
 private actor ScriptedFeedSubmitter: FeedSubmitting {

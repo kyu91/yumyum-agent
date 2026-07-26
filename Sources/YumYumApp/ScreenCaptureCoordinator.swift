@@ -29,6 +29,11 @@ enum ScreenCaptureCoordinatorError: LocalizedError {
     }
 }
 
+struct ScreenCaptureResult: Equatable, Sendable {
+    let url: URL
+    let selectedRegion: CGRect
+}
+
 @MainActor
 final class ScreenCaptureCoordinator {
     private let selector = CaptureRegionOverlayController()
@@ -38,7 +43,7 @@ final class ScreenCaptureCoordinator {
         selector.cancel()
     }
 
-    func capture() async throws -> URL {
+    func capture() async throws -> ScreenCaptureResult {
         guard !isCapturing else {
             throw ScreenCaptureCoordinatorError.alreadyPresenting
         }
@@ -66,7 +71,7 @@ final class ScreenCaptureCoordinator {
             try Task.checkCancellation()
             try data.write(to: url, options: .atomic)
             try Task.checkCancellation()
-            return url
+            return ScreenCaptureResult(url: url, selectedRegion: region)
         } catch {
             try? FileManager.default.removeItem(at: url)
             throw error

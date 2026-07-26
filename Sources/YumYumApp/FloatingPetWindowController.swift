@@ -42,6 +42,7 @@ final class YumYumAppDelegate: NSObject, NSApplicationDelegate, ObservableObject
 
     func setPetVisible(_ isVisible: Bool) {
         petVisibility.setVisible(isVisible)
+        quickMenuController?.setPresentationEnabled(isVisible)
         if isVisible {
             petWindowController?.show()
         } else {
@@ -70,7 +71,10 @@ final class YumYumAppDelegate: NSObject, NSApplicationDelegate, ObservableObject
         let quickMenuController = QuickMenuPanelController(
             petController: petWindowController,
             viewModel: viewModel,
-            workflow: workflow
+            workflow: workflow,
+            openSettings: { [weak self] in
+                self?.openMainWindow()
+            }
         )
         feedback.quickMenuController = quickMenuController
         self.feedFeedback = feedback
@@ -109,7 +113,7 @@ final class YumYumAppDelegate: NSObject, NSApplicationDelegate, ObservableObject
             return
         }
         if quickMenuController.isVisible {
-            quickMenuController.hide()
+            quickMenuController.dismissActionBubble()
         } else {
             showQuickMenu()
         }
@@ -226,15 +230,24 @@ final class FloatingPetWindowController: NSObject {
     }
 
     func setMouthOpen(_ isOpen: Bool) {
-        presentationModel.isMouthOpen = isOpen
+        applyChewFrame(isOpen ? .mouthOpen : .resting)
+    }
+
+    func applyChewFrame(_ frame: PetChewFrame) {
+        guard presentationModel.chewFrame != frame else { return }
+        presentationModel.chewFrame = frame
+    }
+
+    func resetChewPresentation() {
+        applyChewFrame(.resting)
     }
 
     var mouthTargetFrame: CGRect {
         CGRect(
-            x: panel.frame.midX - 12,
-            y: panel.frame.midY - 18,
-            width: 24,
-            height: 18
+            x: panel.frame.midX - 11,
+            y: panel.frame.midY - 16,
+            width: 22,
+            height: 14
         )
     }
 
@@ -285,7 +298,7 @@ final class FloatingPetWindowController: NSObject {
 
 @MainActor
 final class PetPresentationModel: ObservableObject {
-    @Published var isMouthOpen = false
+    @Published var chewFrame = PetChewFrame.resting
 }
 
 final class FloatingPetPanel: NSPanel {
@@ -392,6 +405,12 @@ private struct YumYumPetView: View {
                 .accessibilityHidden(true)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .scaleEffect(
+            x: presentationModel.chewFrame.bodyScaleX,
+            y: presentationModel.chewFrame.bodyScaleY,
+            anchor: .center
+        )
+        .offset(y: presentationModel.chewFrame.bodyOffsetY)
         .contentShape(Rectangle())
         .scaleEffect(isHovered && !reduceMotion ? 1.025 : 1)
         .animation(
@@ -504,11 +523,25 @@ private struct YumYumPetView: View {
             with: .color(Color(red: 1, green: 0.89, blue: 0.67))
         )
         context.fill(
-            Path(ellipseIn: rect(28, 45, 10, 6)),
+            Path(
+                ellipseIn: rect(
+                    28 - presentationModel.chewFrame.cheekOffset,
+                    45,
+                    10,
+                    6
+                )
+            ),
             with: .color(Color(red: 1, green: 0.43, blue: 0.37).opacity(0.7))
         )
         context.fill(
-            Path(ellipseIn: rect(58, 45, 10, 6)),
+            Path(
+                ellipseIn: rect(
+                    58 + presentationModel.chewFrame.cheekOffset,
+                    45,
+                    10,
+                    6
+                )
+            ),
             with: .color(Color(red: 1, green: 0.43, blue: 0.37).opacity(0.7))
         )
 
@@ -523,7 +556,8 @@ private struct YumYumPetView: View {
             )
         }
 
-        if presentationModel.isMouthOpen {
+        switch presentationModel.chewFrame.mouth {
+        case .open:
             context.fill(
                 Path(ellipseIn: rect(39, 48, 18, 16)),
                 with: .color(outline)
@@ -532,7 +566,12 @@ private struct YumYumPetView: View {
                 Path(ellipseIn: rect(43, 56, 10, 5)),
                 with: .color(Color(red: 1, green: 0.43, blue: 0.37))
             )
-        } else {
+        case .halfClosed:
+            context.fill(
+                Path(ellipseIn: rect(41, 51, 14, 6)),
+                with: .color(outline)
+            )
+        case .closed:
             var smile = Path()
             smile.move(to: point(43, 49))
             smile.addQuadCurve(to: point(53, 49), control: point(48, 56))
