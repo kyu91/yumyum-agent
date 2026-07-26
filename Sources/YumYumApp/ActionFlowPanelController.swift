@@ -973,12 +973,23 @@ private final class ThinkingBubbleViewController: NSViewController {
 
 @MainActor
 private final class ResponseBubbleViewController: NSViewController {
+    private static let panelWidth: CGFloat = 360
+    private static let bodyWidth: CGFloat = 328
+    private static let minPanelHeight: CGFloat = 72
+    private static let maxPanelHeight: CGFloat = 222
+    private static let verticalInsets: CGFloat = 28
+    private static let buttonRowHeight: CGFloat = 25
+    private static let stackSpacing: CGFloat = 9
+
     var onOpenChat: (() -> Void)?
     var onRetry: (() -> Void)?
 
     private let label = NSTextField(wrappingLabelWithString: "")
+    private let responseScroll = NSScrollView()
     private let openChatButton = NSButton(title: "채팅 열기", target: nil, action: nil)
     private let retryButton = NSButton(title: "재시도", target: nil, action: nil)
+    private let buttonRow = NSStackView()
+    private var responseHeightConstraint: NSLayoutConstraint?
     private var content = PetResponseContent(
         fullText: "",
         displayText: "",
@@ -987,19 +998,45 @@ private final class ResponseBubbleViewController: NSViewController {
     )
 
     var preferredSize: CGSize {
-        let textWidth: CGFloat = 328
-        let bounds = NSAttributedString(
-            string: content.displayText,
-            attributes: [.font: NSFont.systemFont(ofSize: 13.5)]
-        ).boundingRect(
-            with: CGSize(width: textWidth, height: .greatestFiniteMagnitude),
+        CGSize(
+            width: Self.panelWidth,
+            height: preferredPanelHeight
+        )
+    }
+
+    private var renderedText: NSAttributedString {
+        AssistantMarkdownRenderer.render(
+            content.displayText,
+            font: .systemFont(ofSize: 13.5),
+            textColor: content.isError ? .systemRed : .labelColor
+        )
+    }
+
+    private var measuredTextHeight: CGFloat {
+        ceil(renderedText.boundingRect(
+            with: CGSize(width: Self.bodyWidth, height: .greatestFiniteMagnitude),
             options: [.usesLineFragmentOrigin, .usesFontLeading]
+        ).height) + 2
+    }
+
+    private var buttonChromeHeight: CGFloat {
+        content.showsOpenChat || content.showsRetry
+            ? Self.buttonRowHeight + Self.stackSpacing
+            : 0
+    }
+
+    private var preferredPanelHeight: CGFloat {
+        min(
+            Self.maxPanelHeight,
+            max(
+                Self.minPanelHeight,
+                measuredTextHeight + Self.verticalInsets + buttonChromeHeight
+            )
         )
-        let buttonHeight: CGFloat = content.showsOpenChat || content.showsRetry ? 34 : 0
-        return CGSize(
-            width: 360,
-            height: min(222, max(72, ceil(bounds.height) + 30 + buttonHeight))
-        )
+    }
+
+    private var visibleTextHeight: CGFloat {
+        preferredPanelHeight - Self.verticalInsets - buttonChromeHeight
     }
 
     override func loadView() {
@@ -1011,9 +1048,32 @@ private final class ResponseBubbleViewController: NSViewController {
         background.setAccessibilityHelp("누르면 전체 채팅을 엽니다.")
 
         label.font = .systemFont(ofSize: 13.5)
-        label.maximumNumberOfLines = 6
+        label.maximumNumberOfLines = 0
         label.lineBreakMode = .byWordWrapping
         label.setContentCompressionResistancePriority(.required, for: .vertical)
+
+        let document = ResponseDocumentView()
+        document.translatesAutoresizingMaskIntoConstraints = false
+        label.translatesAutoresizingMaskIntoConstraints = false
+        document.addSubview(label)
+        responseScroll.documentView = document
+        responseScroll.hasVerticalScroller = true
+        responseScroll.autohidesScrollers = true
+        responseScroll.drawsBackground = false
+        responseScroll.borderType = .noBorder
+        responseScroll.addGestureRecognizer(
+            NSClickGestureRecognizer(target: self, action: #selector(openChatPressed))
+        )
+        NSLayoutConstraint.activate([
+            document.leadingAnchor.constraint(equalTo: responseScroll.contentView.leadingAnchor),
+            document.trailingAnchor.constraint(equalTo: responseScroll.contentView.trailingAnchor),
+            document.topAnchor.constraint(equalTo: responseScroll.contentView.topAnchor),
+            document.widthAnchor.constraint(equalTo: responseScroll.contentView.widthAnchor),
+            label.leadingAnchor.constraint(equalTo: document.leadingAnchor),
+            label.trailingAnchor.constraint(equalTo: document.trailingAnchor),
+            label.topAnchor.constraint(equalTo: document.topAnchor),
+            label.bottomAnchor.constraint(equalTo: document.bottomAnchor),
+        ])
 
         openChatButton.target = self
         openChatButton.action = #selector(openChatPressed)
@@ -1024,14 +1084,15 @@ private final class ResponseBubbleViewController: NSViewController {
         retryButton.bezelStyle = .rounded
         retryButton.setAccessibilityLabel("마지막 입력 재시도")
 
-        let buttons = NSStackView(views: [NSView(), retryButton, openChatButton])
-        buttons.orientation = .horizontal
-        buttons.alignment = .centerY
-        buttons.spacing = 8
-        let stack = NSStackView(views: [label, buttons])
+        buttonRow.setViews([NSView(), retryButton, openChatButton], in: .leading)
+        buttonRow.orientation = .horizontal
+        buttonRow.alignment = .centerY
+        buttonRow.spacing = 8
+        buttonRow.heightAnchor.constraint(equalToConstant: Self.buttonRowHeight).isActive = true
+        let stack = NSStackView(views: [responseScroll, buttonRow])
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 9
+        stack.spacing = Self.stackSpacing
         stack.translatesAutoresizingMaskIntoConstraints = false
         background.addSubview(stack)
         for arrangedView in stack.arrangedSubviews {
@@ -1043,6 +1104,9 @@ private final class ResponseBubbleViewController: NSViewController {
             stack.topAnchor.constraint(equalTo: background.topAnchor, constant: 14),
             stack.bottomAnchor.constraint(equalTo: background.bottomAnchor, constant: -14),
         ])
+        let height = responseScroll.heightAnchor.constraint(equalToConstant: visibleTextHeight)
+        height.isActive = true
+        responseHeightConstraint = height
         view = background
         render(content)
     }
@@ -1050,10 +1114,17 @@ private final class ResponseBubbleViewController: NSViewController {
     func render(_ content: PetResponseContent) {
         self.content = content
         guard isViewLoaded else { return }
-        label.stringValue = content.displayText
-        label.textColor = content.isError ? .systemRed : .labelColor
+        label.attributedStringValue = renderedText
         openChatButton.isHidden = !content.showsOpenChat
         retryButton.isHidden = !content.showsRetry
+        buttonRow.isHidden = !content.showsOpenChat && !content.showsRetry
+        responseHeightConstraint?.constant = visibleTextHeight
+        responseScroll.hasVerticalScroller = measuredTextHeight > visibleTextHeight
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.responseScroll.contentView.scroll(to: .zero)
+            self.responseScroll.reflectScrolledClipView(self.responseScroll.contentView)
+        }
         view.setAccessibilityRole(
             content.showsOpenChat || content.showsRetry ? .group : .button
         )
@@ -1069,6 +1140,10 @@ private final class ResponseBubbleViewController: NSViewController {
     @objc private func retryPressed() { onRetry?() }
 }
 
+private final class ResponseDocumentView: NSView {
+    override var isFlipped: Bool { true }
+}
+
 private final class ClickableGlassView: NSView {
     var onClick: (() -> Void)?
 
@@ -1078,7 +1153,7 @@ private final class ClickableGlassView: NSView {
         guard let hit = super.hitTest(point) else { return nil }
         var candidate: NSView? = hit
         while let view = candidate {
-            if view is NSButton {
+            if view is NSButton || view is NSScrollView {
                 return hit
             }
             candidate = view.superview
