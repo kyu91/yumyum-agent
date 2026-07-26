@@ -31,6 +31,7 @@ let package = Package(
             name: "YumYumCoreTests",
             dependencies: [
                 "YumYumCore",
+                "YumYumApp",
                 "YumYumProbe",
                 "YumYumProcessFixture",
             ]

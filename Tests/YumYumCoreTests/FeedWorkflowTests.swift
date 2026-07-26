@@ -149,6 +149,65 @@ struct FeedWorkflowTests {
         #expect(FileManager.default.fileExists(atPath: unrelatedFile.path))
         #expect(FileManager.default.fileExists(atPath: matchingDirectory.path))
     }
+
+    @Test
+    func cancellationClosesTheMouthAndCleansTheTemporaryCapture() async throws {
+        let temporaryImage = FileManager.default.temporaryDirectory
+            .appendingPathComponent("YumYum-Capture-\(UUID().uuidString).png")
+        try Data("image".utf8).write(to: temporaryImage)
+        defer { try? FileManager.default.removeItem(at: temporaryImage) }
+
+        let sender = CancellationPromptSender()
+        let feedback = RecordingFeedFeedback()
+        let workflow = FeedWorkflow(sender: sender, feedback: feedback)
+        let task = Task {
+            try await workflow.submit(
+                FeedInput(
+                    text: "취소",
+                    fileURLs: [temporaryImage],
+                    temporaryFileURLs: [temporaryImage]
+                ),
+                reduceMotion: true
+            )
+        }
+        await sender.waitUntilStarted()
+
+        task.cancel()
+        do {
+            _ = try await task.value
+            Issue.record("Expected cancellation")
+        } catch {
+            #expect(error is CancellationError)
+        }
+
+        #expect(!FileManager.default.fileExists(atPath: temporaryImage.path))
+        #expect(await feedback.mouthStates.last == false)
+        #expect(await feedback.statuses.last == .failed("입력 처리를 취소했습니다."))
+    }
+
+    @Test
+    func cancellationWhileValidationFeedbackIsSuspendedNeverOpensTheMouth() async {
+        let sender = CountingPromptSender()
+        let feedback = SuspendedValidationFeedback()
+        let workflow = FeedWorkflow(sender: sender, feedback: feedback)
+        let task = Task {
+            try await workflow.submit(FeedInput(text: "취소"), reduceMotion: false)
+        }
+        await feedback.waitUntilValidating()
+
+        task.cancel()
+        await feedback.resumeValidation()
+        do {
+            _ = try await task.value
+            Issue.record("Expected cancellation")
+        } catch {
+            #expect(error is CancellationError)
+        }
+
+        #expect(await feedback.mouthStates.allSatisfy { !$0 })
+        #expect(await feedback.animationCount == 0)
+        #expect(await sender.requests.isEmpty)
+    }
 }
 
 private enum FeedEvent: Equatable, Sendable {
@@ -252,7 +311,46 @@ private actor BlockingPromptSender: PromptSending {
     }
 }
 
+private actor CancellationPromptSender: PromptSending {
+    private var started = false
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func send(_ request: PromptRequest) async throws -> PromptResponse {
+        started = true
+        let waiters = startWaiters
+        startWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+        try await Task.sleep(for: .seconds(30))
+        return PromptResponse(text: "unexpected")
+    }
+
+    func waitUntilStarted() async {
+        guard !started else { return }
+        await withCheckedContinuation { startWaiters.append($0) }
+    }
+}
+
 private actor RecordingFeedFeedback: FeedFeedback {
+    private(set) var mouthStates: [Bool] = []
+    private(set) var animationCount = 0
+    private(set) var statuses: [FeedStatus] = []
+
+    func setMouthOpen(_ isOpen: Bool) {
+        mouthStates.append(isOpen)
+    }
+
+    func animate(_ preview: FeedPreview, reduceMotion: Bool) {
+        animationCount += 1
+    }
+
+    func setStatus(_ status: FeedStatus) {
+        statuses.append(status)
+    }
+}
+
+private actor SuspendedValidationFeedback: FeedFeedback {
+    private var validationContinuation: CheckedContinuation<Void, Never>?
+    private var validationWaiters: [CheckedContinuation<Void, Never>] = []
     private(set) var mouthStates: [Bool] = []
     private(set) var animationCount = 0
 
@@ -264,5 +362,21 @@ private actor RecordingFeedFeedback: FeedFeedback {
         animationCount += 1
     }
 
-    func setStatus(_ status: FeedStatus) {}
+    func setStatus(_ status: FeedStatus) async {
+        guard status == .validating else { return }
+        let waiters = validationWaiters
+        validationWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+        await withCheckedContinuation { validationContinuation = $0 }
+    }
+
+    func waitUntilValidating() async {
+        guard validationContinuation == nil else { return }
+        await withCheckedContinuation { validationWaiters.append($0) }
+    }
+
+    func resumeValidation() {
+        validationContinuation?.resume()
+        validationContinuation = nil
+    }
 }

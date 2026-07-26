@@ -36,6 +36,7 @@ final class YumYumAppDelegate: NSObject, NSApplicationDelegate, ObservableObject
 
     func applicationWillTerminate(_ notification: Notification) {
         NotificationCenter.default.removeObserver(self)
+        quickMenuController?.prepareForTermination()
         shortcutController = nil
     }
 
@@ -44,7 +45,7 @@ final class YumYumAppDelegate: NSObject, NSApplicationDelegate, ObservableObject
         if isVisible {
             petWindowController?.show()
         } else {
-            quickMenuController?.hide()
+            quickMenuController?.hide(restorePetAfterCapture: false)
             petWindowController?.hide()
         }
     }
@@ -151,6 +152,8 @@ final class FloatingPetWindowController: NSObject {
 
     let panel: FloatingPetPanel
     let presentationModel = PetPresentationModel()
+
+    var isVisible: Bool { panel.isVisible }
 
     private let layout = FloatingPetLayout()
 

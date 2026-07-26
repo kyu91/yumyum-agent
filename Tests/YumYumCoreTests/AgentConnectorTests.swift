@@ -24,8 +24,16 @@ struct AgentConnectorTests {
 
         let response = try await runtime.send(request)
 
+        await selection.setResult(.failure(AgentSelectionError.explicitReselectionRequired))
+        do {
+            _ = try await runtime.send(PromptRequest(text: "second"))
+            Issue.record("Expected exact selection revalidation to block the second send")
+        } catch {
+            #expect(error as? AgentSelectionError == .explicitReselectionRequired)
+        }
+
         #expect(response == PromptResponse(text: "OpenCode response"))
-        #expect(await selection.validationCount == 1)
+        #expect(await selection.validationCount == 2)
         #expect(await openCode.requests == [request])
         #expect(await openCode.executablePaths == ["/selected/opencode"])
         #expect(await codex.requests.isEmpty)
@@ -119,16 +127,20 @@ struct AgentConnectorTests {
 }
 
 private actor RuntimeSelection: AgentSelectionValidating {
-    private let installation: AgentInstallation
+    private var result: Result<AgentInstallation, AgentSelectionError>
     private(set) var validationCount = 0
 
     init(installation: AgentInstallation) {
-        self.installation = installation
+        result = .success(installation)
     }
 
     func validatedSelection() async throws -> AgentInstallation {
         validationCount += 1
-        return installation
+        return try result.get()
+    }
+
+    func setResult(_ result: Result<AgentInstallation, AgentSelectionError>) {
+        self.result = result
     }
 }
 

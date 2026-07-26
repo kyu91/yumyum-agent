@@ -29,15 +29,18 @@ public struct FeedInput: Equatable, Sendable {
     public let text: String
     public let fileURLs: [URL]
     public let temporaryFileURLs: Set<URL>
+    public let cleanupTemporaryFilesAfterSubmit: Bool
 
     public init(
         text: String = "",
         fileURLs: [URL] = [],
-        temporaryFileURLs: Set<URL> = []
+        temporaryFileURLs: Set<URL> = [],
+        cleanupTemporaryFilesAfterSubmit: Bool = true
     ) {
         self.text = text
         self.fileURLs = fileURLs
         self.temporaryFileURLs = temporaryFileURLs
+        self.cleanupTemporaryFilesAfterSubmit = cleanupTemporaryFilesAfterSubmit
     }
 }
 
@@ -199,6 +202,13 @@ public protocol PromptSending: Sendable {
 
 extension AgentRuntime: PromptSending {}
 
+public protocol FeedSubmitting: Sendable {
+    func submit(
+        _ input: FeedInput,
+        reduceMotion: Bool
+    ) async throws -> PromptResponse
+}
+
 public protocol FeedFeedback: Sendable {
     func setMouthOpen(_ isOpen: Bool) async
     func animate(_ preview: FeedPreview, reduceMotion: Bool) async
@@ -213,7 +223,7 @@ public enum FeedWorkflowError: Error, Equatable, LocalizedError, Sendable {
     }
 }
 
-public actor FeedWorkflow {
+public actor FeedWorkflow: FeedSubmitting {
     private let validator: FeedValidator
     private let sender: any PromptSending
     private let feedback: any FeedFeedback
@@ -234,8 +244,10 @@ public actor FeedWorkflow {
         reduceMotion: Bool
     ) async throws -> PromptResponse {
         defer {
-            for url in input.temporaryFileURLs {
-                try? FileManager.default.removeItem(at: url)
+            if input.cleanupTemporaryFilesAfterSubmit {
+                for url in input.temporaryFileURLs {
+                    try? FileManager.default.removeItem(at: url)
+                }
             }
         }
         guard !isSubmitting else {
@@ -246,7 +258,15 @@ public actor FeedWorkflow {
             isSubmitting = false
         }
 
+        try Task.checkCancellation()
         await feedback.setStatus(.validating)
+        do {
+            try Task.checkCancellation()
+        } catch {
+            await feedback.setMouthOpen(false)
+            await feedback.setStatus(.failed("입력 처리를 취소했습니다."))
+            throw error
+        }
         let validated: ValidatedFeed
         do {
             validated = try validator.validate(input)
@@ -263,16 +283,19 @@ public actor FeedWorkflow {
         } else {
             previewLabel = "대화"
         }
-        await feedback.setStatus(.animating(previewLabel))
-        await feedback.setMouthOpen(true)
-        await feedback.animate(
-            FeedPreview(
-                label: previewLabel,
-                attachmentCount: validated.attachments.count
-            ),
-            reduceMotion: reduceMotion
-        )
         do {
+            try Task.checkCancellation()
+            await feedback.setStatus(.animating(previewLabel))
+            try Task.checkCancellation()
+            await feedback.setMouthOpen(true)
+            try Task.checkCancellation()
+            await feedback.animate(
+                FeedPreview(
+                    label: previewLabel,
+                    attachmentCount: validated.attachments.count
+                ),
+                reduceMotion: reduceMotion
+            )
             try Task.checkCancellation()
         } catch {
             await feedback.setMouthOpen(false)
@@ -287,10 +310,17 @@ public actor FeedWorkflow {
         )
         await feedback.setStatus(.sending)
         do {
+            try Task.checkCancellation()
             let response = try await sender.send(request)
+            try Task.checkCancellation()
             await feedback.setStatus(.completed(response.text))
             return response
+        } catch is CancellationError {
+            await feedback.setMouthOpen(false)
+            await feedback.setStatus(.failed("입력 처리를 취소했습니다."))
+            throw CancellationError()
         } catch {
+            await feedback.setMouthOpen(false)
             await feedback.setStatus(.failed((error as? LocalizedError)?.errorDescription ?? "전송하지 못했습니다."))
             throw error
         }
