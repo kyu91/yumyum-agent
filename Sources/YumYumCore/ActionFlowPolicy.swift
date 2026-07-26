@@ -446,39 +446,12 @@ public struct PetResponseContent: Equatable, Sendable {
 }
 
 public enum PetResponsePolicy {
-    public static let maximumFullCharacters = 360
-    public static let maximumFullLines = 6
-    public static let maximumExcerptCharacters = 320
-    public static let preferredMinimumBoundary = 180
-
     public static func content(for response: String) -> PetResponseContent {
-        let lineCount = response.split(
-            separator: "\n",
-            omittingEmptySubsequences: false
-        ).count
-        guard response.count > maximumFullCharacters
-                || lineCount > maximumFullLines else {
-            return PetResponseContent(
-                fullText: response,
-                displayText: response,
-                isExcerpt: false,
-                showsOpenChat: false
-            )
-        }
-
-        let normalized = response
-            .split(whereSeparator: \.isWhitespace)
-            .joined(separator: " ")
-        let bodyLimit = maximumExcerptCharacters - 1
-        let available = String(normalized.prefix(bodyLimit))
-        let boundary = preferredSentenceBoundary(in: available)
-        let body = String(available.prefix(boundary ?? available.count))
-            .trimmingCharacters(in: .whitespacesAndNewlines)
         return PetResponseContent(
             fullText: response,
-            displayText: body + "…",
-            isExcerpt: true,
-            showsOpenChat: true
+            displayText: response,
+            isExcerpt: false,
+            showsOpenChat: false
         )
     }
 
@@ -492,18 +465,6 @@ public enum PetResponsePolicy {
             showsRetry: true,
             isError: true
         )
-    }
-
-    private static func preferredSentenceBoundary(in text: String) -> Int? {
-        var offset = 0
-        for character in text {
-            offset += 1
-            guard offset >= preferredMinimumBoundary else { continue }
-            if ".!?。！？".contains(character) {
-                return offset
-            }
-        }
-        return nil
     }
 }
 
