@@ -1,9 +1,36 @@
 import CoreGraphics
+import Foundation
 import Testing
 @testable import YumYumCore
 
 @Suite
 struct QuickMenuLayoutTests {
+    @Test
+    func appPanelsKeepTheMarkdownStreamingAndBoundedResponseContracts() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let quickMenu = try String(
+            contentsOf: repository.appending(
+                path: "Sources/YumYumApp/QuickMenuPanelController.swift"
+            ),
+            encoding: .utf8
+        )
+        let actionFlow = try String(
+            contentsOf: repository.appending(
+                path: "Sources/YumYumApp/ActionFlowPanelController.swift"
+            ),
+            encoding: .utf8
+        )
+
+        #expect(quickMenu.contains("AssistantMarkdownRenderer.render"))
+        #expect(quickMenu.contains("canUpdateStreamingAssistant"))
+        #expect(quickMenu.contains("autoScrollThreshold: CGFloat = 24"))
+        #expect(actionFlow.contains("maxPanelHeight: CGFloat = 222"))
+        #expect(actionFlow.contains("responseScroll"))
+    }
+
     @Test
     func menuStateEnablesInputOnlyForAnAvailableExplicitSelection() {
         let available = AgentInstallation(

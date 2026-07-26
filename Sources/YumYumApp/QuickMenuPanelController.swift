@@ -3,6 +3,225 @@ import Combine
 import UniformTypeIdentifiers
 import YumYumCore
 
+@MainActor
+enum AssistantMarkdownRenderer {
+    static func render(
+        _ source: String,
+        font: NSFont,
+        textColor: NSColor
+    ) -> NSAttributedString {
+        let fallback = NSAttributedString(
+            string: source,
+            attributes: [
+                .font: font,
+                .foregroundColor: textColor,
+            ]
+        )
+
+        do {
+            let markdown = try AttributedString(
+                markdown: source,
+                options: .init(interpretedSyntax: .full)
+            )
+            let rendered = NSMutableAttributedString()
+            var previousBlock: MarkdownBlock?
+            for run in markdown.runs {
+                let block = markdownBlock(for: run.presentationIntent)
+                if previousBlock?.identity != block.identity {
+                    if let previousBlock {
+                        appendSeparator(
+                            to: rendered,
+                            between: previousBlock,
+                            and: block,
+                            font: font,
+                            textColor: textColor
+                        )
+                    }
+                    if !block.prefix.isEmpty {
+                        rendered.append(
+                            NSAttributedString(
+                                string: block.prefix,
+                                attributes: [
+                                    .font: blockFont(base: font, block: block),
+                                    .foregroundColor: textColor,
+                                ]
+                            )
+                        )
+                    }
+                    previousBlock = block
+                }
+                let intent = run.inlinePresentationIntent
+                var attributes: [NSAttributedString.Key: Any] = [
+                    .font: renderedFont(
+                        base: blockFont(base: font, block: block),
+                        intent: intent
+                    ),
+                    .foregroundColor: textColor,
+                ]
+                if intent?.contains(.strikethrough) == true {
+                    attributes[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
+                }
+                if let link = run.link {
+                    attributes[.link] = link
+                    attributes[.foregroundColor] = NSColor.linkColor
+                    attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
+                }
+                rendered.append(
+                    NSAttributedString(
+                        string: String(markdown[run.range].characters),
+                        attributes: attributes
+                    )
+                )
+            }
+            return rendered.length == 0 && !source.isEmpty ? fallback : rendered
+        } catch {
+            return fallback
+        }
+    }
+
+    private struct MarkdownBlock {
+        enum Kind {
+            case paragraph
+            case heading(Int)
+            case unorderedItem
+            case orderedItem(Int)
+            case quote
+            case code
+        }
+
+        let identity: Int?
+        let kind: Kind
+        let listDepth: Int
+
+        var isListItem: Bool {
+            switch kind {
+            case .unorderedItem, .orderedItem:
+                true
+            default:
+                false
+            }
+        }
+
+        var prefix: String {
+            let indentation = String(repeating: "  ", count: max(0, listDepth - 1))
+            return switch kind {
+            case .unorderedItem:
+                indentation + "- "
+            case let .orderedItem(ordinal):
+                indentation + "\(ordinal). "
+            case .quote:
+                "> "
+            default:
+                ""
+            }
+        }
+    }
+
+    private static func markdownBlock(
+        for intent: PresentationIntent?
+    ) -> MarkdownBlock {
+        guard let intent, let leaf = intent.components.first else {
+            return MarkdownBlock(identity: nil, kind: .paragraph, listDepth: 0)
+        }
+        var kind: MarkdownBlock.Kind = .paragraph
+        var listOrdinal: Int?
+        var nearestListIsUnordered: Bool?
+        var listDepth = 0
+        for component in intent.components {
+            switch component.kind {
+            case let .header(level):
+                kind = .heading(level)
+            case let .listItem(ordinal):
+                listOrdinal = ordinal
+            case .unorderedList:
+                if nearestListIsUnordered == nil {
+                    nearestListIsUnordered = true
+                }
+                listDepth += 1
+            case .orderedList:
+                if nearestListIsUnordered == nil {
+                    nearestListIsUnordered = false
+                }
+                listDepth += 1
+            case .blockQuote:
+                kind = .quote
+            case .codeBlock:
+                kind = .code
+            default:
+                break
+            }
+        }
+        if let listOrdinal {
+            kind = nearestListIsUnordered == true
+                ? .unorderedItem
+                : .orderedItem(listOrdinal)
+        }
+        return MarkdownBlock(
+            identity: leaf.identity,
+            kind: kind,
+            listDepth: listDepth
+        )
+    }
+
+    private static func blockFont(base: NSFont, block: MarkdownBlock) -> NSFont {
+        switch block.kind {
+        case let .heading(level):
+            let increment = max(1, 6 - CGFloat(level) * 1.25)
+            return .systemFont(ofSize: base.pointSize + increment, weight: .bold)
+        case .code:
+            return .monospacedSystemFont(ofSize: base.pointSize, weight: .regular)
+        default:
+            return base
+        }
+    }
+
+    private static func appendSeparator(
+        to rendered: NSMutableAttributedString,
+        between previous: MarkdownBlock,
+        and next: MarkdownBlock,
+        font: NSFont,
+        textColor: NSColor
+    ) {
+        let desiredCount = previous.isListItem && next.isListItem ? 1 : 2
+        let existingCount = rendered.string.reversed().prefix { $0 == "\n" }.count
+        guard existingCount < desiredCount else { return }
+        rendered.append(
+            NSAttributedString(
+                string: String(repeating: "\n", count: desiredCount - existingCount),
+                attributes: [
+                    .font: font,
+                    .foregroundColor: textColor,
+                ]
+            )
+        )
+    }
+
+    private static func renderedFont(
+        base: NSFont,
+        intent: InlinePresentationIntent?
+    ) -> NSFont {
+        let isBold = intent?.contains(.stronglyEmphasized) == true
+        let isItalic = intent?.contains(.emphasized) == true
+        var rendered = intent?.contains(.code) == true
+            ? NSFont.monospacedSystemFont(
+                ofSize: base.pointSize,
+                weight: isBold ? .semibold : .regular
+            )
+            : base
+        var traits: NSFontTraitMask = []
+        if isBold && intent?.contains(.code) != true {
+            traits.insert(.boldFontMask)
+        }
+        if isItalic {
+            traits.insert(.italicFontMask)
+        }
+        if !traits.isEmpty {
+            rendered = NSFontManager.shared.convert(rendered, toHaveTrait: traits)
+        }
+        return rendered
+    }
+}
+
 enum GlobalShortcutChoice: String, CaseIterable, Identifiable {
     case controlOptionSpace
     case commandShiftSpace
@@ -445,6 +664,8 @@ final class QuickMenuPanel: NSPanel {
 
 @MainActor
 final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
+    private static let autoScrollThreshold: CGFloat = 24
+
     var onClose: (() -> Void)?
     var onCapture: (() -> Void)?
     var onChooseFiles: (() -> Void)?
@@ -466,6 +687,7 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
     private let retryButton = NSButton(title: "재시도", target: nil, action: nil)
     private let cancelButton = NSButton(title: "취소", target: nil, action: nil)
     private var lastAnnouncedStatus = ""
+    private var renderedMessages: [ChatMessage] = []
 
     override func loadView() {
         let background = NSVisualEffectView()
@@ -654,7 +876,7 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
         if composer.stringValue != state.draftText {
             composer.stringValue = state.draftText
         }
-        rebuildTranscript(state.messages)
+        renderTranscript(state.messages)
         rebuildAttachments(state.draftAttachments)
 
         let isBusy: Bool
@@ -714,6 +936,50 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
         onDraftChanged?(composer.stringValue)
     }
 
+    private func renderTranscript(_ messages: [ChatMessage]) {
+        let shouldAutoScroll = isNearTranscriptBottom
+        if canUpdateStreamingAssistant(with: messages),
+           let message = messages.last,
+           let row = transcriptStack.arrangedSubviews.last as? ChatMessageRowView {
+            row.render(message)
+            renderedMessages = messages
+            finishTranscriptUpdate(autoScroll: shouldAutoScroll)
+            return
+        }
+
+        rebuildTranscript(messages)
+        renderedMessages = messages
+        finishTranscriptUpdate(autoScroll: shouldAutoScroll)
+    }
+
+    private func canUpdateStreamingAssistant(with messages: [ChatMessage]) -> Bool {
+        guard messages.count == renderedMessages.count,
+              messages.last?.role == .assistant else {
+            return false
+        }
+        return messages.map(\.id) == renderedMessages.map(\.id)
+    }
+
+    private var isNearTranscriptBottom: Bool {
+        guard let document = transcriptScroll.documentView else { return true }
+        let distance = document.bounds.maxY
+            - transcriptScroll.contentView.bounds.maxY
+        return distance <= Self.autoScrollThreshold
+    }
+
+    private func finishTranscriptUpdate(autoScroll: Bool) {
+        view.layoutSubtreeIfNeeded()
+        guard autoScroll else { return }
+        let origin = transcriptScroll.contentView.bounds.origin
+        DispatchQueue.main.async { [weak self] in
+            guard let self,
+                  self.transcriptScroll.contentView.bounds.origin == origin else {
+                return
+            }
+            self.scrollToLatest()
+        }
+    }
+
     private func rebuildTranscript(_ messages: [ChatMessage]) {
         transcriptStack.arrangedSubviews.forEach {
             transcriptStack.removeArrangedSubview($0)
@@ -732,70 +998,11 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
             empty.widthAnchor.constraint(equalTo: transcriptStack.widthAnchor, constant: -8).isActive = true
         } else {
             for message in messages {
-                let row = makeMessageRow(message)
+                let row = ChatMessageRowView(message: message)
                 transcriptStack.addArrangedSubview(row)
                 row.widthAnchor.constraint(equalTo: transcriptStack.widthAnchor, constant: -8).isActive = true
             }
         }
-        view.layoutSubtreeIfNeeded()
-        DispatchQueue.main.async { [weak self] in
-            self?.scrollToLatest()
-        }
-    }
-
-    private func makeMessageRow(_ message: ChatMessage) -> NSView {
-        let bubble = NSView()
-        bubble.wantsLayer = true
-        bubble.layer?.cornerRadius = 13
-        bubble.layer?.backgroundColor = (
-            message.role == .user
-                ? NSColor.controlAccentColor.withAlphaComponent(0.18)
-                : NSColor.controlBackgroundColor.withAlphaComponent(0.86)
-        ).cgColor
-        bubble.translatesAutoresizingMaskIntoConstraints = false
-
-        let content: NSView
-        if message.isLoading {
-            let progress = NSProgressIndicator()
-            progress.style = .spinning
-            progress.controlSize = .small
-            progress.startAnimation(nil)
-            let label = NSTextField(labelWithString: "응답을 기다리는 중…")
-            label.font = .systemFont(ofSize: 13)
-            let loading = NSStackView(views: [progress, label])
-            loading.orientation = .horizontal
-            loading.alignment = .centerY
-            loading.spacing = 7
-            content = loading
-        } else {
-            let label = NSTextField(wrappingLabelWithString: message.visibleText)
-            label.font = .systemFont(ofSize: 13)
-            label.maximumNumberOfLines = 0
-            label.isSelectable = true
-            content = label
-        }
-        content.translatesAutoresizingMaskIntoConstraints = false
-        bubble.addSubview(content)
-        NSLayoutConstraint.activate([
-            content.leadingAnchor.constraint(equalTo: bubble.leadingAnchor, constant: 11),
-            content.trailingAnchor.constraint(equalTo: bubble.trailingAnchor, constant: -11),
-            content.topAnchor.constraint(equalTo: bubble.topAnchor, constant: 8),
-            content.bottomAnchor.constraint(equalTo: bubble.bottomAnchor, constant: -8),
-            bubble.widthAnchor.constraint(lessThanOrEqualToConstant: 300),
-        ])
-
-        let spacer = NSView()
-        let row = NSStackView(
-            views: message.role == .user ? [spacer, bubble] : [bubble, spacer]
-        )
-        row.orientation = .horizontal
-        row.alignment = .top
-        row.setAccessibilityElement(true)
-        row.setAccessibilityRole(.group)
-        let role = message.role == .user ? "사용자" : "어시스턴트"
-        let value = message.isLoading ? "응답을 기다리는 중" : message.visibleText
-        row.setAccessibilityLabel("\(role): \(value)")
-        return row
     }
 
     private func rebuildAttachments(_ attachments: [ChatDraftAttachment]) {
@@ -881,6 +1088,91 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
             return
         }
         onRemoveAttachment?(id)
+    }
+}
+
+@MainActor
+private final class ChatMessageRowView: NSStackView {
+    private let bubble = NSView()
+    private let spacer = NSView()
+    private var messageContent: NSView?
+
+    init(message: ChatMessage) {
+        super.init(frame: .zero)
+        orientation = .horizontal
+        alignment = .top
+        setAccessibilityElement(true)
+        setAccessibilityRole(.group)
+
+        bubble.wantsLayer = true
+        bubble.layer?.cornerRadius = 13
+        bubble.layer?.backgroundColor = (
+            message.role == .user
+                ? NSColor.controlAccentColor.withAlphaComponent(0.18)
+                : NSColor.controlBackgroundColor.withAlphaComponent(0.86)
+        ).cgColor
+        bubble.translatesAutoresizingMaskIntoConstraints = false
+        bubble.widthAnchor.constraint(lessThanOrEqualToConstant: 300).isActive = true
+        if message.role == .user {
+            addArrangedSubview(spacer)
+            addArrangedSubview(bubble)
+        } else {
+            addArrangedSubview(bubble)
+            addArrangedSubview(spacer)
+        }
+        render(message)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func render(_ message: ChatMessage) {
+        messageContent?.removeFromSuperview()
+
+        let content: NSView
+        if message.isLoading {
+            let progress = NSProgressIndicator()
+            progress.style = .spinning
+            progress.controlSize = .small
+            progress.startAnimation(nil)
+            let label = NSTextField(labelWithString: "응답을 기다리는 중…")
+            label.font = .systemFont(ofSize: 13)
+            let loading = NSStackView(views: [progress, label])
+            loading.orientation = .horizontal
+            loading.alignment = .centerY
+            loading.spacing = 7
+            content = loading
+        } else {
+            let label = NSTextField(wrappingLabelWithString: "")
+            label.font = .systemFont(ofSize: 13)
+            label.maximumNumberOfLines = 0
+            label.isSelectable = true
+            if message.role == .assistant {
+                label.attributedStringValue = AssistantMarkdownRenderer.render(
+                    message.visibleText,
+                    font: .systemFont(ofSize: 13),
+                    textColor: .labelColor
+                )
+            } else {
+                label.stringValue = message.visibleText
+            }
+            content = label
+        }
+        content.translatesAutoresizingMaskIntoConstraints = false
+        bubble.addSubview(content)
+        NSLayoutConstraint.activate([
+            content.leadingAnchor.constraint(equalTo: bubble.leadingAnchor, constant: 11),
+            content.trailingAnchor.constraint(equalTo: bubble.trailingAnchor, constant: -11),
+            content.topAnchor.constraint(equalTo: bubble.topAnchor, constant: 8),
+            content.bottomAnchor.constraint(equalTo: bubble.bottomAnchor, constant: -8),
+        ])
+        messageContent = content
+
+        let role = message.role == .user ? "사용자" : "어시스턴트"
+        let value = message.isLoading ? "응답을 기다리는 중" : message.visibleText
+        setAccessibilityLabel("\(role): \(value)")
     }
 }
 
