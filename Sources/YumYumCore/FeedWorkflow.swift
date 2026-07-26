@@ -30,17 +30,20 @@ public struct FeedInput: Equatable, Sendable {
     public let fileURLs: [URL]
     public let temporaryFileURLs: Set<URL>
     public let cleanupTemporaryFilesAfterSubmit: Bool
+    public let sourceRect: CGRect?
 
     public init(
         text: String = "",
         fileURLs: [URL] = [],
         temporaryFileURLs: Set<URL> = [],
-        cleanupTemporaryFilesAfterSubmit: Bool = true
+        cleanupTemporaryFilesAfterSubmit: Bool = true,
+        sourceRect: CGRect? = nil
     ) {
         self.text = text
         self.fileURLs = fileURLs
         self.temporaryFileURLs = temporaryFileURLs
         self.cleanupTemporaryFilesAfterSubmit = cleanupTemporaryFilesAfterSubmit
+        self.sourceRect = sourceRect
     }
 }
 
@@ -180,10 +183,19 @@ public struct FeedValidator: Sendable {
 public struct FeedPreview: Equatable, Sendable {
     public let label: String
     public let attachmentCount: Int
+    public let fileURLs: [URL]
+    public let sourceRect: CGRect?
 
-    public init(label: String, attachmentCount: Int) {
+    public init(
+        label: String,
+        attachmentCount: Int,
+        fileURLs: [URL] = [],
+        sourceRect: CGRect? = nil
+    ) {
         self.label = label
         self.attachmentCount = attachmentCount
+        self.fileURLs = fileURLs
+        self.sourceRect = sourceRect
     }
 }
 
@@ -194,6 +206,13 @@ public enum FeedStatus: Equatable, Sendable {
     case sending
     case completed(String)
     case failed(String)
+    case cancelled
+}
+
+public enum FeedMouthPresentation: Equatable, Sendable {
+    case resting
+    case open
+    case reducedMotion
 }
 
 public protocol PromptSending: Sendable {
@@ -210,9 +229,9 @@ public protocol FeedSubmitting: Sendable {
 }
 
 public protocol FeedFeedback: Sendable {
-    func setMouthOpen(_ isOpen: Bool) async
+    func setMouthPresentation(_ presentation: FeedMouthPresentation) async
     func animate(_ preview: FeedPreview, reduceMotion: Bool) async
-    func setStatus(_ status: FeedStatus) async
+    func setStatus(_ update: FeedStatusUpdate) async
 }
 
 public enum FeedWorkflowError: Error, Equatable, LocalizedError, Sendable {
@@ -243,6 +262,7 @@ public actor FeedWorkflow: FeedSubmitting {
         _ input: FeedInput,
         reduceMotion: Bool
     ) async throws -> PromptResponse {
+        let generation = UUID()
         defer {
             if input.cleanupTemporaryFilesAfterSubmit {
                 for url in input.temporaryFileURLs {
@@ -259,19 +279,27 @@ public actor FeedWorkflow: FeedSubmitting {
         }
 
         try Task.checkCancellation()
-        await feedback.setStatus(.validating)
+        await feedback.setStatus(
+            FeedStatusUpdate(generation: generation, status: .validating)
+        )
         do {
             try Task.checkCancellation()
         } catch {
-            await feedback.setMouthOpen(false)
-            await feedback.setStatus(.failed("입력 처리를 취소했습니다."))
+            await feedback.setStatus(
+                FeedStatusUpdate(generation: generation, status: .cancelled)
+            )
             throw error
         }
         let validated: ValidatedFeed
         do {
             validated = try validator.validate(input)
         } catch {
-            await feedback.setStatus(.failed((error as? LocalizedError)?.errorDescription ?? "입력을 확인할 수 없습니다."))
+            await feedback.setStatus(
+                FeedStatusUpdate(
+                    generation: generation,
+                    status: .failed(UserFacingErrorRedactor.message(for: error))
+                )
+            )
             throw error
         }
 
@@ -285,43 +313,71 @@ public actor FeedWorkflow: FeedSubmitting {
         }
         do {
             try Task.checkCancellation()
-            await feedback.setStatus(.animating(previewLabel))
+            await feedback.setStatus(
+                FeedStatusUpdate(
+                    generation: generation,
+                    status: .animating(previewLabel)
+                )
+            )
             try Task.checkCancellation()
-            await feedback.setMouthOpen(true)
+            await feedback.setMouthPresentation(
+                reduceMotion ? .reducedMotion : .open
+            )
             try Task.checkCancellation()
             await feedback.animate(
                 FeedPreview(
                     label: previewLabel,
-                    attachmentCount: validated.attachments.count
+                    attachmentCount: validated.attachments.count,
+                    fileURLs: validated.attachments.map(\.url),
+                    sourceRect: input.sourceRect
                 ),
                 reduceMotion: reduceMotion
             )
             try Task.checkCancellation()
         } catch {
-            await feedback.setMouthOpen(false)
-            await feedback.setStatus(.failed("입력 처리를 취소했습니다."))
+            await feedback.setMouthPresentation(.resting)
+            await feedback.setStatus(
+                FeedStatusUpdate(generation: generation, status: .cancelled)
+            )
             throw error
         }
-        await feedback.setMouthOpen(false)
+        if !reduceMotion {
+            await feedback.setMouthPresentation(.resting)
+        }
 
         let request = PromptRequest(
             text: validated.text,
             attachments: validated.attachments
         )
-        await feedback.setStatus(.sending)
+        await feedback.setStatus(
+            FeedStatusUpdate(generation: generation, status: .sending)
+        )
         do {
             try Task.checkCancellation()
             let response = try await sender.send(request)
             try Task.checkCancellation()
-            await feedback.setStatus(.completed(response.text))
+            await feedback.setMouthPresentation(.resting)
+            await feedback.setStatus(
+                FeedStatusUpdate(
+                    generation: generation,
+                    status: .completed(response.text)
+                )
+            )
             return response
         } catch is CancellationError {
-            await feedback.setMouthOpen(false)
-            await feedback.setStatus(.failed("입력 처리를 취소했습니다."))
+            await feedback.setMouthPresentation(.resting)
+            await feedback.setStatus(
+                FeedStatusUpdate(generation: generation, status: .cancelled)
+            )
             throw CancellationError()
         } catch {
-            await feedback.setMouthOpen(false)
-            await feedback.setStatus(.failed((error as? LocalizedError)?.errorDescription ?? "전송하지 못했습니다."))
+            await feedback.setMouthPresentation(.resting)
+            await feedback.setStatus(
+                FeedStatusUpdate(
+                    generation: generation,
+                    status: .failed(UserFacingErrorRedactor.message(for: error))
+                )
+            )
             throw error
         }
     }

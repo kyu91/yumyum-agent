@@ -4,11 +4,18 @@ public struct ChatDraftAttachment: Identifiable, Equatable, Sendable {
     public let id: UUID
     public let url: URL
     public let isTemporary: Bool
+    public let sourceRect: CGRect?
 
-    public init(id: UUID = UUID(), url: URL, isTemporary: Bool) {
+    public init(
+        id: UUID = UUID(),
+        url: URL,
+        isTemporary: Bool,
+        sourceRect: CGRect? = nil
+    ) {
         self.id = id
         self.url = url.standardizedFileURL
         self.isTemporary = isTemporary
+        self.sourceRect = sourceRect
     }
 
     public var displayName: String {
@@ -160,7 +167,8 @@ public struct ChatBubbleState: Sendable {
             temporaryFileURLs: Set(
                 attachments.lazy.filter(\.isTemporary).map(\.url)
             ),
-            cleanupTemporaryFilesAfterSubmit: false
+            cleanupTemporaryFilesAfterSubmit: false,
+            sourceRect: attachments.compactMap(\.sourceRect).first
         )
         messages.append(
             ChatMessage(
@@ -174,6 +182,45 @@ public struct ChatBubbleState: Sendable {
         )
         draftText = ""
         draftAttachments.removeAll()
+        phase = .sending(id)
+        return ChatSubmission(id: id, input: input)
+    }
+
+    public mutating func beginAttachmentMeal(
+        _ attachments: [ChatDraftAttachment],
+        id: UUID = UUID()
+    ) throws -> ChatSubmission {
+        if case .sending = phase {
+            throw ChatBubbleStateError.busy
+        }
+        if case .capturing = phase {
+            throw ChatBubbleStateError.busy
+        }
+        guard !attachments.isEmpty else {
+            throw ChatBubbleStateError.blankDraft
+        }
+
+        var seen: Set<URL> = []
+        let uniqueAttachments = attachments.filter { seen.insert($0.url).inserted }
+        let input = FeedInput(
+            text: conversationText(currentUserText: ""),
+            fileURLs: uniqueAttachments.map(\.url),
+            temporaryFileURLs: Set(
+                uniqueAttachments.lazy.filter(\.isTemporary).map(\.url)
+            ),
+            cleanupTemporaryFilesAfterSubmit: false,
+            sourceRect: uniqueAttachments.compactMap(\.sourceRect).first
+        )
+        messages.append(
+            ChatMessage(
+                role: .user,
+                text: "",
+                attachmentNames: uniqueAttachments.map(\.displayName)
+            )
+        )
+        messages.append(
+            ChatMessage(role: .assistant, text: "", isLoading: true)
+        )
         phase = .sending(id)
         return ChatSubmission(id: id, input: input)
     }
@@ -206,7 +253,7 @@ public struct ChatBubbleState: Sendable {
         }
         excludeLatestUserMessageFromContext()
         messages.removeAll { $0.role == .assistant && $0.isLoading }
-        phase = .failed(message)
+        phase = .failed(UserFacingErrorRedactor.sanitize(message))
     }
 
     public mutating func beginRetry(id: UUID) throws {
@@ -239,14 +286,14 @@ public struct ChatBubbleState: Sendable {
         case .cancelled:
             phase = .idle
         case .permissionDenied:
-            phase = .failed("화면 캡처 권한이 필요합니다.")
-        case let .failed(message):
-            phase = .failed(message)
+            phase = .failed(UserFacingErrorCategory.capturePermission.message)
+        case .failed:
+            phase = .failed(UserFacingErrorCategory.captureFailure.message)
         }
     }
 
     public mutating func setFailure(_ message: String) {
-        phase = .failed(message)
+        phase = .failed(UserFacingErrorRedactor.sanitize(message))
     }
 
     public mutating func discardDraftAttachments() -> [ChatDraftAttachment] {

@@ -73,7 +73,7 @@ public struct QuickMenuActionState: Equatable, Sendable {
     public init(snapshot: AgentRegistrySnapshot, isBusy: Bool) {
         isInputEnabled = snapshot.canSend && !isBusy
         if let selected = snapshot.selectedInstallation {
-            statusText = "\(selected.definitionID.displayName) 준비됨 · \(selected.path ?? "")"
+            statusText = "\(selected.definitionID.displayName) 준비됨"
         } else if snapshot.requiresExplicitReselection {
             statusText = "기존 에이전트를 사용할 수 없습니다. 다시 선택하세요."
         } else {
