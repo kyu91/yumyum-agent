@@ -5,17 +5,20 @@ public struct ProcessCommand: Equatable, Sendable {
     public let arguments: [String]
     public let environment: [String: String]?
     public let currentDirectoryURL: URL?
+    public let outputByteLimit: Int?
 
     public init(
         executableURL: URL,
         arguments: [String] = [],
         environment: [String: String]? = nil,
-        currentDirectoryURL: URL? = nil
+        currentDirectoryURL: URL? = nil,
+        outputByteLimit: Int? = nil
     ) {
         self.executableURL = executableURL
         self.arguments = arguments
         self.environment = environment
         self.currentDirectoryURL = currentDirectoryURL
+        self.outputByteLimit = outputByteLimit
     }
 }
 

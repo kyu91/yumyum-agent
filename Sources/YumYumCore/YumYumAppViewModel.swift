@@ -34,19 +34,62 @@ public final class YumYumAppViewModel: ObservableObject {
         }
     }
     @Published public private(set) var probeState: FixtureProbeState = .idle
+    @Published public private(set) var agentSnapshot = AgentRegistrySnapshot(
+        installations: [],
+        selection: .unselected
+    )
+    @Published public private(set) var isDiscoveringAgents = false
 
     public let fixturePath: String
+    public let agentRegistry: AgentRegistry
+    public let agentRuntime: AgentRuntime
 
     private let fixtureProbe: any FixtureProbing
     private let connectionChecker: any HermesConnectionChecking
 
     public init(
         fixtureProbe: any FixtureProbing,
-        connectionChecker: any HermesConnectionChecking = HermesConnectionService()
+        connectionChecker: any HermesConnectionChecking = HermesConnectionService(),
+        agentRegistry: AgentRegistry = AgentRegistry()
     ) {
         self.fixtureProbe = fixtureProbe
         self.connectionChecker = connectionChecker
+        self.agentRegistry = agentRegistry
+        agentRuntime = AgentRuntime(
+            selection: agentRegistry,
+            connectors: [
+                HermesACPConnector(transport: ACPProcessTransport()),
+                OpenCodeConnector(),
+                CodexConnector(),
+                ClaudeCodeConnector(),
+            ]
+        )
         fixturePath = fixtureProbe.fixturePath
+    }
+
+    public var canSendPrompt: Bool {
+        agentSnapshot.canSend
+    }
+
+    public func refreshAgents(trigger: AgentRefreshTrigger) async {
+        isDiscoveringAgents = true
+        agentSnapshot = await agentRegistry.refresh(trigger: trigger)
+        isDiscoveringAgents = false
+    }
+
+    public func selectAgent(
+        _ definitionID: AgentDefinitionID,
+        path: String
+    ) async throws {
+        agentSnapshot = try await agentRegistry.select(definitionID, path: path)
+    }
+
+    public func addExplicitAgentPath(
+        _ path: String,
+        for definitionID: AgentDefinitionID
+    ) async {
+        await agentRegistry.addExplicitPath(path, for: definitionID)
+        await refreshAgents(trigger: .manualRescan)
     }
 
     public var hermesPathStatus: HermesPathStatus {

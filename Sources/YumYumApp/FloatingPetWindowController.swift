@@ -5,8 +5,13 @@ import YumYumCore
 @MainActor
 final class YumYumAppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     @Published private(set) var petVisibility = FloatingPetVisibilityPolicy()
+    @Published private(set) var shortcutChoice = GlobalShortcutChoice.load()
 
     private var petWindowController: FloatingPetWindowController?
+    private var quickMenuController: QuickMenuPanelController?
+    private var shortcutController: GlobalShortcutController?
+    private var feedFeedback: AppFeedFeedback?
+    private weak var viewModel: YumYumAppViewModel?
     private var mainWindow: NSWindow?
     private var openMainWindowAction: (@MainActor () -> Void)?
 
@@ -19,9 +24,10 @@ final class YumYumAppDelegate: NSObject, NSApplicationDelegate, ObservableObject
         )
 
         let controller = FloatingPetWindowController { [weak self] in
-            self?.openMainWindow()
+            self?.toggleQuickMenu()
         }
         petWindowController = controller
+        assembleQuickMenuIfPossible()
         if petVisibility.isVisible {
             controller.show()
         }
@@ -30,6 +36,7 @@ final class YumYumAppDelegate: NSObject, NSApplicationDelegate, ObservableObject
 
     func applicationWillTerminate(_ notification: Notification) {
         NotificationCenter.default.removeObserver(self)
+        shortcutController = nil
     }
 
     func setPetVisible(_ isVisible: Bool) {
@@ -37,7 +44,73 @@ final class YumYumAppDelegate: NSObject, NSApplicationDelegate, ObservableObject
         if isVisible {
             petWindowController?.show()
         } else {
+            quickMenuController?.hide()
             petWindowController?.hide()
+        }
+    }
+
+    func configure(viewModel: YumYumAppViewModel) {
+        self.viewModel = viewModel
+        assembleQuickMenuIfPossible()
+    }
+
+    private func assembleQuickMenuIfPossible() {
+        guard quickMenuController == nil,
+              let viewModel,
+              let petWindowController else {
+            return
+        }
+
+        let feedback = AppFeedFeedback(petController: petWindowController)
+        let workflow = FeedWorkflow(
+            sender: viewModel.agentRuntime,
+            feedback: feedback
+        )
+        let quickMenuController = QuickMenuPanelController(
+            petController: petWindowController,
+            viewModel: viewModel,
+            workflow: workflow
+        )
+        feedback.quickMenuController = quickMenuController
+        self.feedFeedback = feedback
+        self.quickMenuController = quickMenuController
+        shortcutController = GlobalShortcutController(
+            choice: shortcutChoice
+        ) { [weak self] in
+            self?.showQuickMenu()
+        }
+    }
+
+    func setShortcutChoice(_ choice: GlobalShortcutChoice) {
+        shortcutChoice = choice
+        choice.save()
+        shortcutController?.update(choice: choice)
+    }
+
+    func showQuickMenu() {
+        guard petVisibility.isVisible,
+              let quickMenuController,
+              let viewModel else {
+            return
+        }
+        quickMenuController.showCheckingStatus()
+        quickMenuController.show()
+        Task { @MainActor [weak quickMenuController, weak viewModel] in
+            guard let quickMenuController, let viewModel else { return }
+            await viewModel.refreshAgents(trigger: .quickMenuOpened)
+            quickMenuController.update(snapshot: viewModel.agentSnapshot)
+        }
+    }
+
+    private func toggleQuickMenu() {
+        guard let quickMenuController else {
+            openMainWindow()
+            return
+        }
+        if quickMenuController.isVisible {
+            quickMenuController.hide()
+        } else {
+            showQuickMenu()
         }
     }
 
@@ -77,10 +150,11 @@ final class FloatingPetWindowController: NSObject {
     )
 
     let panel: FloatingPetPanel
+    let presentationModel = PetPresentationModel()
 
     private let layout = FloatingPetLayout()
 
-    init(onOpenMainWindow: @escaping @MainActor () -> Void) {
+    init(onClick: @escaping @MainActor () -> Void) {
         let screen = Self.screen(containing: NSEvent.mouseLocation)
             ?? NSScreen.main
             ?? NSScreen.screens.first
@@ -116,8 +190,11 @@ final class FloatingPetWindowController: NSObject {
         ]
 
         let hostingView = FloatingPetHostingView(
-            rootView: YumYumPetView(onOpenMainWindow: onOpenMainWindow),
-            onClick: onOpenMainWindow
+            rootView: YumYumPetView(
+                presentationModel: presentationModel,
+                onClick: onClick
+            ),
+            onClick: onClick
         )
         hostingView.onDragEnded = { [weak self] in
             self?.clampToVisibleScreen()
@@ -143,6 +220,19 @@ final class FloatingPetWindowController: NSObject {
 
     func hide() {
         panel.orderOut(nil)
+    }
+
+    func setMouthOpen(_ isOpen: Bool) {
+        presentationModel.isMouthOpen = isOpen
+    }
+
+    var mouthTargetFrame: CGRect {
+        CGRect(
+            x: panel.frame.midX - 12,
+            y: panel.frame.midY - 18,
+            width: 24,
+            height: 18
+        )
     }
 
     @objc
@@ -188,6 +278,11 @@ final class FloatingPetWindowController: NSObject {
         }
         return intersection.width * intersection.height
     }
+}
+
+@MainActor
+final class PetPresentationModel: ObservableObject {
+    @Published var isMouthOpen = false
 }
 
 final class FloatingPetPanel: NSPanel {
@@ -276,7 +371,8 @@ private struct YumYumPetView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovered = false
 
-    let onOpenMainWindow: @MainActor () -> Void
+    @ObservedObject var presentationModel: PetPresentationModel
+    let onClick: @MainActor () -> Void
 
     var body: some View {
         ZStack {
@@ -302,10 +398,10 @@ private struct YumYumPetView: View {
         .onHover { isHovered = $0 }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("YumYum 플로팅 펫")
-        .accessibilityHint("클릭하면 YumYum 창을 엽니다. 드래그하여 이동할 수 있습니다.")
+        .accessibilityHint("클릭하면 빠른 메뉴를 엽니다. 드래그하여 이동할 수 있습니다.")
         .accessibilityAddTraits(.isButton)
         .accessibilityAction {
-            onOpenMainWindow()
+            onClick()
         }
     }
 
@@ -424,14 +520,25 @@ private struct YumYumPetView: View {
             )
         }
 
-        var smile = Path()
-        smile.move(to: point(43, 49))
-        smile.addQuadCurve(to: point(53, 49), control: point(48, 56))
-        context.stroke(
-            smile,
-            with: .color(outline),
-            style: StrokeStyle(lineWidth: 2 * scale, lineCap: .round)
-        )
+        if presentationModel.isMouthOpen {
+            context.fill(
+                Path(ellipseIn: rect(39, 48, 18, 16)),
+                with: .color(outline)
+            )
+            context.fill(
+                Path(ellipseIn: rect(43, 56, 10, 5)),
+                with: .color(Color(red: 1, green: 0.43, blue: 0.37))
+            )
+        } else {
+            var smile = Path()
+            smile.move(to: point(43, 49))
+            smile.addQuadCurve(to: point(53, 49), control: point(48, 56))
+            context.stroke(
+                smile,
+                with: .color(outline),
+                style: StrokeStyle(lineWidth: 2 * scale, lineCap: .round)
+            )
+        }
 
         for footX in [24.0, 60.0] {
             let foot = Path(ellipseIn: rect(footX, 78, 13, 8))

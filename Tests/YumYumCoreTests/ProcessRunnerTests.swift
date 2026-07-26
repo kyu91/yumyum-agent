@@ -5,6 +5,21 @@ import Testing
 @Suite(.serialized)
 struct ProcessRunnerTests {
     @Test
+    func capsCombinedProcessOutputWhileContinuingToDrainBothStreams() async throws {
+        let result = try await ProcessRunner().run(
+            ProcessCommand(
+                executableURL: fixtureURL,
+                arguments: ["flood"],
+                outputByteLimit: 8_192
+            ),
+            timeout: .seconds(5)
+        )
+
+        #expect(result.standardOutput.count + result.standardError.count <= 8_192)
+        #expect(result.termination == .exited(status: 0))
+    }
+
+    @Test
     func capturesBothStreamsAndNonzeroExitStatus() async throws {
         let result = try await ProcessRunner().run(
             ProcessCommand(executableURL: fixtureURL, arguments: ["emit"]),
