@@ -8,10 +8,12 @@ enum AssistantMarkdownRenderer {
     static func render(
         _ source: String,
         font: NSFont,
-        textColor: NSColor
+        textColor: NSColor,
+        isStreaming: Bool = false
     ) -> NSAttributedString {
+        let renderedSource = isStreaming ? streamingSource(source) : source
         let fallback = NSAttributedString(
-            string: source,
+            string: renderedSource,
             attributes: [
                 .font: font,
                 .foregroundColor: textColor,
@@ -20,7 +22,7 @@ enum AssistantMarkdownRenderer {
 
         do {
             let markdown = try AttributedString(
-                markdown: source,
+                markdown: renderedSource,
                 options: .init(interpretedSyntax: .full)
             )
             let rendered = NSMutableAttributedString()
@@ -73,10 +75,58 @@ enum AssistantMarkdownRenderer {
                     )
                 )
             }
-            return rendered.length == 0 && !source.isEmpty ? fallback : rendered
+            return rendered.length == 0 && !renderedSource.isEmpty ? fallback : rendered
         } catch {
             return fallback
         }
+    }
+
+    private static func streamingSource(_ source: String) -> String {
+        let characters = Array(source)
+        var hidden: Set<Int> = []
+
+        let asterisks = characters.indices.filter { characters[$0] == "*" }
+        if !asterisks.count.isMultiple(of: 4) {
+            hidden.formUnion(asterisks)
+        }
+
+        let lineStart = (characters.lastIndex(of: "\n") ?? -1) + 1
+        var headingEnd = lineStart
+        while headingEnd < characters.count,
+              headingEnd - lineStart < 6,
+              characters[headingEnd] == "#" {
+            headingEnd += 1
+        }
+        if headingEnd > lineStart,
+           characters[headingEnd...].allSatisfy(\.isWhitespace) {
+            hidden.formUnion(lineStart..<characters.count)
+        }
+
+        var backtickRuns: [Int: [Range<Int>]] = [:]
+        var index = 0
+        while index < characters.count {
+            guard characters[index] == "`" else {
+                index += 1
+                continue
+            }
+            let start = index
+            while index < characters.count, characters[index] == "`" {
+                index += 1
+            }
+            let run = start..<index
+            if run.count < 3 {
+                backtickRuns[run.count, default: []].append(run)
+            }
+        }
+        for runs in backtickRuns.values where !runs.count.isMultiple(of: 2) {
+            hidden.formUnion(runs.last ?? 0..<0)
+        }
+
+        return String(
+            characters.enumerated().compactMap { offset, character in
+                hidden.contains(offset) ? nil : character
+            }
+        )
     }
 
     private struct MarkdownBlock {
@@ -876,7 +926,13 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
         if composer.stringValue != state.draftText {
             composer.stringValue = state.draftText
         }
-        renderTranscript(state.messages)
+        let streamingAssistantID = state.isSending
+            ? state.messages.last(where: { $0.role == .assistant })?.id
+            : nil
+        renderTranscript(
+            state.messages,
+            streamingAssistantID: streamingAssistantID
+        )
         rebuildAttachments(state.draftAttachments)
 
         let isBusy: Bool
@@ -936,18 +992,24 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
         onDraftChanged?(composer.stringValue)
     }
 
-    private func renderTranscript(_ messages: [ChatMessage]) {
+    private func renderTranscript(
+        _ messages: [ChatMessage],
+        streamingAssistantID: UUID?
+    ) {
         let shouldAutoScroll = isNearTranscriptBottom
         if canUpdateStreamingAssistant(with: messages),
            let message = messages.last,
            let row = transcriptStack.arrangedSubviews.last as? ChatMessageRowView {
-            row.render(message)
+            row.render(message, isStreaming: message.id == streamingAssistantID)
             renderedMessages = messages
             finishTranscriptUpdate(autoScroll: shouldAutoScroll)
             return
         }
 
-        rebuildTranscript(messages)
+        rebuildTranscript(
+            messages,
+            streamingAssistantID: streamingAssistantID
+        )
         renderedMessages = messages
         finishTranscriptUpdate(autoScroll: shouldAutoScroll)
     }
@@ -980,7 +1042,10 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
         }
     }
 
-    private func rebuildTranscript(_ messages: [ChatMessage]) {
+    private func rebuildTranscript(
+        _ messages: [ChatMessage],
+        streamingAssistantID: UUID?
+    ) {
         transcriptStack.arrangedSubviews.forEach {
             transcriptStack.removeArrangedSubview($0)
             $0.removeFromSuperview()
@@ -998,7 +1063,10 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
             empty.widthAnchor.constraint(equalTo: transcriptStack.widthAnchor, constant: -8).isActive = true
         } else {
             for message in messages {
-                let row = ChatMessageRowView(message: message)
+                let row = ChatMessageRowView(
+                    message: message,
+                    isStreaming: message.id == streamingAssistantID
+                )
                 transcriptStack.addArrangedSubview(row)
                 row.widthAnchor.constraint(equalTo: transcriptStack.widthAnchor, constant: -8).isActive = true
             }
@@ -1097,7 +1165,7 @@ private final class ChatMessageRowView: NSStackView {
     private let spacer = NSView()
     private var messageContent: NSView?
 
-    init(message: ChatMessage) {
+    init(message: ChatMessage, isStreaming: Bool) {
         super.init(frame: .zero)
         orientation = .horizontal
         alignment = .top
@@ -1120,7 +1188,7 @@ private final class ChatMessageRowView: NSStackView {
             addArrangedSubview(bubble)
             addArrangedSubview(spacer)
         }
-        render(message)
+        render(message, isStreaming: isStreaming)
     }
 
     @available(*, unavailable)
@@ -1128,7 +1196,7 @@ private final class ChatMessageRowView: NSStackView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func render(_ message: ChatMessage) {
+    func render(_ message: ChatMessage, isStreaming: Bool) {
         messageContent?.removeFromSuperview()
 
         let content: NSView
@@ -1153,7 +1221,8 @@ private final class ChatMessageRowView: NSStackView {
                 label.attributedStringValue = AssistantMarkdownRenderer.render(
                     message.visibleText,
                     font: .systemFont(ofSize: 13),
-                    textColor: .labelColor
+                    textColor: .labelColor,
+                    isStreaming: isStreaming
                 )
             } else {
                 label.stringValue = message.visibleText

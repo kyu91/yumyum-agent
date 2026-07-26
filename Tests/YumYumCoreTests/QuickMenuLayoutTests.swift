@@ -1,34 +1,73 @@
+import AppKit
 import CoreGraphics
 import Foundation
 import Testing
+@testable import YumYumApp
 @testable import YumYumCore
 
 @Suite
 struct QuickMenuLayoutTests {
     @Test
-    func appPanelsKeepTheMarkdownStreamingAndBoundedResponseContracts() throws {
-        let repository = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let quickMenu = try String(
-            contentsOf: repository.appending(
-                path: "Sources/YumYumApp/QuickMenuPanelController.swift"
-            ),
-            encoding: .utf8
-        )
-        let actionFlow = try String(
-            contentsOf: repository.appending(
-                path: "Sources/YumYumApp/ActionFlowPanelController.swift"
-            ),
-            encoding: .utf8
+    @MainActor
+    func streamingMarkdownHidesIncompleteDelimiters() {
+        let rendered = AssistantMarkdownRenderer.render(
+            "**강조 중이고 `코드 입력 중",
+            font: .systemFont(ofSize: 13),
+            textColor: .labelColor,
+            isStreaming: true
         )
 
-        #expect(quickMenu.contains("AssistantMarkdownRenderer.render"))
-        #expect(quickMenu.contains("canUpdateStreamingAssistant"))
-        #expect(quickMenu.contains("autoScrollThreshold: CGFloat = 24"))
-        #expect(actionFlow.contains("maxPanelHeight: CGFloat = 222"))
-        #expect(actionFlow.contains("responseScroll"))
+        #expect(rendered.string == "강조 중이고 코드 입력 중")
+        #expect(!rendered.string.contains("**"))
+        #expect(!rendered.string.contains("`"))
+
+        let headingMarker = AssistantMarkdownRenderer.render(
+            "##",
+            font: .systemFont(ofSize: 13),
+            textColor: .labelColor,
+            isStreaming: true
+        )
+        #expect(headingMarker.string.isEmpty)
+    }
+
+    @Test
+    @MainActor
+    func completedMarkdownRendersBlockAndInlineStyles() throws {
+        let rendered = AssistantMarkdownRenderer.render(
+            "# 제목\n\n**굵게**와 `인라인`\n\n```swift\nlet value = 1\n```",
+            font: .systemFont(ofSize: 13),
+            textColor: .labelColor,
+            isStreaming: false
+        )
+
+        let heading = try #require(font(in: rendered, matching: "제목"))
+        let bold = try #require(font(in: rendered, matching: "굵게"))
+        let inlineCode = try #require(font(in: rendered, matching: "인라인"))
+        let fencedCode = try #require(font(in: rendered, matching: "let value = 1"))
+        #expect(!rendered.string.contains("#"))
+        #expect(!rendered.string.contains("**"))
+        #expect(!rendered.string.contains("```"))
+        #expect(heading.pointSize > 13)
+        #expect(
+            heading.fontDescriptor.symbolicTraits.contains(
+                NSFontDescriptor.SymbolicTraits.bold
+            )
+        )
+        #expect(
+            bold.fontDescriptor.symbolicTraits.contains(
+                NSFontDescriptor.SymbolicTraits.bold
+            )
+        )
+        #expect(
+            inlineCode.fontDescriptor.symbolicTraits.contains(
+                NSFontDescriptor.SymbolicTraits.monoSpace
+            )
+        )
+        #expect(
+            fencedCode.fontDescriptor.symbolicTraits.contains(
+                NSFontDescriptor.SymbolicTraits.monoSpace
+            )
+        )
     }
 
     @Test
@@ -135,4 +174,17 @@ struct QuickMenuLayoutTests {
         #expect(lowerBubble.size == bubbleSize)
         #expect(upperBubble.size == bubbleSize)
     }
+}
+
+private func font(
+    in attributedString: NSAttributedString,
+    matching text: String
+) -> NSFont? {
+    let range = (attributedString.string as NSString).range(of: text)
+    guard range.location != NSNotFound else { return nil }
+    return attributedString.attribute(
+        .font,
+        at: range.location,
+        effectiveRange: nil
+    ) as? NSFont
 }

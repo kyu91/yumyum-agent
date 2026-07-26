@@ -268,40 +268,18 @@ struct PetResponsePolicyTests {
     }
 
     @Test
-    func SevenLinesBecomeACompactExcerptWithOpenChat() {
-        let answer = "하나\n둘\n셋\n넷\n다섯\n여섯\n일곱"
+    func longMultilineAnswerRemainsCompleteForTheScrollablePetBubble() {
+        let answer = (1...40)
+            .map { "\($0)번째 줄: " + String(repeating: "긴 답변 ", count: 12) }
+            .joined(separator: "\n")
 
         let content = PetResponsePolicy.content(for: answer)
 
         #expect(content.fullText == answer)
-        #expect(content.isExcerpt)
-        #expect(content.showsOpenChat)
-        #expect(content.displayText.count <= 320)
-        #expect(content.displayText.hasSuffix("…"))
-    }
-
-    @Test
-    func longKoreanAnswerPrefersASentenceBoundaryAfterOneHundredEightyCharacters() {
-        let firstSentence = String(repeating: "가", count: 188) + "입니다."
-        let answer = firstSentence
-            + " " + String(repeating: "나", count: 200) + "입니다."
-
-        let content = PetResponsePolicy.content(for: answer)
-
-        #expect(content.isExcerpt)
-        #expect(content.displayText.count <= 320)
-        #expect(content.displayText == firstSentence + "…")
-    }
-
-    @Test
-    func veryLongUnbrokenAnswerNeverExceedsThreeHundredTwentyCharacters() {
-        let content = PetResponsePolicy.content(
-            for: String(repeating: "긴", count: 500)
-        )
-
-        #expect(content.displayText.count == 320)
-        #expect(content.displayText.hasSuffix("…"))
-        #expect(content.showsOpenChat)
+        #expect(content.displayText == answer)
+        #expect(content.displayText.split(separator: "\n").count == 40)
+        #expect(!content.isExcerpt)
+        #expect(!content.showsOpenChat)
     }
 
     @Test
