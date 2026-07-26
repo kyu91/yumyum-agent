@@ -39,9 +39,18 @@ public struct HermesVersionProbe: Sendable {
         self.timeout = timeout
     }
 
-    public func probe(executableURL: URL) async throws -> HermesVersionProbeResult {
+    public func probe(
+        executableURL: URL,
+        environment: [String: String]? = nil,
+        outputByteLimit: Int? = nil
+    ) async throws -> HermesVersionProbeResult {
         let result = try await processRunner.run(
-            ProcessCommand(executableURL: executableURL, arguments: ["--version"]),
+            ProcessCommand(
+                executableURL: executableURL,
+                arguments: ["--version"],
+                environment: environment,
+                outputByteLimit: outputByteLimit
+            ),
             timeout: timeout
         )
 

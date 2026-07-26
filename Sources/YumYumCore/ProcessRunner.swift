@@ -78,11 +78,14 @@ public struct ProcessRunner: ProcessRunning, Sendable {
             try? standardOutputPipe.fileHandleForWriting.close()
             try? standardErrorPipe.fileHandleForWriting.close()
 
+            let outputBudget = ProcessOutputBudget(limit: command.outputByteLimit)
             let standardOutputReader = PipeReader(
-                fileHandle: standardOutputPipe.fileHandleForReading
+                fileHandle: standardOutputPipe.fileHandleForReading,
+                outputBudget: outputBudget
             )
             let standardErrorReader = PipeReader(
-                fileHandle: standardErrorPipe.fileHandleForReading
+                fileHandle: standardErrorPipe.fileHandleForReading,
+                outputBudget: outputBudget
             )
             let standardOutputTask = Task.detached {
                 try standardOutputReader.readToEnd()
@@ -185,10 +188,12 @@ private enum Completion: Sendable {
 private final class PipeReader: @unchecked Sendable {
     private let lock = NSLock()
     private let fileHandle: FileHandle
+    private let outputBudget: ProcessOutputBudget
     private var stopRequested = false
 
-    init(fileHandle: FileHandle) {
+    init(fileHandle: FileHandle, outputBudget: ProcessOutputBudget) {
         self.fileHandle = fileHandle
+        self.outputBudget = outputBudget
     }
 
     func requestStop() {
@@ -214,7 +219,9 @@ private final class PipeReader: @unchecked Sendable {
             }
 
             if byteCount > 0 {
-                output.append(contentsOf: buffer.prefix(Int(byteCount)))
+                let bytesRead = Int(byteCount)
+                let bytesToKeep = outputBudget.reserve(upTo: bytesRead)
+                output.append(contentsOf: buffer.prefix(bytesToKeep))
                 if shouldStop {
                     return output
                 }
@@ -259,6 +266,26 @@ private final class PipeReader: @unchecked Sendable {
 
     private func posixError(_ code: Int32) -> NSError {
         NSError(domain: NSPOSIXErrorDomain, code: Int(code))
+    }
+}
+
+private final class ProcessOutputBudget: @unchecked Sendable {
+    private let lock = NSLock()
+    private var remaining: Int?
+
+    init(limit: Int?) {
+        remaining = limit.map { max(0, $0) }
+    }
+
+    func reserve(upTo requested: Int) -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let remaining else {
+            return requested
+        }
+        let granted = min(requested, remaining)
+        self.remaining = remaining - granted
+        return granted
     }
 }
 

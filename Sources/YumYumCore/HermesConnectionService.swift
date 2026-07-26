@@ -70,7 +70,13 @@ public struct HermesConnectionService: HermesConnectionChecking, Sendable {
 
         let result: HermesVersionProbeResult
         do {
-            result = try await versionProbe.probe(executableURL: executableURL)
+            result = try await versionProbe.probe(
+                executableURL: executableURL,
+                environment: AgentProcessEnvironment.make(
+                    executableDirectory: executableURL.deletingLastPathComponent()
+                ),
+                outputByteLimit: 65_536
+            )
         } catch is CancellationError {
             throw CancellationError()
         } catch {

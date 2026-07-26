@@ -6,6 +6,37 @@ import Testing
 struct AppShellViewModelTests {
     @Test
     @MainActor
+    func refreshesDiscoveredAgentsAndSharesTheExplicitDefaultSelection() async throws {
+        let codex = AgentInstallation(
+            definitionID: .codex,
+            path: "/safe/codex",
+            version: "codex-cli 0.144.6",
+            runtimeContract: .codexExec,
+            availability: .available
+        )
+        let registry = AgentRegistry(
+            discovery: StaticAgentDiscovery(installations: [codex]),
+            persistence: EmptyAgentSelectionPersistence()
+        )
+        let viewModel = YumYumAppViewModel(
+            fixtureProbe: ImmediateFixtureProbe(result: .success("unused")),
+            agentRegistry: registry
+        )
+
+        await viewModel.refreshAgents(trigger: .appStart)
+        #expect(viewModel.agentSnapshot.installations == [codex])
+        #expect(!viewModel.canSendPrompt)
+
+        try await viewModel.selectAgent(.codex, path: "/safe/codex")
+        #expect(viewModel.canSendPrompt)
+        #expect(viewModel.agentSnapshot.selectedInstallation == codex)
+
+        await viewModel.refreshAgents(trigger: .quickMenuOpened)
+        #expect(viewModel.agentSnapshot.selectedInstallation == codex)
+    }
+
+    @Test
+    @MainActor
     func startsWithAnEmptyUnsavedPathAndEnablesOnlyAnAbsolutePath() {
         let viewModel = YumYumAppViewModel(
             fixtureProbe: ImmediateFixtureProbe(result: .success("Hermes Fixture 0.0.0"))
@@ -214,6 +245,23 @@ struct AppShellViewModelTests {
                 == .failure(message: "안전한 fixture가 제한 시간 안에 응답하지 않았습니다.")
         )
     }
+}
+
+private actor StaticAgentDiscovery: AgentDiscovering {
+    let installations: [AgentInstallation]
+
+    init(installations: [AgentInstallation]) {
+        self.installations = installations
+    }
+
+    func scan(explicitPaths: [AgentDefinitionID: String]) async -> [AgentInstallation] {
+        installations
+    }
+}
+
+private actor EmptyAgentSelectionPersistence: AgentSelectionPersisting {
+    func load() -> SelectedAgentReference? { nil }
+    func save(_ reference: SelectedAgentReference?) {}
 }
 
 private struct ImmediateFixtureProbe: FixtureProbing {

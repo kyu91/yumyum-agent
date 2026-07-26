@@ -28,8 +28,14 @@ struct HermesConnectionServiceTests {
         #expect(version == "Hermes 1.2.3\nbuild abc\n")
         #expect(invocation.command.executableURL == executable.standardizedFileURL)
         #expect(invocation.command.arguments == ["--version"])
-        #expect(invocation.command.environment == nil)
+        #expect(
+            invocation.command.environment
+                == AgentProcessEnvironment.make(
+                    executableDirectory: executable.deletingLastPathComponent()
+                )
+        )
         #expect(invocation.command.currentDirectoryURL == nil)
+        #expect(invocation.command.outputByteLimit == 65_536)
         #expect(invocation.timeout == timeout)
     }
 

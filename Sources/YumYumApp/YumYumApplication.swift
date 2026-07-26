@@ -9,20 +9,24 @@ struct YumYumApplication: App {
     @StateObject private var viewModel: YumYumAppViewModel
 
     init() {
+        CaptureTemporaryFileCleanup.removeStaleFiles()
         let service = FixtureProbeService(fixtureURL: Self.fixtureURL)
-        _viewModel = StateObject(
-            wrappedValue: YumYumAppViewModel(fixtureProbe: service)
-        )
+        let viewModel = YumYumAppViewModel(fixtureProbe: service)
+        _viewModel = StateObject(wrappedValue: viewModel)
+        appDelegate.configure(viewModel: viewModel)
     }
 
     var body: some Scene {
         Window("YumYum", id: "main") {
-            YumYumContentView(viewModel: viewModel)
+            YumYumContentView(viewModel: viewModel, appDelegate: appDelegate)
                 .background {
-                    MainWindowActionInstaller(appDelegate: appDelegate)
+                    MainWindowActionInstaller(
+                        appDelegate: appDelegate,
+                        viewModel: viewModel
+                    )
                 }
         }
-        .defaultSize(width: 600, height: 680)
+        .defaultSize(width: 640, height: 820)
         .windowResizability(.contentMinSize)
         .commands {
             CommandGroup(replacing: .newItem) {}
@@ -60,11 +64,13 @@ private struct MainWindowActionInstaller: View {
     @Environment(\.openWindow) private var openWindow
 
     let appDelegate: YumYumAppDelegate
+    let viewModel: YumYumAppViewModel
 
     var body: some View {
         Color.clear
             .frame(width: 0, height: 0)
             .onAppear {
+                appDelegate.configure(viewModel: viewModel)
                 appDelegate.setOpenMainWindowAction {
                     openWindow(id: "main")
                 }
@@ -93,6 +99,10 @@ private struct YumYumMenu: View {
         )
         .accessibilityHint("화면 우하단의 YumYum 펫 표시 여부를 전환합니다")
 
+        Button("빠른 메뉴 열기") {
+            appDelegate.showQuickMenu()
+        }
+
         Divider()
 
         Text(menuStatus)
@@ -107,6 +117,12 @@ private struct YumYumMenu: View {
     }
 
     private var menuStatus: String {
+        if let selected = viewModel.agentSnapshot.selectedInstallation {
+            return "기본 에이전트: \(selected.definitionID.displayName)"
+        }
+        if viewModel.agentSnapshot.requiresExplicitReselection {
+            return "기본 에이전트: 다시 선택 필요"
+        }
         switch viewModel.connectionState {
         case .idle:
             return "Hermes 연결: 확인 전"
@@ -126,17 +142,31 @@ private struct YumYumMenu: View {
 
 private struct YumYumContentView: View {
     @ObservedObject var viewModel: YumYumAppViewModel
+    @ObservedObject var appDelegate: YumYumAppDelegate
     @State private var connectionTask: Task<Void, Never>?
+    @State private var explicitAgentID = AgentDefinitionID.hermes
+    @State private var explicitAgentPath = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            header
-            hermesPathSection
-            safetySection
-            fixtureSection
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                header
+                agentSection
+                shortcutSection
+                hermesPathSection
+                safetySection
+                fixtureSection
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .padding(24)
         .frame(minWidth: 560, minHeight: 620, alignment: .topLeading)
+        .onAppear {
+            appDelegate.configure(viewModel: viewModel)
+        }
+        .task {
+            await viewModel.refreshAgents(trigger: .appStart)
+        }
         .onDisappear {
             connectionTask?.cancel()
         }
@@ -152,7 +182,7 @@ private struct YumYumContentView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("YumYum")
                     .font(.title.bold())
-                Text("Hermes 로컬 연결 확인")
+                Text("검증된 로컬 에이전트와 빠른 메뉴")
                     .foregroundStyle(.secondary)
             }
 
@@ -165,6 +195,133 @@ private struct YumYumContentView: View {
                 .padding(.vertical, 5)
                 .background(.orange.opacity(0.12), in: Capsule())
                 .accessibilityLabel("Local only")
+        }
+    }
+
+    private var agentSection: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 10) {
+                if viewModel.isDiscoveringAgents {
+                    ProgressView("안전한 설치 경로 확인 중…")
+                        .controlSize(.small)
+                }
+
+                ForEach(viewModel.agentSnapshot.installations) { installation in
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: installation.availability == .available
+                            ? "checkmark.circle.fill"
+                            : "xmark.circle")
+                            .foregroundStyle(installation.availability == .available ? .green : .secondary)
+                            .accessibilityHidden(true)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(installation.definitionID.displayName)
+                                .font(.callout.weight(.semibold))
+                            Text(installation.path ?? "안전한 설치 경로에서 찾지 못함")
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Text(agentDetail(installation))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Spacer()
+
+                        Button(
+                            viewModel.agentSnapshot.selectedInstallation?.id == installation.id
+                                ? "선택됨"
+                                : "기본으로 선택"
+                        ) {
+                            guard let path = installation.path else { return }
+                            Task {
+                                try? await viewModel.selectAgent(
+                                    installation.definitionID,
+                                    path: path
+                                )
+                            }
+                        }
+                        .disabled(
+                            installation.availability != .available
+                                || viewModel.agentSnapshot.selectedInstallation?.id == installation.id
+                        )
+                    }
+                    Divider()
+                }
+
+                HStack {
+                    Picker("에이전트", selection: $explicitAgentID) {
+                        ForEach(AgentDefinitionID.allCases, id: \.self) { definitionID in
+                            Text(definitionID.displayName).tag(definitionID)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 130)
+
+                    TextField("/absolute/path/to/executable", text: $explicitAgentPath)
+                        .textFieldStyle(.roundedBorder)
+
+                    Button("경로 확인") {
+                        let path = explicitAgentPath.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard NSString(string: path).isAbsolutePath else { return }
+                        Task {
+                            await viewModel.addExplicitAgentPath(path, for: explicitAgentID)
+                        }
+                    }
+                    .disabled(
+                        !NSString(
+                            string: explicitAgentPath.trimmingCharacters(in: .whitespacesAndNewlines)
+                        ).isAbsolutePath
+                    )
+                }
+
+                Button("다시 검색") {
+                    Task { await viewModel.refreshAgents(trigger: .manualRescan) }
+                }
+                .disabled(viewModel.isDiscoveringAgents)
+            }
+            .padding(.top, 4)
+        } label: {
+            Label("로컬 에이전트", systemImage: "cpu")
+                .font(.headline)
+        }
+    }
+
+    private var shortcutSection: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 10) {
+                Picker(
+                    "빠른 메뉴 전역 단축키",
+                    selection: Binding(
+                        get: { appDelegate.shortcutChoice },
+                        set: { appDelegate.setShortcutChoice($0) }
+                    )
+                ) {
+                    ForEach(GlobalShortcutChoice.allCases) { choice in
+                        Text(choice.displayName).tag(choice)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .accessibilityHint("포커스를 강제로 가져오지 않고 펫 옆 빠른 메뉴를 엽니다")
+
+                Button("빠른 메뉴 지금 열기") {
+                    appDelegate.showQuickMenu()
+                }
+            }
+            .padding(.top, 4)
+        } label: {
+            Label("빠른 메뉴", systemImage: "keyboard")
+                .font(.headline)
+        }
+    }
+
+    private func agentDetail(_ installation: AgentInstallation) -> String {
+        switch installation.availability {
+        case .available:
+            return installation.version ?? "버전 확인 완료"
+        case let .unavailable(reason):
+            return reason
         }
     }
 
@@ -213,7 +370,7 @@ private struct YumYumContentView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, 4)
         } label: {
-            Label("Hermes 경로", systemImage: "terminal")
+            Label("Hermes 수동 경로 진단", systemImage: "terminal")
                 .font(.headline)
         }
     }
@@ -349,13 +506,13 @@ private struct YumYumContentView: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
                 HStack {
-                    Text("연결 확인 외 기능")
+                    Text("외부 변경")
                         .font(.callout.weight(.semibold))
-                    Text("DISABLED · FAIL-CLOSED")
+                    Text("TASK-SCOPED APPROVAL · FAIL-CLOSED")
                         .font(.caption2.weight(.bold))
                         .foregroundStyle(.secondary)
                 }
-                Text("ACP, 네트워크, 캘린더, 자격증명 및 외부 변경 기능에는 접근하지 않습니다.")
+                Text("YumYum은 자격증명을 읽지 않으며 외부 변경은 Task 한정 일회성 승인 전까지 차단합니다.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -366,7 +523,7 @@ private struct YumYumContentView: View {
     private var pathStatusText: String {
         switch viewModel.hermesPathStatus {
         case .empty:
-            return "절대 경로 문자열을 직접 입력하세요. 자동 탐색은 꺼져 있습니다."
+            return "자동 발견 결과와 별개로 진단할 Hermes 절대 경로를 입력할 수 있습니다."
         case .invalidAbsolutePath:
             return "상대 경로는 허용하지 않습니다. `/`로 시작하는 경로를 입력하세요."
         case .absolutePathReady:

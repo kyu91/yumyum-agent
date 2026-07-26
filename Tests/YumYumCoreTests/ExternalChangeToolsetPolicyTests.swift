@@ -1,8 +1,54 @@
+import Foundation
 import Testing
 @testable import YumYumCore
 
 @Suite
 struct ExternalChangeToolsetPolicyTests {
+    @Test
+    func taskApprovalIsScopedConsumedOnceAndNeverPersisted() async {
+        let taskID = UUID()
+        let otherTaskID = UUID()
+        let approvalID = UUID()
+        let gate = TaskApprovalGate()
+
+        await gate.grant(
+            TaskScopedApproval(
+                id: approvalID,
+                taskID: taskID,
+                toolsetID: "calendar"
+            )
+        )
+
+        #expect(
+            await gate.consume(
+                taskID: otherTaskID,
+                approvalID: approvalID,
+                toolsetID: "calendar"
+            ) == .denied(.externalChangeRequiresApproval(toolsetID: "calendar"))
+        )
+        #expect(
+            await gate.consume(
+                taskID: taskID,
+                approvalID: approvalID,
+                toolsetID: "calendar"
+            ) == .allowed
+        )
+        #expect(
+            await gate.consume(
+                taskID: taskID,
+                approvalID: approvalID,
+                toolsetID: "calendar"
+            ) == .denied(.externalChangeRequiresApproval(toolsetID: "calendar"))
+        )
+        #expect(
+            await TaskApprovalGate().consume(
+                taskID: taskID,
+                approvalID: approvalID,
+                toolsetID: "calendar"
+            ) == .denied(.externalChangeRequiresApproval(toolsetID: "calendar"))
+        )
+    }
+
     @Test
     func allowsReadOnlyToolsetByDefault() {
         let policy = ExternalChangeToolsetPolicy()
