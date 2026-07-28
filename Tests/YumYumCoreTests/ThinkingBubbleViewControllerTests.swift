@@ -6,7 +6,7 @@ import Testing
 struct ThinkingBubbleViewControllerTests {
     @Test
     @MainActor
-    func usesSemanticLabelForeground() throws {
+    func usesBlackForeground() throws {
         let controller = ThinkingBubbleViewController()
         controller.loadView()
         let label = try #require(textField(in: controller.view))
@@ -14,7 +14,7 @@ struct ThinkingBubbleViewControllerTests {
 
         controller.loadView()
 
-        #expect(label.textColor == .labelColor)
+        #expect(label.textColor == .black)
     }
 
     @MainActor

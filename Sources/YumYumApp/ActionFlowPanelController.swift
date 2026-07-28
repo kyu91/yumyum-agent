@@ -954,7 +954,7 @@ final class ThinkingBubbleViewController: NSViewController {
         background.setAccessibilityRole(.group)
         background.setAccessibilityLabel("YumYum이 응답을 생각하는 중")
         label.font = .systemFont(ofSize: 14, weight: .semibold)
-        label.textColor = .labelColor
+        label.textColor = .black
         label.alignment = .center
         label.setAccessibilityElement(false)
         label.translatesAutoresizingMaskIntoConstraints = false
