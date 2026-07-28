@@ -240,6 +240,42 @@ struct ChatBubbleStateTests {
 struct ChatBubbleSessionTests {
     @Test
     @MainActor
+    func emptySendIsRejectedWithoutStartingProductionTask() async {
+        let submitter = ControlledFeedSubmitter()
+        let session = ChatBubbleSession(submitter: submitter)
+        session.setDraftText(" \n ")
+
+        #expect(!session.send(reduceMotion: true))
+        #expect(await submitter.submissionCount == 0)
+        #expect(!session.state.isSending)
+    }
+
+    @Test
+    @MainActor
+    func visibleDraftAttachmentAndTextAreSubmittedExactlyOnceWithoutPathInContext() async {
+        let submitter = ControlledFeedSubmitter()
+        let attachment = ChatDraftAttachment(
+            url: URL(fileURLWithPath: "/private/tmp/secret-report.pdf"),
+            isTemporary: false
+        )
+        let session = ChatBubbleSession(submitter: submitter)
+        session.setDraftText("첨부 확인")
+        session.addAttachment(attachment)
+
+        #expect(session.send(reduceMotion: false))
+        #expect(!session.send(reduceMotion: false))
+        await submitter.waitForSubmissionCount(1)
+
+        let input = await submitter.inputs[0]
+        #expect(input.fileURLs == [attachment.url])
+        #expect(input.text.contains("첨부 확인"))
+        #expect(!input.text.contains("/private/"))
+        await submitter.succeed(at: 0, text: "완료")
+        await session.waitForCurrentSend()
+    }
+
+    @Test
+    @MainActor
     func duplicateSendDoesNotReplaceTheActiveGenerationOrCreateAnotherPrompt() async {
         let submitter = ControlledFeedSubmitter()
         let session = ChatBubbleSession(submitter: submitter)

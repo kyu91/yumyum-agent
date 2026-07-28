@@ -435,15 +435,18 @@ final class ChatPanelController: NSObject {
     private var fileSelectionGate = CallbackGenerationGate()
     private var activeFilePanel: NSOpenPanel?
     private var agentNotice: String?
+    private(set) var hasPresented = false
 
     var onWillBeginCapture: (() -> Void)?
     var onExplicitCancel: (() -> Void)?
     var onVisibilityChanged: ((Bool) -> Void)?
+    var onStateChanged: ((ChatBubbleState) -> Void)?
 
     let panel: QuickMenuPanel
 
     var isVisible: Bool { panel.isVisible }
     var isCapturing: Bool { captureTask != nil }
+    var state: ChatBubbleState { session.state }
 
     init(
         petController: FloatingPetWindowController,
@@ -500,6 +503,7 @@ final class ChatPanelController: NSObject {
                 canRetry: self.session.canRetry,
                 agentNotice: self.agentNotice
             )
+            self.onStateChanged?(state)
         }
 
         NotificationCenter.default.addObserver(
@@ -518,6 +522,8 @@ final class ChatPanelController: NSObject {
         guard captureTask == nil else { return }
         updateFrame()
         session.show()
+        viewController.setPresented(true)
+        hasPresented = true
         panel.makeKeyAndOrderFront(nil)
         viewController.focusComposer()
         onVisibilityChanged?(true)
@@ -530,6 +536,7 @@ final class ChatPanelController: NSObject {
             restorePet: restorePetAfterCapture
         )
         session.hide()
+        viewController.setPresented(false)
         panel.orderOut(nil)
         onVisibilityChanged?(false)
     }
@@ -547,12 +554,21 @@ final class ChatPanelController: NSObject {
             agentNotice: agentNotice
         )
     }
+
+    func addAttachmentForTesting(_ attachment: ChatDraftAttachment) {
+        session.addAttachment(attachment)
+    }
+
+    func waitForSendForTesting() async {
+        await session.waitForCurrentSend()
+    }
 #endif
 
     func prepareForTermination() {
         cancelFileSelection()
         cancelCapture(restorePanel: false, restorePet: false)
         session.discardDraftAndCancel()
+        viewController.setPresented(false)
         petController.setMouthOpen(false)
         panel.orderOut(nil)
         petController.hide()
@@ -579,6 +595,20 @@ final class ChatPanelController: NSObject {
 
     func retryLastSend() {
         retrySend()
+    }
+
+    func setDraftText(_ text: String) {
+        guard session.state.draftText != text else { return }
+        session.setDraftText(text)
+    }
+
+    @discardableResult
+    func sendDraftFromResponse() -> Bool {
+        guard session.send(
+            reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        ) else { return false }
+        refreshAgentStateAfterFailure()
+        return true
     }
 
     func scrollToLatest() {
@@ -802,13 +832,27 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
     private let fileButton = NSButton(title: "파일", target: nil, action: nil)
     private let composer = NSTextField()
     private let sendButton = NSButton(title: "보내기", target: nil, action: nil)
-    private let statusLabel = NSTextField(wrappingLabelWithString: "대화를 입력하거나 자료를 첨부하세요.")
+    private let statusLabel = ThinkingStatusField(
+        wrappingLabelWithString: "대화를 입력하거나 자료를 첨부하세요."
+    )
     private let retryButton = NSButton(title: "재시도", target: nil, action: nil)
     private let cancelButton = NSButton(title: "취소", target: nil, action: nil)
     private var lastAnnouncedStatus = ""
     private var statusIsError = false
     private var renderedMessages: [ChatMessage] = []
     private var theme = AppTheme.dark
+    private let thinkingPolicy = ThinkingAnimationPolicy()
+    private var loadingTask: Task<Void, Never>?
+    private var loadingElapsed = 0
+    private var renderedState = ChatBubbleState()
+    private var renderedCanRetry = false
+    private var renderedAgentNotice: String?
+    private var isPresented = false
+
+    deinit {
+        loadingTask?.cancel()
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
+    }
 
     override func loadView() {
         let background = NSVisualEffectView()
@@ -821,6 +865,12 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
         background.layer?.borderWidth = 0.5
         background.layer?.borderColor = NSColor.separatorColor.cgColor
         view = background
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(accessibilityDisplayOptionsDidChange(_:)),
+            name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
+            object: nil
+        )
 
         let title = NSTextField(labelWithString: "YumYum")
         title.font = .systemFont(ofSize: 16, weight: .bold)
@@ -936,6 +986,7 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
         composerRow.spacing = 8
 
         statusLabel.font = .systemFont(ofSize: 12)
+        statusLabel.identifier = NSUserInterfaceItemIdentifier("chat-loading-status")
         statusLabel.textColor = .secondaryLabelColor
         statusLabel.maximumNumberOfLines = 2
         statusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -1012,6 +1063,10 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
         agentNotice: String?
     ) {
         guard isViewLoaded else { return }
+        renderedState = state
+        renderedCanRetry = canRetry
+        renderedAgentNotice = agentNotice
+        updateLoadingAnimation()
         if composer.stringValue != state.draftText {
             composer.stringValue = state.draftText
         }
@@ -1038,7 +1093,7 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
             isError = false
         case .sending:
             isBusy = true
-            status = "응답을 기다리는 중…"
+            status = loadingText
             isError = false
         case .cancelled:
             isBusy = false
@@ -1059,6 +1114,108 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
         retryButton.isHidden = !(canRetry && !isBusy)
         cancelButton.isHidden = !state.isSending
         setStatus(status, isError: isError)
+    }
+
+#if DEBUG
+    func renderForTesting(
+        state: ChatBubbleState,
+        elapsedMilliseconds: Int,
+        reduceMotion: Bool
+    ) {
+        loadingTask?.cancel()
+        loadingTask = nil
+        loadingElapsed = elapsedMilliseconds
+        renderedState = state
+        renderTranscript(
+            state.messages,
+            streamingAssistantID: state.messages.last?.id
+        )
+        renderLoadingText(reduceMotion: reduceMotion)
+    }
+
+    var hasLoadingTaskForTesting: Bool { loadingTask != nil }
+
+    func accessibilityDisplayOptionsDidChangeForTesting() {
+        accessibilityDisplayOptionsDidChange(
+            Notification(name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification)
+        )
+    }
+#endif
+
+    private var loadingText: String {
+        thinkingPolicy.thought(
+            at: loadingElapsed,
+            reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        )
+    }
+
+    private func updateLoadingAnimation() {
+        guard renderedState.isSending, isPresented else {
+            loadingTask?.cancel()
+            loadingTask = nil
+            loadingElapsed = 0
+            return
+        }
+        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
+            loadingTask?.cancel()
+            loadingTask = nil
+            loadingElapsed = 0
+            return
+        }
+        guard loadingTask == nil else { return }
+        loadingTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled, self?.renderedState.isSending == true {
+                self?.renderLoadingText(reduceMotion: false)
+                do {
+                    try await Task.sleep(for: .milliseconds(300))
+                } catch {
+                    return
+                }
+                self?.advanceLoadingAnimation()
+            }
+            self?.loadingTask = nil
+        }
+    }
+
+    private func advanceLoadingAnimation() {
+        loadingElapsed = (
+            loadingElapsed + 300
+        ) % ThinkingAnimationPolicy.cycleMilliseconds
+    }
+
+    private func renderLoadingText(reduceMotion: Bool) {
+        let text = thinkingPolicy.thought(
+            at: loadingElapsed,
+            reduceMotion: reduceMotion
+        )
+        statusLabel.stringValue = text
+        statusLabel.setAccessibilityLabel("응답 생성 중")
+        statusLabel.setAccessibilityValue("응답 생성 중")
+        transcriptStack.arrangedSubviews
+            .compactMap { $0 as? ChatMessageRowView }
+            .forEach { $0.setLoadingText(text) }
+    }
+
+    @objc
+    private func accessibilityDisplayOptionsDidChange(_ notification: Notification) {
+        loadingTask?.cancel()
+        loadingTask = nil
+        loadingElapsed = 0
+        render(
+            state: renderedState,
+            canRetry: renderedCanRetry,
+            agentNotice: renderedAgentNotice
+        )
+    }
+
+    func setPresented(_ presented: Bool) {
+        isPresented = presented
+        if presented {
+            updateLoadingAnimation()
+        } else {
+            loadingTask?.cancel()
+            loadingTask = nil
+        }
     }
 
     func focusComposer() {
@@ -1089,7 +1246,11 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
         if canUpdateStreamingAssistant(with: messages),
            let message = messages.last,
            let row = transcriptStack.arrangedSubviews.last as? ChatMessageRowView {
-            row.render(message, isStreaming: message.id == streamingAssistantID)
+            row.render(
+                message,
+                isStreaming: message.id == streamingAssistantID,
+                loadingText: loadingText
+            )
             renderedMessages = messages
             finishTranscriptUpdate(autoScroll: shouldAutoScroll)
             return
@@ -1155,7 +1316,8 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
                 let row = ChatMessageRowView(
                     message: message,
                     isStreaming: message.id == streamingAssistantID,
-                    theme: theme
+                    theme: theme,
+                    loadingText: loadingText
                 )
                 transcriptStack.addArrangedSubview(row)
                 row.widthAnchor.constraint(equalTo: transcriptStack.widthAnchor, constant: -8).isActive = true
@@ -1212,17 +1374,21 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
     private func setStatus(_ text: String, isError: Bool) {
         statusIsError = isError
         statusLabel.stringValue = text
+        statusLabel.setAccessibilityLabel(
+            renderedState.isSending ? "응답 생성 중" : "YumYum 상태"
+        )
         statusLabel.textColor = isError
             ? theme.palette.error
             : theme.palette.text.withAlphaComponent(0.68)
-        statusLabel.setAccessibilityValue(text)
-        guard lastAnnouncedStatus != text else { return }
-        lastAnnouncedStatus = text
+        let accessibilityStatus = renderedState.isSending ? "응답 생성 중" : text
+        statusLabel.setAccessibilityValue(accessibilityStatus)
+        guard lastAnnouncedStatus != accessibilityStatus else { return }
+        lastAnnouncedStatus = accessibilityStatus
         NSAccessibility.post(
             element: statusLabel,
             notification: .announcementRequested,
             userInfo: [
-                .announcement: text,
+                .announcement: accessibilityStatus,
                 .priority: NSAccessibilityPriorityLevel.medium.rawValue,
             ]
         )
@@ -1259,8 +1425,14 @@ private final class ChatMessageRowView: NSStackView {
     private var message: ChatMessage
     private var isStreaming: Bool
     private var theme: AppTheme
+    private var loadingLabel: NSTextField?
 
-    init(message: ChatMessage, isStreaming: Bool, theme: AppTheme) {
+    init(
+        message: ChatMessage,
+        isStreaming: Bool,
+        theme: AppTheme,
+        loadingText: String
+    ) {
         self.message = message
         self.isStreaming = isStreaming
         self.theme = theme
@@ -1282,6 +1454,7 @@ private final class ChatMessageRowView: NSStackView {
             addArrangedSubview(spacer)
         }
         applyTheme(theme)
+        render(message, isStreaming: isStreaming, loadingText: loadingText)
     }
 
     @available(*, unavailable)
@@ -1289,10 +1462,15 @@ private final class ChatMessageRowView: NSStackView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func render(_ message: ChatMessage, isStreaming: Bool) {
+    func render(
+        _ message: ChatMessage,
+        isStreaming: Bool,
+        loadingText: String? = nil
+    ) {
         self.message = message
         self.isStreaming = isStreaming
         messageContent?.removeFromSuperview()
+        loadingLabel = nil
 
         let content: NSView
         if message.isLoading {
@@ -1300,8 +1478,12 @@ private final class ChatMessageRowView: NSStackView {
             progress.style = .spinning
             progress.controlSize = .small
             progress.startAnimation(nil)
-            let label = NSTextField(labelWithString: "응답을 기다리는 중…")
+            let label = ThinkingStatusField(labelWithString: loadingText ?? "Yum.")
+            label.identifier = NSUserInterfaceItemIdentifier("chat-loading-message")
             label.font = .systemFont(ofSize: 13)
+            label.setAccessibilityLabel("응답 생성 중")
+            label.setAccessibilityValue("응답 생성 중")
+            loadingLabel = label
             let loading = NSStackView(views: [progress, label])
             loading.orientation = .horizontal
             loading.alignment = .centerY
@@ -1336,8 +1518,14 @@ private final class ChatMessageRowView: NSStackView {
         messageContent = content
 
         let role = message.role == .user ? "사용자" : "어시스턴트"
-        let value = message.isLoading ? "응답을 기다리는 중" : message.visibleText
+        let value = message.isLoading ? "응답 생성 중" : message.visibleText
         setAccessibilityLabel("\(role): \(value)")
+    }
+
+    func setLoadingText(_ text: String) {
+        loadingLabel?.stringValue = text
+        loadingLabel?.setAccessibilityLabel("응답 생성 중")
+        loadingLabel?.setAccessibilityValue("응답 생성 중")
     }
 
     func applyTheme(_ theme: AppTheme) {
@@ -1347,12 +1535,18 @@ private final class ChatMessageRowView: NSStackView {
                 ? theme.palette.userMessage
                 : theme.palette.secondarySurface
         ).cgColor
-        render(message, isStreaming: isStreaming)
+        render(message, isStreaming: isStreaming, loadingText: loadingLabel?.stringValue)
     }
 }
 
 private final class FlippedDocumentView: NSView {
     override var isFlipped: Bool { true }
+}
+
+private final class ThinkingStatusField: NSTextField {
+    override func accessibilityValue() -> String? {
+        stringValue.hasPrefix("Yum") ? "응답 생성 중" : super.accessibilityValue()
+    }
 }
 
 @MainActor
