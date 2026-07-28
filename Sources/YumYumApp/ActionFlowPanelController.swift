@@ -949,12 +949,22 @@ final class ThinkingBubbleViewController: NSViewController {
     private let label = NSTextField(labelWithString: "Yum.")
 
     override func loadView() {
-        let background = makeGlassBackground(cornerRadius: 16)
+        let background = NSView()
+        background.wantsLayer = true
+        background.layer?.backgroundColor = NSColor(
+            calibratedWhite: 0.14,
+            alpha: 0.96
+        ).cgColor
+        background.layer?.cornerRadius = 16
+        background.layer?.cornerCurve = .continuous
+        background.layer?.borderWidth = 0.5
+        background.layer?.borderColor = NSColor.white
+            .withAlphaComponent(0.28).cgColor
         background.setAccessibilityElement(true)
         background.setAccessibilityRole(.group)
         background.setAccessibilityLabel("YumYum이 응답을 생각하는 중")
         label.font = .systemFont(ofSize: 14, weight: .semibold)
-        label.textColor = .black
+        label.textColor = NSColor.white.withAlphaComponent(0.94)
         label.alignment = .center
         label.setAccessibilityElement(false)
         label.translatesAutoresizingMaskIntoConstraints = false
