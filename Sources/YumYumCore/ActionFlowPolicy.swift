@@ -394,6 +394,13 @@ public struct ThinkingAnimationPolicy: Equatable, Sendable {
 
     public var resetFrame: PetChewFrame { .resting }
 
+    public func showsExternalBubble(
+        isThinking: Bool,
+        isChatVisible: Bool
+    ) -> Bool {
+        isThinking && !isChatVisible
+    }
+
     public func frame(at milliseconds: Int, reduceMotion: Bool) -> PetChewFrame {
         guard !reduceMotion else { return .reducedMotion }
         let phase = normalizedPhase(milliseconds)

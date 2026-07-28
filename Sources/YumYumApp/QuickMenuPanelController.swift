@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import SwiftUI
 import UniformTypeIdentifiers
 import YumYumCore
 
@@ -313,6 +314,56 @@ enum GlobalShortcutChoice: String, CaseIterable, Identifiable {
     }
 }
 
+enum AppTheme: String, CaseIterable, Identifiable {
+    static let defaultsKey = "YumYum.appTheme"
+
+    case light
+    case dark
+
+    var id: String { rawValue }
+    var displayName: String { self == .light ? "Light" : "Dark" }
+    var colorScheme: ColorScheme { self == .light ? .light : .dark }
+    var appearance: NSAppearance? {
+        NSAppearance(named: self == .light ? .aqua : .darkAqua)
+    }
+    var palette: AppThemePalette {
+        switch self {
+        case .light:
+            AppThemePalette(
+                surface: NSColor(calibratedWhite: 0.96, alpha: 0.98),
+                secondarySurface: NSColor(calibratedWhite: 0.88, alpha: 0.92),
+                userMessage: NSColor(calibratedRed: 0.13, green: 0.45, blue: 0.95, alpha: 0.18),
+                text: NSColor(calibratedWhite: 0.10, alpha: 0.94),
+                error: NSColor(calibratedRed: 0.78, green: 0.12, blue: 0.16, alpha: 1)
+            )
+        case .dark:
+            AppThemePalette(
+                surface: NSColor(calibratedWhite: 0.14, alpha: 0.96),
+                secondarySurface: NSColor(calibratedWhite: 0.25, alpha: 0.92),
+                userMessage: NSColor(calibratedRed: 0.35, green: 0.65, blue: 1, alpha: 0.24),
+                text: NSColor(calibratedWhite: 1.00, alpha: 0.94),
+                error: NSColor(calibratedRed: 1, green: 0.38, blue: 0.42, alpha: 1)
+            )
+        }
+    }
+
+    static func load(defaults: UserDefaults = .standard) -> AppTheme {
+        AppTheme(rawValue: defaults.string(forKey: defaultsKey) ?? "") ?? .dark
+    }
+
+    func save(defaults: UserDefaults = .standard) {
+        defaults.set(rawValue, forKey: Self.defaultsKey)
+    }
+}
+
+struct AppThemePalette {
+    let surface: NSColor
+    let secondarySurface: NSColor
+    let userMessage: NSColor
+    let text: NSColor
+    let error: NSColor
+}
+
 @MainActor
 final class GlobalShortcutController {
     private var choice: GlobalShortcutChoice
@@ -387,6 +438,7 @@ final class ChatPanelController: NSObject {
 
     var onWillBeginCapture: (() -> Void)?
     var onExplicitCancel: (() -> Void)?
+    var onVisibilityChanged: ((Bool) -> Void)?
 
     let panel: QuickMenuPanel
 
@@ -468,6 +520,7 @@ final class ChatPanelController: NSObject {
         session.show()
         panel.makeKeyAndOrderFront(nil)
         viewController.focusComposer()
+        onVisibilityChanged?(true)
     }
 
     func hide(restorePetAfterCapture: Bool = true) {
@@ -478,7 +531,23 @@ final class ChatPanelController: NSObject {
         )
         session.hide()
         panel.orderOut(nil)
+        onVisibilityChanged?(false)
     }
+
+    func applyTheme(_ theme: AppTheme) {
+        panel.appearance = theme.appearance
+        viewController.applyTheme(theme)
+    }
+
+#if DEBUG
+    func renderForTesting(_ state: ChatBubbleState) {
+        viewController.render(
+            state: state,
+            canRetry: session.canRetry,
+            agentNotice: agentNotice
+        )
+    }
+#endif
 
     func prepareForTermination() {
         cancelFileSelection()
@@ -737,7 +806,9 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
     private let retryButton = NSButton(title: "재시도", target: nil, action: nil)
     private let cancelButton = NSButton(title: "취소", target: nil, action: nil)
     private var lastAnnouncedStatus = ""
+    private var statusIsError = false
     private var renderedMessages: [ChatMessage] = []
+    private var theme = AppTheme.dark
 
     override func loadView() {
         let background = NSVisualEffectView()
@@ -915,6 +986,24 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
         ])
 
         render(state: ChatBubbleState(), canRetry: false, agentNotice: nil)
+        applyTheme(theme)
+    }
+
+    func applyTheme(_ theme: AppTheme) {
+        self.theme = theme
+        guard isViewLoaded else { return }
+        view.appearance = theme.appearance
+        view.layer?.borderColor = theme.palette.text
+            .withAlphaComponent(0.18).cgColor
+        transcriptStack.arrangedSubviews
+            .compactMap { $0 as? ChatMessageRowView }
+            .forEach { $0.applyTheme(theme) }
+        attachmentStack.arrangedSubviews.forEach {
+            $0.layer?.backgroundColor = theme.palette.secondarySurface.cgColor
+        }
+        statusLabel.textColor = statusIsError
+            ? theme.palette.error
+            : theme.palette.text.withAlphaComponent(0.68)
     }
 
     func render(
@@ -1065,7 +1154,8 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
             for message in messages {
                 let row = ChatMessageRowView(
                     message: message,
-                    isStreaming: message.id == streamingAssistantID
+                    isStreaming: message.id == streamingAssistantID,
+                    theme: theme
                 )
                 transcriptStack.addArrangedSubview(row)
                 row.widthAnchor.constraint(equalTo: transcriptStack.widthAnchor, constant: -8).isActive = true
@@ -1109,8 +1199,7 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
             row.spacing = 6
             row.wantsLayer = true
             row.layer?.cornerRadius = 8
-            row.layer?.backgroundColor = NSColor.controlBackgroundColor
-                .withAlphaComponent(0.7).cgColor
+            row.layer?.backgroundColor = theme.palette.secondarySurface.cgColor
             row.edgeInsets = NSEdgeInsets(top: 4, left: 7, bottom: 4, right: 5)
             row.setAccessibilityElement(true)
             row.setAccessibilityRole(.group)
@@ -1121,8 +1210,11 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
     }
 
     private func setStatus(_ text: String, isError: Bool) {
+        statusIsError = isError
         statusLabel.stringValue = text
-        statusLabel.textColor = isError ? .systemRed : .secondaryLabelColor
+        statusLabel.textColor = isError
+            ? theme.palette.error
+            : theme.palette.text.withAlphaComponent(0.68)
         statusLabel.setAccessibilityValue(text)
         guard lastAnnouncedStatus != text else { return }
         lastAnnouncedStatus = text
@@ -1164,8 +1256,14 @@ private final class ChatMessageRowView: NSStackView {
     private let bubble = NSView()
     private let spacer = NSView()
     private var messageContent: NSView?
+    private var message: ChatMessage
+    private var isStreaming: Bool
+    private var theme: AppTheme
 
-    init(message: ChatMessage, isStreaming: Bool) {
+    init(message: ChatMessage, isStreaming: Bool, theme: AppTheme) {
+        self.message = message
+        self.isStreaming = isStreaming
+        self.theme = theme
         super.init(frame: .zero)
         orientation = .horizontal
         alignment = .top
@@ -1174,11 +1272,6 @@ private final class ChatMessageRowView: NSStackView {
 
         bubble.wantsLayer = true
         bubble.layer?.cornerRadius = 13
-        bubble.layer?.backgroundColor = (
-            message.role == .user
-                ? NSColor.controlAccentColor.withAlphaComponent(0.18)
-                : NSColor.controlBackgroundColor.withAlphaComponent(0.86)
-        ).cgColor
         bubble.translatesAutoresizingMaskIntoConstraints = false
         bubble.widthAnchor.constraint(lessThanOrEqualToConstant: 300).isActive = true
         if message.role == .user {
@@ -1188,7 +1281,7 @@ private final class ChatMessageRowView: NSStackView {
             addArrangedSubview(bubble)
             addArrangedSubview(spacer)
         }
-        render(message, isStreaming: isStreaming)
+        applyTheme(theme)
     }
 
     @available(*, unavailable)
@@ -1197,6 +1290,8 @@ private final class ChatMessageRowView: NSStackView {
     }
 
     func render(_ message: ChatMessage, isStreaming: Bool) {
+        self.message = message
+        self.isStreaming = isStreaming
         messageContent?.removeFromSuperview()
 
         let content: NSView
@@ -1221,11 +1316,12 @@ private final class ChatMessageRowView: NSStackView {
                 label.attributedStringValue = AssistantMarkdownRenderer.render(
                     message.visibleText,
                     font: .systemFont(ofSize: 13),
-                    textColor: .labelColor,
+                    textColor: theme.palette.text,
                     isStreaming: isStreaming
                 )
             } else {
                 label.stringValue = message.visibleText
+                label.textColor = theme.palette.text
             }
             content = label
         }
@@ -1242,6 +1338,16 @@ private final class ChatMessageRowView: NSStackView {
         let role = message.role == .user ? "사용자" : "어시스턴트"
         let value = message.isLoading ? "응답을 기다리는 중" : message.visibleText
         setAccessibilityLabel("\(role): \(value)")
+    }
+
+    func applyTheme(_ theme: AppTheme) {
+        self.theme = theme
+        bubble.layer?.backgroundColor = (
+            message.role == .user
+                ? theme.palette.userMessage
+                : theme.palette.secondarySurface
+        ).cgColor
+        render(message, isStreaming: isStreaming)
     }
 }
 

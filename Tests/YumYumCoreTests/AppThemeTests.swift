@@ -1,0 +1,145 @@
+import AppKit
+import Foundation
+import Testing
+import YumYumCore
+@testable import YumYumApp
+
+@Suite
+struct AppThemeTests {
+    @Test
+    func savesLoadsAndDefaultsToDark() throws {
+        let suite = try #require(UserDefaults(suiteName: #function))
+        suite.removePersistentDomain(forName: #function)
+
+        #expect(AppTheme.load(defaults: suite) == .dark)
+        suite.set("invalid", forKey: AppTheme.defaultsKey)
+        #expect(AppTheme.load(defaults: suite) == .dark)
+
+        AppTheme.light.save(defaults: suite)
+        #expect(AppTheme.load(defaults: suite) == .light)
+        AppTheme.dark.save(defaults: suite)
+        #expect(AppTheme.load(defaults: suite) == .dark)
+    }
+
+    @Test
+    func palettesUseFixedSurfaceAndTextColors() {
+        #expect(AppTheme.light.palette.surface == NSColor(calibratedWhite: 0.96, alpha: 0.98))
+        #expect(AppTheme.light.palette.text == NSColor(calibratedWhite: 0.10, alpha: 0.94))
+        #expect(AppTheme.dark.palette.surface == NSColor(calibratedWhite: 0.14, alpha: 0.96))
+        #expect(AppTheme.dark.palette.text == NSColor(calibratedWhite: 1.00, alpha: 0.94))
+    }
+
+    @Test
+    @MainActor
+    func openChatAppliesThemeWithoutReplacingContentOrScrollPosition() throws {
+        let controller = QuickMenuViewController()
+        controller.loadView()
+        controller.render(
+            state: ChatBubbleState(
+                draftText: "draft",
+                draftAttachments: [
+                    ChatDraftAttachment(
+                        url: URL(fileURLWithPath: "/tmp/theme.txt"),
+                        isTemporary: false
+                    ),
+                ],
+                messages: [
+                    ChatMessage(role: .user, text: "question"),
+                    ChatMessage(role: .assistant, text: "**answer**"),
+                ]
+            ),
+            canRetry: true,
+            agentNotice: nil
+        )
+        controller.view.layoutSubtreeIfNeeded()
+        let scroll = try #require(descendants(of: controller.view, as: NSScrollView.self).first)
+        scroll.contentView.scroll(to: CGPoint(x: 0, y: 12))
+        let origin = scroll.contentView.bounds.origin
+        controller.applyTheme(.light)
+        let lightColors = layerBackgroundColors(in: controller.view)
+
+        controller.applyTheme(.dark)
+
+        #expect(layerBackgroundColors(in: controller.view) != lightColors)
+        #expect(scroll.contentView.bounds.origin == origin)
+        let text = descendants(of: controller.view, as: NSTextField.self)
+            .map(\.stringValue)
+        #expect(text.contains("draft"))
+        #expect(text.contains("question"))
+        #expect(text.contains("answer"))
+    }
+
+    @Test
+    @MainActor
+    func themesMarkdownErrorDisabledAndLayerBackedRows() throws {
+        let controller = QuickMenuViewController()
+        controller.loadView()
+        controller.render(
+            state: ChatBubbleState(
+                draftText: "",
+                draftAttachments: [
+                    ChatDraftAttachment(
+                        url: URL(fileURLWithPath: "/tmp/theme.txt"),
+                        isTemporary: false
+                    ),
+                ],
+                messages: [
+                    ChatMessage(role: .user, text: "question"),
+                    ChatMessage(role: .assistant, text: "**answer**"),
+                ],
+                phase: .failed("failed")
+            ),
+            canRetry: false,
+            agentNotice: nil
+        )
+
+        controller.applyTheme(.light)
+
+        let fields = descendants(of: controller.view, as: NSTextField.self)
+        let markdown = try #require(fields.first { $0.stringValue == "answer" })
+        let error = try #require(
+            fields.first { $0.accessibilityLabel() == "YumYum 상태" }
+        )
+        let send = try #require(
+            descendants(of: controller.view, as: NSButton.self)
+                .first { $0.title == "보내기" }
+        )
+        let markdownColor = markdown.attributedStringValue.attribute(
+            .foregroundColor,
+            at: 0,
+            effectiveRange: nil
+        ) as? NSColor
+        #expect(markdownColor == AppTheme.light.palette.text)
+        #expect(error.textColor == AppTheme.light.palette.error)
+        #expect(layerBackgroundColors(in: controller.view).contains(
+            AppTheme.light.palette.secondarySurface.cgColor
+        ))
+        #expect(layerBackgroundColors(in: controller.view).contains(
+            AppTheme.light.palette.userMessage.cgColor
+        ))
+        controller.render(
+            state: ChatBubbleState(
+                draftText: "busy",
+                phase: .sending(UUID())
+            ),
+            canRetry: false,
+            agentNotice: nil
+        )
+        #expect(!send.isEnabled)
+    }
+
+    @MainActor
+    private func descendants<T: NSView>(
+        of view: NSView,
+        as type: T.Type
+    ) -> [T] {
+        (view as? T).map { [$0] } ?? []
+            + view.subviews.flatMap { descendants(of: $0, as: type) }
+    }
+
+    @MainActor
+    private func layerBackgroundColors(in view: NSView) -> [CGColor] {
+        [view.layer?.backgroundColor].compactMap { $0 }
+            + view.subviews.flatMap(layerBackgroundColors)
+    }
+}

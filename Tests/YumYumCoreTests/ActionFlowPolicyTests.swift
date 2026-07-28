@@ -210,6 +210,15 @@ struct FeedPreviewFlightPolicyTests {
 @Suite
 struct ThinkingAnimationPolicyTests {
     @Test
+    func externalBubbleIsVisibleOnlyWhileThinkingWithChatClosed() {
+        let policy = ThinkingAnimationPolicy()
+
+        #expect(policy.showsExternalBubble(isThinking: true, isChatVisible: false))
+        #expect(!policy.showsExternalBubble(isThinking: true, isChatVisible: true))
+        #expect(!policy.showsExternalBubble(isThinking: false, isChatVisible: false))
+    }
+
+    @Test
     func chewUsesTheApprovedNineHundredMillisecondFramesAndHasAnExactReset() {
         let policy = ThinkingAnimationPolicy()
 

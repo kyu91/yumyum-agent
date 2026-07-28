@@ -100,6 +100,9 @@ final class QuickMenuPanelController: NSObject {
         chatController.onExplicitCancel = { [weak self] in
             self?.stopActivePresentation()
         }
+        chatController.onVisibilityChanged = { [weak self] _ in
+            self?.updateExternalThinkingVisibility()
+        }
 
         NotificationCenter.default.addObserver(
             self,
@@ -131,6 +134,15 @@ final class QuickMenuPanelController: NSObject {
         stopThinking()
         removeAnimationPreview()
         flow.returnToPet()
+    }
+
+    func applyTheme(_ theme: AppTheme) {
+        actionPanel.appearance = theme.appearance
+        thinkingPanel.appearance = theme.appearance
+        responsePanel.appearance = theme.appearance
+        chatController.applyTheme(theme)
+        thinkingViewController.applyTheme(theme)
+        responseViewController.applyTheme(theme)
     }
 
     func show() {
@@ -254,6 +266,12 @@ final class QuickMenuPanelController: NSObject {
         }
     }
 
+#if DEBUG
+    func renderChatForTesting(_ state: ChatBubbleState) {
+        chatController.renderForTesting(state)
+    }
+#endif
+
     private func select(_ action: ActionBubbleAction) {
         guard action != .capture && action != .findFile
                 || canFeed && !isCheckingAgents && !chatController.isSending else {
@@ -274,10 +292,7 @@ final class QuickMenuPanelController: NSObject {
             case .hideActionBubble:
                 lastActionSourceRect = actionPanel.frame
                 actionPanel.orderOut(nil)
-                if thinkingGeneration != nil {
-                    updateThinkingFrame()
-                    thinkingPanel.orderFrontRegardless()
-                }
+                updateExternalThinkingVisibility()
             case .hideAllForCapture:
                 hideAllForCapture()
             case let .beginCapture(generation):
@@ -312,6 +327,7 @@ final class QuickMenuPanelController: NSObject {
         actionPanel.orderOut(nil)
         responsePanel.orderOut(nil)
         chatController.show()
+        updateExternalThinkingVisibility()
         if scrollToLatest {
             chatController.scrollToLatest()
         }
@@ -501,8 +517,7 @@ final class QuickMenuPanelController: NSObject {
         thinkingGeneration = generation
         guard presentationEnabled else { return }
         petController.show()
-        updateThinkingFrame()
-        thinkingPanel.orderFrontRegardless()
+        updateExternalThinkingVisibility()
 
         let reduceMotion = lastReduceMotion
         if reduceMotion {
@@ -550,6 +565,19 @@ final class QuickMenuPanelController: NSObject {
         if resetPet {
             petController.resetChewPresentation()
         }
+    }
+
+    private func updateExternalThinkingVisibility() {
+        guard presentationEnabled,
+              thinkingPolicy.showsExternalBubble(
+                isThinking: thinkingGeneration != nil,
+                isChatVisible: chatController.isVisible
+              ) else {
+            thinkingPanel.orderOut(nil)
+            return
+        }
+        updateThinkingFrame()
+        thinkingPanel.orderFrontRegardless()
     }
 
     private func showResponse(
@@ -947,14 +975,11 @@ private final class ActionRowButton: NSButton {
 @MainActor
 final class ThinkingBubbleViewController: NSViewController {
     private let label = NSTextField(labelWithString: "Yum.")
+    private var theme = AppTheme.dark
 
     override func loadView() {
         let background = NSView()
         background.wantsLayer = true
-        background.layer?.backgroundColor = NSColor(
-            calibratedWhite: 0.14,
-            alpha: 0.96
-        ).cgColor
         background.layer?.cornerRadius = 16
         background.layer?.cornerCurve = .continuous
         background.layer?.borderWidth = 0.5
@@ -964,7 +989,6 @@ final class ThinkingBubbleViewController: NSViewController {
         background.setAccessibilityRole(.group)
         background.setAccessibilityLabel("YumYum이 응답을 생각하는 중")
         label.font = .systemFont(ofSize: 14, weight: .semibold)
-        label.textColor = NSColor.white.withAlphaComponent(0.94)
         label.alignment = .center
         label.setAccessibilityElement(false)
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -974,6 +998,16 @@ final class ThinkingBubbleViewController: NSViewController {
             label.centerYAnchor.constraint(equalTo: background.centerYAnchor),
         ])
         view = background
+        applyTheme(theme)
+    }
+
+    func applyTheme(_ theme: AppTheme) {
+        self.theme = theme
+        guard isViewLoaded else { return }
+        view.layer?.backgroundColor = theme.palette.surface.cgColor
+        view.layer?.borderColor = theme.palette.text
+            .withAlphaComponent(0.28).cgColor
+        label.textColor = theme.palette.text
     }
 
     func setThought(_ text: String) {
@@ -1007,6 +1041,7 @@ private final class ResponseBubbleViewController: NSViewController {
         isExcerpt: false,
         showsOpenChat: false
     )
+    private var theme = AppTheme.dark
 
     var preferredSize: CGSize {
         CGSize(
@@ -1019,7 +1054,7 @@ private final class ResponseBubbleViewController: NSViewController {
         AssistantMarkdownRenderer.render(
             content.displayText,
             font: .systemFont(ofSize: 13.5),
-            textColor: content.isError ? .systemRed : .labelColor
+            textColor: content.isError ? theme.palette.error : theme.palette.text
         )
     }
 
@@ -1119,6 +1154,14 @@ private final class ResponseBubbleViewController: NSViewController {
         height.isActive = true
         responseHeightConstraint = height
         view = background
+        render(content)
+        applyTheme(theme)
+    }
+
+    func applyTheme(_ theme: AppTheme) {
+        self.theme = theme
+        guard isViewLoaded else { return }
+        view.appearance = theme.appearance
         render(content)
     }
 

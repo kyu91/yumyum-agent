@@ -6,22 +6,23 @@ import Testing
 struct ThinkingBubbleViewControllerTests {
     @Test
     @MainActor
-    func usesFixedDarkSurfaceAndLightForeground() throws {
+    func appliesLightSurfaceAndDarkForeground() throws {
         let controller = ThinkingBubbleViewController()
         controller.loadView()
+        controller.applyTheme(.light)
         let label = try #require(textField(in: controller.view))
         let backgroundColor = try #require(controller.view.layer?.backgroundColor)
         let background = try #require(NSColor(cgColor: backgroundColor))
             .usingColorSpace(.deviceRGB)
         let foreground = try #require(label.textColor?.usingColorSpace(.deviceRGB))
 
-        #expect(try #require(background?.redComponent) < 0.25)
-        #expect(try #require(background?.greenComponent) < 0.25)
-        #expect(try #require(background?.blueComponent) < 0.25)
+        #expect(try #require(background?.redComponent) > 0.9)
+        #expect(try #require(background?.greenComponent) > 0.9)
+        #expect(try #require(background?.blueComponent) > 0.9)
         #expect(try #require(background?.alphaComponent) >= 0.9)
-        #expect(foreground.redComponent > 0.8)
-        #expect(foreground.greenComponent > 0.8)
-        #expect(foreground.blueComponent > 0.8)
+        #expect(foreground.redComponent < 0.2)
+        #expect(foreground.greenComponent < 0.2)
+        #expect(foreground.blueComponent < 0.2)
     }
 
     @MainActor

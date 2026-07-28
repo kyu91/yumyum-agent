@@ -6,6 +6,7 @@ import YumYumCore
 final class YumYumAppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     @Published private(set) var petVisibility = FloatingPetVisibilityPolicy()
     @Published private(set) var shortcutChoice = GlobalShortcutChoice.load()
+    @Published private(set) var currentTheme = AppTheme.load()
 
     private var petWindowController: FloatingPetWindowController?
     private var quickMenuController: QuickMenuPanelController?
@@ -117,6 +118,7 @@ final class YumYumAppDelegate: NSObject, NSApplicationDelegate, ObservableObject
                 self?.openMainWindow()
             }
         )
+        quickMenuController.applyTheme(currentTheme)
         feedback.quickMenuController = quickMenuController
         self.feedFeedback = feedback
         self.quickMenuController = quickMenuController
@@ -131,6 +133,13 @@ final class YumYumAppDelegate: NSObject, NSApplicationDelegate, ObservableObject
         shortcutChoice = choice
         choice.save()
         shortcutController?.update(choice: choice)
+    }
+
+    func setTheme(_ theme: AppTheme) {
+        currentTheme = theme
+        theme.save()
+        mainWindow?.appearance = theme.appearance
+        quickMenuController?.applyTheme(theme)
     }
 
     func showQuickMenu() {
@@ -171,6 +180,7 @@ final class YumYumAppDelegate: NSObject, NSApplicationDelegate, ObservableObject
             return
         }
         mainWindow = window
+        window.appearance = currentTheme.appearance
     }
 
     private func captureMainWindow() {
@@ -178,6 +188,7 @@ final class YumYumAppDelegate: NSObject, NSApplicationDelegate, ObservableObject
             !($0 is NSPanel) && $0.title == "YumYum"
         }) {
             mainWindow = window
+            window.appearance = currentTheme.appearance
         }
     }
 

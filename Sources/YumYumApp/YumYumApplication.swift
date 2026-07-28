@@ -19,6 +19,7 @@ struct YumYumApplication: App {
     var body: some Scene {
         Window("YumYum", id: "main") {
             YumYumContentView(viewModel: viewModel, appDelegate: appDelegate)
+                .preferredColorScheme(appDelegate.currentTheme.colorScheme)
                 .background {
                     MainWindowActionInstaller(
                         appDelegate: appDelegate,
@@ -34,6 +35,7 @@ struct YumYumApplication: App {
 
         MenuBarExtra("YumYum", systemImage: "takeoutbag.and.cup.and.straw.fill") {
             YumYumMenu(viewModel: viewModel, appDelegate: appDelegate)
+                .preferredColorScheme(appDelegate.currentTheme.colorScheme)
         }
     }
 
@@ -151,6 +153,7 @@ private struct YumYumContentView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 header
+                themeSection
                 agentSection
                 shortcutSection
                 hermesPathSection
@@ -169,6 +172,28 @@ private struct YumYumContentView: View {
         }
         .onDisappear {
             connectionTask?.cancel()
+        }
+    }
+
+    private var themeSection: some View {
+        GroupBox {
+            Picker(
+                "테마",
+                selection: Binding(
+                    get: { appDelegate.currentTheme },
+                    set: { appDelegate.setTheme($0) }
+                )
+            ) {
+                ForEach(AppTheme.allCases) { theme in
+                    Text(theme.displayName).tag(theme)
+                }
+            }
+            .pickerStyle(.segmented)
+            .accessibilityHint("YumYum 화면의 밝은 테마와 어두운 테마를 전환합니다")
+            .padding(.top, 4)
+        } label: {
+            Label("화면 테마", systemImage: "circle.lefthalf.filled")
+                .font(.headline)
         }
     }
 
