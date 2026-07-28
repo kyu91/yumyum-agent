@@ -337,7 +337,9 @@ enum AppTheme: String, CaseIterable, Identifiable {
                 secondaryText: NSColor(calibratedWhite: 0.28, alpha: 1),
                 border: NSColor(calibratedWhite: 0, alpha: 0.14),
                 shadow: NSColor(calibratedWhite: 0, alpha: 0.16),
-                error: NSColor(calibratedRed: 0.78, green: 0.12, blue: 0.16, alpha: 1)
+                error: NSColor(calibratedRed: 0.78, green: 0.12, blue: 0.16, alpha: 1),
+                primaryAction: NSColor(calibratedRed: 0.60, green: 0.20, blue: 0.07, alpha: 1),
+                secondaryAction: NSColor(calibratedRed: 0.64, green: 0.52, blue: 0.43, alpha: 1)
             )
         case .dark:
             AppThemePalette(
@@ -348,7 +350,9 @@ enum AppTheme: String, CaseIterable, Identifiable {
                 secondaryText: NSColor(calibratedWhite: 1.00, alpha: 0.68),
                 border: NSColor(calibratedWhite: 1.00, alpha: 0.18),
                 shadow: .clear,
-                error: NSColor(calibratedRed: 1, green: 0.38, blue: 0.42, alpha: 1)
+                error: NSColor(calibratedRed: 1, green: 0.38, blue: 0.42, alpha: 1),
+                primaryAction: NSColor(calibratedRed: 0.68, green: 0.24, blue: 0.05, alpha: 1),
+                secondaryAction: NSColor(calibratedRed: 0.48, green: 0.35, blue: 0.27, alpha: 1)
             )
         }
     }
@@ -371,6 +375,8 @@ struct AppThemePalette {
     let border: NSColor
     let shadow: NSColor
     let error: NSColor
+    let primaryAction: NSColor
+    let secondaryAction: NSColor
 }
 
 @MainActor

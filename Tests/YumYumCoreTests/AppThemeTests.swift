@@ -44,6 +44,24 @@ struct AppThemeTests {
             blue: 0.42,
             alpha: 1
         ))
+        for theme in AppTheme.allCases {
+            let primary = theme.palette.primaryAction
+            let secondary = theme.palette.secondaryAction
+            let primaryHSB = hsb(primary)
+            let secondaryHSB = hsb(secondary)
+
+            #expect(primary != secondary)
+            #expect(warmChannels(primary))
+            #expect(warmChannels(secondary))
+            #expect(primaryHSB.saturation > secondaryHSB.saturation)
+            #expect(hueDistance(primaryHSB.hue, secondaryHSB.hue) < 0.08)
+            #expect(abs(primaryHSB.brightness - secondaryHSB.brightness) < 0.22)
+            #expect(contrastRatio(primary, .white) >= 4.5)
+            #expect(contrastRatio(
+                secondary,
+                theme == .light ? theme.palette.text : .white
+            ) >= 4.5)
+        }
     }
 
     @Test
@@ -148,7 +166,7 @@ struct AppThemeTests {
 
     @Test
     @MainActor
-    func lightResponseDisablesVibrancyWithoutReplacingScrollState() throws {
+    func responseThemesIndependentSurfacesWithoutReplacingScrollState() throws {
         let controller = ResponseBubbleViewController()
         controller.loadView()
         controller.render(PetResponseContent(
@@ -166,18 +184,28 @@ struct AppThemeTests {
 
         controller.applyTheme(.light)
 
-        let effect = try #require(
-            descendants(of: controller.view, as: NSView.self).first {
-                $0.identifier?.rawValue == "YumYumGlassBackground"
-            }
-        )
-        #expect(effect.isHidden)
-        #expect(controller.view.layer?.backgroundColor
-            == AppTheme.light.palette.surface.cgColor)
+        let inline = try #require(descendants(of: controller.view, as: NSView.self).first {
+            $0.identifier?.rawValue == "response-inline-action-surface"
+        })
+        let detail = try #require(descendants(of: controller.view, as: NSView.self).first {
+            $0.identifier?.rawValue == "response-detail-action-surface"
+        })
+        #expect(controller.view.layer?.backgroundColor == NSColor.clear.cgColor)
+        #expect(layerBackgroundColors(in: inline).contains(
+            AppTheme.light.palette.primaryAction.cgColor
+        ))
+        #expect(layerBackgroundColors(in: detail).contains(
+            AppTheme.light.palette.secondaryAction.cgColor
+        ))
         #expect(scroll.contentView.bounds.origin == origin)
 
         controller.applyTheme(.dark)
-        #expect(!effect.isHidden)
+        #expect(layerBackgroundColors(in: inline).contains(
+            AppTheme.dark.palette.primaryAction.cgColor
+        ))
+        #expect(layerBackgroundColors(in: detail).contains(
+            AppTheme.dark.palette.secondaryAction.cgColor
+        ))
         #expect(scroll.contentView.bounds.origin == origin)
     }
 
@@ -194,5 +222,47 @@ struct AppThemeTests {
     private func layerBackgroundColors(in view: NSView) -> [CGColor] {
         [view.layer?.backgroundColor].compactMap { $0 }
             + view.subviews.flatMap(layerBackgroundColors)
+    }
+
+    private func hsb(_ color: NSColor) -> (hue: CGFloat, saturation: CGFloat, brightness: CGFloat) {
+        var hue: CGFloat = 0
+        var saturation: CGFloat = 0
+        var brightness: CGFloat = 0
+        color.usingColorSpace(.deviceRGB)?.getHue(
+            &hue,
+            saturation: &saturation,
+            brightness: &brightness,
+            alpha: nil
+        )
+        return (hue, saturation, brightness)
+    }
+
+    private func warmChannels(_ color: NSColor) -> Bool {
+        guard let rgb = color.usingColorSpace(.deviceRGB) else { return false }
+        return rgb.redComponent > rgb.greenComponent
+            && rgb.greenComponent > rgb.blueComponent
+    }
+
+    private func hueDistance(_ lhs: CGFloat, _ rhs: CGFloat) -> CGFloat {
+        let distance = abs(lhs - rhs)
+        return min(distance, 1 - distance)
+    }
+
+    private func contrastRatio(_ lhs: NSColor, _ rhs: NSColor) -> CGFloat {
+        let lighter = max(relativeLuminance(lhs), relativeLuminance(rhs))
+        let darker = min(relativeLuminance(lhs), relativeLuminance(rhs))
+        return (lighter + 0.05) / (darker + 0.05)
+    }
+
+    private func relativeLuminance(_ color: NSColor) -> CGFloat {
+        guard let rgb = color.usingColorSpace(.deviceRGB) else { return 0 }
+        func linear(_ channel: CGFloat) -> CGFloat {
+            channel <= 0.04045
+                ? channel / 12.92
+                : pow((channel + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * linear(rgb.redComponent)
+            + 0.7152 * linear(rgb.greenComponent)
+            + 0.0722 * linear(rgb.blueComponent)
     }
 }

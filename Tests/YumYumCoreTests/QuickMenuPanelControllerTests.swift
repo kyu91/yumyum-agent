@@ -7,6 +7,293 @@ import YumYumCore
 struct QuickMenuPanelControllerTests {
     @Test
     @MainActor
+    func responseUsesFourIndependentVerticalSurfacesOnATransparentRoot() throws {
+        _ = NSApplication.shared
+        let controller = ResponseBubbleViewController()
+        _ = controller.view
+        controller.render(PetResponsePolicy.content(for: "완료"))
+        controller.view.frame.size = controller.preferredSize
+        controller.view.layoutSubtreeIfNeeded()
+
+        let identifiers = [
+            "response-body-surface",
+            "response-inline-composer-surface",
+            "response-inline-action-surface",
+            "response-detail-action-surface",
+        ]
+        let surfaces = try identifiers.map { identifier in
+            try #require(flattened(controller.view).first {
+                $0.identifier?.rawValue == identifier
+            })
+        }
+
+        #expect(controller.view.layer?.backgroundColor == NSColor.clear.cgColor)
+        #expect(surfaces[1].isHidden)
+        #expect(surfaces[0].frame.minY > surfaces[2].frame.maxY)
+        #expect(surfaces[2].frame.minY > surfaces[3].frame.maxY)
+        #expect(abs(surfaces[0].frame.minY - surfaces[2].frame.maxY - 8) < 0.5)
+        #expect(abs(surfaces[2].frame.minY - surfaces[3].frame.maxY - 8) < 0.5)
+        #expect(!surfaces[0].frame.intersects(surfaces[2].frame))
+        #expect(!surfaces[2].frame.intersects(surfaces[3].frame))
+    }
+
+    @Test
+    @MainActor
+    func responseExpansionKeepsActionsEqualAndComposerOrderedAccessibleAndFocused() throws {
+        _ = NSApplication.shared
+        let controller = ResponseBubbleViewController()
+        let panel = ResponseBubblePanel(
+            contentRect: CGRect(x: 0, y: 0, width: 360, height: 140),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.contentViewController = controller
+        controller.onRequestInput = { panel.beginInput() }
+        controller.render(PetResponsePolicy.content(for: "완료"))
+        controller.renderChat(ChatBubbleState(draftText: "보존할 초안"))
+        controller.view.frame.size = controller.preferredSize
+        controller.view.layoutSubtreeIfNeeded()
+
+        let inline = try surface("response-inline-action-surface", in: controller.view)
+        let composerSurface = try surface("response-inline-composer-surface", in: controller.view)
+        let detail = try surface("response-detail-action-surface", in: controller.view)
+        let collapsedHeight = controller.preferredSize.height
+        let scroll = try #require(scrollViews(in: controller.view).first)
+        let composer = try #require(textFields(in: controller.view).first {
+            $0.accessibilityLabel() == "인라인 채팅 메시지"
+        })
+
+        #expect(inline.frame.size == detail.frame.size)
+        #expect(composerSurface.isHidden)
+        #expect(!composerSurface.isAccessibilityElement())
+        try pressButton(titled: "채팅 입력하기", in: controller.view)
+        controller.view.frame.size = controller.preferredSize
+        controller.view.layoutSubtreeIfNeeded()
+
+        #expect(controller.preferredSize.height > collapsedHeight)
+        #expect(!composerSurface.isHidden)
+        #expect(composerSurface.frame.minY > inline.frame.maxY)
+        #expect(inline.frame.minY > detail.frame.maxY)
+        #expect(index(of: composerSurface, in: controller.view)
+            < index(of: inline, in: controller.view))
+        #expect(composer.stringValue == "보존할 초안")
+        #expect(panel.canBecomeKey)
+        #expect(panel.firstResponder === composer.currentEditor())
+        #expect(scroll.documentView?.isDescendant(of: inline) == false)
+        #expect(scroll.documentView?.isDescendant(of: composerSurface) == false)
+        #expect(scroll.documentView?.isDescendant(of: detail) == false)
+    }
+
+    @Test
+    @MainActor
+    func collapsingInlineComposerMovesFocusBeforeReturnAndPreservesDraft() throws {
+        _ = NSApplication.shared
+        let controller = ResponseBubbleViewController()
+        let panel = ResponseBubblePanel(
+            contentRect: CGRect(x: 0, y: 0, width: 360, height: 140),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.contentViewController = controller
+        controller.onRequestInput = { panel.beginInput() }
+        var sends = 0
+        controller.onSend = { sends += 1 }
+        controller.render(PetResponsePolicy.content(for: "완료"))
+        controller.renderChat(ChatBubbleState(draftText: "보존할 초안"))
+
+        try pressButton(titled: "채팅 입력하기", in: controller.view)
+        let composerSurface = try surface(
+            "response-inline-composer-surface",
+            in: controller.view
+        )
+        let composer = try #require(textFields(in: controller.view).first {
+            $0.accessibilityLabel() == "인라인 채팅 메시지"
+        })
+        let inline = try #require(buttons(in: controller.view).first {
+            $0.title == "채팅 입력하기"
+        })
+        #expect(panel.firstResponder === composer.currentEditor())
+
+        inline.performClick(nil)
+
+        #expect(composerSurface.isHidden)
+        #expect(!composerSurface.isAccessibilityElement())
+        #expect(panel.firstResponder === inline)
+        _ = panel.firstResponder?.tryToPerform(
+            #selector(NSResponder.insertNewline(_:)),
+            with: nil
+        )
+        #expect(sends == 0)
+
+        inline.performClick(nil)
+        #expect(composer.stringValue == "보존할 초안")
+        #expect(panel.firstResponder === composer.currentEditor())
+    }
+
+    @Test
+    @MainActor
+    func responseErrorKeepsMinimalRetryBehavior() throws {
+        _ = NSApplication.shared
+        let controller = ResponseBubbleViewController()
+        _ = controller.view
+        var retries = 0
+        controller.onRetry = { retries += 1 }
+
+        controller.render(PetResponsePolicy.error(message: "실패"))
+        let retry = try #require(buttons(in: controller.view).first {
+            $0.accessibilityLabel() == "마지막 입력 재시도"
+        })
+        #expect(!retry.isHidden)
+        retry.performClick(nil)
+        #expect(retries == 1)
+
+        controller.render(PetResponsePolicy.content(for: "복구"))
+        #expect(retry.isHidden)
+    }
+
+    @Test
+    @MainActor
+    func responseFitsAClampedPanelWithoutRemovingTheMinimumBodyViewport() throws {
+        _ = NSApplication.shared
+        let controller = ResponseBubbleViewController()
+        _ = controller.view
+        controller.render(PetResponsePolicy.content(for: String(repeating: "긴 답변\n", count: 80)))
+
+        controller.fitPanelHeight(220)
+        controller.view.frame.size = CGSize(width: 360, height: 220)
+        controller.view.layoutSubtreeIfNeeded()
+
+        let bodyScroll = try #require(scrollViews(in: controller.view).first)
+        #expect(bodyScroll.frame.height >= 44)
+        #expect(flattened(controller.view).filter {
+            $0.identifier?.rawValue.hasPrefix("response-") == true && !$0.isHidden
+        }.allSatisfy {
+            $0.frame.minY >= 0 && $0.frame.maxY <= controller.view.bounds.maxY
+        })
+    }
+
+    @Test
+    @MainActor
+    func expandedComposerConstraintTracksDraftAttachmentsAndPreferredHeight() throws {
+        _ = NSApplication.shared
+        let controller = ResponseBubbleViewController()
+        _ = controller.view
+        controller.render(PetResponsePolicy.content(for: "완료"))
+        controller.renderChat(ChatBubbleState())
+        try pressButton(titled: "채팅 입력하기", in: controller.view)
+        controller.view.frame.size = controller.preferredSize
+        controller.view.layoutSubtreeIfNeeded()
+
+        let composerSurface = try surface(
+            "response-inline-composer-surface",
+            in: controller.view
+        )
+        let plainHeight = composerSurface.frame.height
+        #expect(plainHeight > 0)
+
+        controller.renderChat(
+            ChatBubbleState(
+                draftAttachments: [
+                    ChatDraftAttachment(
+                        url: URL(fileURLWithPath: "/private/tmp/report.pdf"),
+                        isTemporary: false
+                    ),
+                ]
+            )
+        )
+        controller.view.frame.size = controller.preferredSize
+        controller.view.layoutSubtreeIfNeeded()
+
+        #expect(composerSurface.frame.height > plainHeight)
+        #expect(abs(controller.view.frame.height - controller.preferredSize.height) < 0.5)
+        #expect(!controller.view.hasAmbiguousLayout)
+    }
+
+    @Test
+    @MainActor
+    func constrainedExpandedErrorWithAttachmentKeepsEverySurfaceInsideNegativeOriginPanel() throws {
+        _ = NSApplication.shared
+        let controller = ResponseBubbleViewController()
+        _ = controller.view
+        controller.render(PetResponsePolicy.error(message: String(repeating: "실패\n", count: 40)))
+        controller.renderChat(
+            ChatBubbleState(
+                draftAttachments: [
+                    ChatDraftAttachment(
+                        url: URL(fileURLWithPath: "/private/tmp/report.pdf"),
+                        isTemporary: false
+                    ),
+                ]
+            )
+        )
+        try pressButton(titled: "채팅 입력하기", in: controller.view)
+        controller.fitPanelHeight(220)
+        controller.view.frame = CGRect(x: -720, y: -360, width: 360, height: 220)
+        controller.view.layoutSubtreeIfNeeded()
+
+        let visibleSurfaces = flattened(controller.view).filter {
+            $0.identifier?.rawValue.hasPrefix("response-") == true && !$0.isHidden
+        }
+        let localBounds = controller.view.bounds
+        #expect(visibleSurfaces.count == 4)
+        #expect(visibleSurfaces.allSatisfy { $0.frame.height > 0 })
+        #expect(visibleSurfaces.allSatisfy {
+            $0.frame.minY >= localBounds.minY && $0.frame.maxY <= localBounds.maxY
+        })
+        #expect(visibleSurfaces.indices.allSatisfy { first in
+            visibleSurfaces.indices.allSatisfy { second in
+                first == second || !visibleSurfaces[first].frame.intersects(
+                    visibleSurfaces[second].frame
+                )
+            }
+        })
+        #expect(!controller.view.hasAmbiguousLayout)
+    }
+
+    @Test
+    @MainActor
+    func responseActionsReturnToNeutralAfterPanelHideAndKeyLoss() throws {
+        _ = NSApplication.shared
+        let controller = ResponseBubbleViewController()
+        let panel = ResponseBubblePanel(
+            contentRect: CGRect(x: 0, y: 0, width: 360, height: 220),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.contentViewController = controller
+        controller.render(PetResponsePolicy.content(for: "완료"))
+        let actions = buttons(in: controller.view).filter {
+            $0.title == "채팅 입력하기" || $0.title == "채팅창 상세"
+        }
+        let event = try #require(NSEvent.mouseEvent(
+            with: .mouseMoved,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            eventNumber: 0,
+            clickCount: 0,
+            pressure: 0
+        ))
+
+        actions.forEach { $0.mouseEntered(with: event) }
+        panel.beginInput()
+        panel.makeFirstResponder(actions[0])
+        panel.resignKey()
+        panel.orderOut(nil)
+
+        #expect(actions.allSatisfy {
+            $0.layer?.backgroundColor == NSColor.white.withAlphaComponent(0).cgColor
+                && $0.layer?.borderWidth == 0
+        })
+    }
+
+    @Test
+    @MainActor
     func droppedFilesUseTheProductionWorkflowExactlyOnceAndRejectInvalidOrBusyDrops() async throws {
         _ = NSApplication.shared
         let directory = FileManager.default.temporaryDirectory
@@ -510,6 +797,13 @@ struct QuickMenuPanelControllerTests {
         guard let view else { return [] }
         return (view as? NSScrollView).map { [$0] } ?? []
             + view.subviews.flatMap(scrollViews)
+    }
+
+    @MainActor
+    private func surface(_ identifier: String, in view: NSView) throws -> NSView {
+        try #require(flattened(view).first {
+            $0.identifier?.rawValue == identifier
+        })
     }
 
     @MainActor

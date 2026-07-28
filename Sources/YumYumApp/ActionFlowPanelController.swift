@@ -179,6 +179,9 @@ final class QuickMenuPanelController: NSObject {
         chatController.applyTheme(theme)
         thinkingViewController.applyTheme(theme)
         responseViewController.applyTheme(theme)
+        if responsePanel.isVisible {
+            updateResponseFrame()
+        }
     }
 
     func canAcceptDroppedFiles(_ urls: [URL]) -> Bool {
@@ -751,14 +754,13 @@ final class QuickMenuPanelController: NSObject {
 
     private func updateResponseFrame() {
         let size = responseViewController.preferredSize
-        responsePanel.setFrame(
-            layout.panelFrame(
-                petFrame: petController.panel.frame,
-                panelSize: size,
-                visibleFrames: NSScreen.screens.map(\.visibleFrame)
-            ),
-            display: true
+        let frame = layout.panelFrame(
+            petFrame: petController.panel.frame,
+            panelSize: size,
+            visibleFrames: NSScreen.screens.map(\.visibleFrame)
         )
+        responseViewController.fitPanelHeight(frame.height)
+        responsePanel.setFrame(frame, display: true)
     }
 
     @objc
@@ -855,10 +857,14 @@ final class ResponseBubblePanel: NSPanel {
     override func resignKey() {
         super.resignKey()
         acceptsKeyInput = false
+        (contentViewController as? ResponseBubbleViewController)?
+            .resetActionInteractionState()
     }
 
     override func orderOut(_ sender: Any?) {
         acceptsKeyInput = false
+        (contentViewController as? ResponseBubbleViewController)?
+            .resetActionInteractionState()
         super.orderOut(sender)
     }
 }
@@ -1144,12 +1150,14 @@ final class ThinkingBubbleViewController: NSViewController {
 @MainActor
 final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate {
     private static let panelWidth: CGFloat = 360
-    private static let bodyWidth: CGFloat = 328
-    private static let minPanelHeight: CGFloat = 72
+    private static let bodyWidth: CGFloat = 312
+    private static let minBodyHeight: CGFloat = 44
     private static let maxPanelHeight: CGFloat = 310
-    private static let verticalInsets: CGFloat = 28
-    private static let buttonRowHeight: CGFloat = 25
-    private static let stackSpacing: CGFloat = 9
+    private static let surfaceInset: CGFloat = 8
+    private static let bodyInsets: CGFloat = 28
+    private static let actionHeight: CGFloat = 36
+    private static let composerHeight: CGFloat = 50
+    private static let stackSpacing: CGFloat = 8
 
     var onOpenChat: (() -> Void)?
     var onRetry: (() -> Void)?
@@ -1160,15 +1168,21 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
 
     private let label = NSTextField(wrappingLabelWithString: "")
     private let responseScroll = NSScrollView()
-    private let inlineToggleButton = NSButton(title: "채팅 입력하기", target: nil, action: nil)
-    private let openChatButton = NSButton(title: "채팅창 상세", target: nil, action: nil)
+    private let inlineToggleButton = ResponseActionButton(title: "채팅 입력하기")
+    private let openChatButton = ResponseActionButton(title: "채팅창 상세")
     private let retryButton = NSButton(title: "재시도", target: nil, action: nil)
-    private let buttonRow = NSStackView()
+    private let retryRow = NSStackView()
     private let composer = NSTextField()
     private let sendButton = NSButton(title: "전송", target: nil, action: nil)
     private let attachmentLabel = NSTextField(labelWithString: "")
     private let inlineStack = NSStackView()
+    private let bodySurface = ResponseSurfaceView(identifier: "response-body-surface")
+    private let inlineActionSurface = ResponseSurfaceView(identifier: "response-inline-action-surface")
+    private let composerSurface = ResponseSurfaceView(identifier: "response-inline-composer-surface")
+    private let detailActionSurface = ResponseSurfaceView(identifier: "response-detail-action-surface")
     private var responseHeightConstraint: NSLayoutConstraint?
+    private var composerHeightConstraint: NSLayoutConstraint?
+    private var surfaceStack: NSStackView?
     private var isInlineExpanded = false
     private var content = PetResponseContent(
         fullText: "",
@@ -1200,38 +1214,53 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
         ).height) + 2
     }
 
-    private var buttonChromeHeight: CGFloat {
-        let rows = Self.buttonRowHeight * 2
-        guard isInlineExpanded else {
-            return rows + Self.stackSpacing
-        }
+    private var composerSurfaceHeight: CGFloat {
+        guard isInlineExpanded else { return 0 }
         let attachmentHeight = attachmentLabel.isHidden
             ? 0
             : ceil(attachmentLabel.intrinsicContentSize.height) + inlineStack.spacing
-        return rows + 28 + attachmentHeight + Self.stackSpacing * 3
+        return Self.composerHeight + attachmentHeight
+    }
+
+    private var chromeHeight: CGFloat {
+        let fixed = Self.actionHeight * 2 + Self.stackSpacing * 2
+        return isInlineExpanded
+            ? fixed + composerSurfaceHeight + Self.stackSpacing
+            : fixed
+    }
+
+    private var retryHeight: CGFloat {
+        content.showsRetry ? Self.actionHeight : 0
     }
 
     private var preferredPanelHeight: CGFloat {
         min(
             Self.maxPanelHeight,
             max(
-                Self.minPanelHeight,
-                measuredTextHeight + Self.verticalInsets + buttonChromeHeight
+                Self.minBodyHeight + Self.bodyInsets + chromeHeight + retryHeight
+                    + Self.surfaceInset * 2,
+                measuredTextHeight + Self.bodyInsets + chromeHeight + retryHeight
+                    + Self.surfaceInset * 2
             )
         )
     }
 
     private var visibleTextHeight: CGFloat {
-        preferredPanelHeight - Self.verticalInsets - buttonChromeHeight
+        max(
+            Self.minBodyHeight,
+            preferredPanelHeight - Self.bodyInsets - chromeHeight - retryHeight
+                - Self.surfaceInset * 2
+        )
     }
 
     override func loadView() {
-        let background = ClickableGlassView()
-        installGlassBackground(in: background, cornerRadius: 18)
-        background.onClick = { [weak self] in self?.onOpenChat?() }
-        background.setAccessibilityElement(true)
-        background.setAccessibilityRole(.group)
-        background.setAccessibilityHelp("누르면 전체 채팅을 엽니다.")
+        let root = NSView()
+        root.wantsLayer = true
+        root.layer?.backgroundColor = NSColor.clear.cgColor
+        bodySurface.content.onClick = { [weak self] in self?.onOpenChat?() }
+        bodySurface.setAccessibilityElement(true)
+        bodySurface.setAccessibilityRole(.group)
+        bodySurface.setAccessibilityHelp("누르면 전체 채팅을 엽니다.")
 
         label.font = .systemFont(ofSize: 13.5)
         label.maximumNumberOfLines = 0
@@ -1263,22 +1292,15 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
 
         openChatButton.target = self
         openChatButton.action = #selector(openChatPressed)
-        openChatButton.bezelStyle = .rounded
         openChatButton.setAccessibilityLabel("전체 답변을 채팅에서 열기")
         inlineToggleButton.target = self
         inlineToggleButton.action = #selector(toggleInline)
-        inlineToggleButton.bezelStyle = .rounded
         inlineToggleButton.setAccessibilityLabel("응답 말풍선에서 채팅 입력하기")
         retryButton.target = self
         retryButton.action = #selector(retryPressed)
         retryButton.bezelStyle = .rounded
         retryButton.setAccessibilityLabel("마지막 입력 재시도")
 
-        buttonRow.setViews([NSView(), retryButton, inlineToggleButton], in: .leading)
-        buttonRow.orientation = .horizontal
-        buttonRow.alignment = .centerY
-        buttonRow.spacing = 8
-        buttonRow.heightAnchor.constraint(equalToConstant: Self.buttonRowHeight).isActive = true
         composer.placeholderString = "메시지 입력"
         composer.delegate = self
         composer.target = self
@@ -1299,29 +1321,74 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
         inlineStack.setViews([attachmentLabel, composerRow], in: .top)
         inlineStack.orientation = .vertical
         inlineStack.spacing = 5
-        let detailRow = NSStackView(views: [NSView(), openChatButton])
-        detailRow.orientation = .horizontal
-        let stack = NSStackView(views: [responseScroll, buttonRow, inlineStack, detailRow])
+
+        retryRow.setViews([NSView(), retryButton], in: .leading)
+        retryRow.orientation = .horizontal
+        retryRow.heightAnchor.constraint(equalToConstant: Self.actionHeight).isActive = true
+        let bodyStack = NSStackView(views: [responseScroll, retryRow])
+        bodyStack.orientation = .vertical
+        bodyStack.spacing = 0
+        bodyStack.translatesAutoresizingMaskIntoConstraints = false
+        bodySurface.content.addSubview(bodyStack)
+        NSLayoutConstraint.activate([
+            bodyStack.leadingAnchor.constraint(equalTo: bodySurface.content.leadingAnchor, constant: 16),
+            bodyStack.trailingAnchor.constraint(equalTo: bodySurface.content.trailingAnchor, constant: -16),
+            bodyStack.topAnchor.constraint(equalTo: bodySurface.content.topAnchor, constant: 14),
+            bodyStack.bottomAnchor.constraint(equalTo: bodySurface.content.bottomAnchor, constant: -14),
+            responseScroll.widthAnchor.constraint(equalTo: bodyStack.widthAnchor),
+            retryRow.widthAnchor.constraint(equalTo: bodyStack.widthAnchor),
+        ])
+        inlineActionSurface.content.addSubview(inlineToggleButton)
+        composerSurface.content.addSubview(inlineStack)
+        detailActionSurface.content.addSubview(openChatButton)
+        for (child, surface) in [
+            (inlineToggleButton, inlineActionSurface),
+            (inlineStack, composerSurface),
+            (openChatButton, detailActionSurface),
+        ] {
+            child.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                child.leadingAnchor.constraint(equalTo: surface.content.leadingAnchor, constant: 10),
+                child.trailingAnchor.constraint(equalTo: surface.content.trailingAnchor, constant: -10),
+                child.topAnchor.constraint(equalTo: surface.content.topAnchor, constant: 4),
+                child.bottomAnchor.constraint(equalTo: surface.content.bottomAnchor, constant: -4),
+            ])
+        }
+
+        let stack = NSStackView(views: [
+            bodySurface,
+            composerSurface,
+            inlineActionSurface,
+            detailActionSurface,
+        ])
         stack.orientation = .vertical
-        stack.alignment = .leading
+        stack.alignment = .trailing
         stack.spacing = Self.stackSpacing
         stack.translatesAutoresizingMaskIntoConstraints = false
-        background.addSubview(stack)
-        for arrangedView in stack.arrangedSubviews {
-            arrangedView.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-        }
+        root.addSubview(stack)
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: background.leadingAnchor, constant: 16),
-            stack.trailingAnchor.constraint(equalTo: background.trailingAnchor, constant: -16),
-            stack.topAnchor.constraint(equalTo: background.topAnchor, constant: 14),
-            stack.bottomAnchor.constraint(equalTo: background.bottomAnchor, constant: -14),
+            stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: Self.surfaceInset),
+            stack.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -Self.surfaceInset),
+            stack.topAnchor.constraint(equalTo: root.topAnchor, constant: Self.surfaceInset),
+            stack.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -Self.surfaceInset),
+            bodySurface.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            inlineActionSurface.widthAnchor.constraint(equalToConstant: 164),
+            composerSurface.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            detailActionSurface.widthAnchor.constraint(equalToConstant: 164),
+            inlineActionSurface.heightAnchor.constraint(equalToConstant: Self.actionHeight),
+            detailActionSurface.heightAnchor.constraint(equalToConstant: Self.actionHeight),
             composer.heightAnchor.constraint(equalToConstant: 28),
-            detailRow.heightAnchor.constraint(equalToConstant: Self.buttonRowHeight),
         ])
+        let composerHeight = composerSurface.heightAnchor.constraint(
+            equalToConstant: composerSurfaceHeight
+        )
+        composerHeight.isActive = true
+        composerHeightConstraint = composerHeight
+        surfaceStack = stack
         let height = responseScroll.heightAnchor.constraint(equalToConstant: visibleTextHeight)
         height.isActive = true
         responseHeightConstraint = height
-        view = background
+        view = root
         render(content)
         applyTheme(theme)
     }
@@ -1329,24 +1396,30 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
     func applyTheme(_ theme: AppTheme) {
         self.theme = theme
         guard isViewLoaded else { return }
+        let scrollOrigin = responseScroll.contentView.bounds.origin
         view.appearance = theme.appearance
-        view.wantsLayer = true
         let opaqueSurface = theme == .light
             || NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
-        view.layer?.backgroundColor = opaqueSurface
-            ? theme.palette.surface.withAlphaComponent(1).cgColor
-            : NSColor.clear.cgColor
-        setGlassBackgroundsHidden(opaqueSurface, in: view)
-        view.layer?.borderWidth = theme == .light
-            ? (NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast ? 1 : 0.5)
-            : 0
-        view.layer?.borderColor = theme.palette.border.cgColor
-        view.layer?.shadowColor = theme.palette.shadow.cgColor
-        view.layer?.shadowOpacity = theme == .light ? 1 : 0
-        view.layer?.shadowRadius = 8
-        view.layer?.shadowOffset = CGSize(width: 0, height: -2)
+        view.layer?.backgroundColor = NSColor.clear.cgColor
+        for surface in [bodySurface, composerSurface] {
+            surface.applyTheme(theme, color: theme.palette.surface, opaque: opaqueSurface)
+        }
+        inlineActionSurface.applyTheme(
+            theme,
+            color: theme.palette.primaryAction,
+            opaque: true
+        )
+        detailActionSurface.applyTheme(
+            theme,
+            color: theme.palette.secondaryAction,
+            opaque: true
+        )
+        inlineToggleButton.contentTintColor = .white
+        openChatButton.contentTintColor = theme == .light ? theme.palette.text : .white
         attachmentLabel.textColor = theme.palette.secondaryText
         render(content, resetScroll: false)
+        responseScroll.contentView.scroll(to: scrollOrigin)
+        responseScroll.reflectScrolledClipView(responseScroll.contentView)
     }
 
     func render(_ content: PetResponseContent, resetScroll: Bool = true) {
@@ -1355,10 +1428,10 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
         label.attributedStringValue = renderedText
         openChatButton.isHidden = false
         retryButton.isHidden = !content.showsRetry
+        retryRow.isHidden = !content.showsRetry
         inlineToggleButton.isHidden = false
-        buttonRow.isHidden = false
-        inlineStack.isHidden = !isInlineExpanded
-        responseHeightConstraint?.constant = visibleTextHeight
+        composerSurface.isHidden = !isInlineExpanded
+        updateLayout()
         responseScroll.hasVerticalScroller = measuredTextHeight > visibleTextHeight
         if resetScroll {
             DispatchQueue.main.async { [weak self] in
@@ -1367,15 +1440,15 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
                 self.responseScroll.reflectScrolledClipView(self.responseScroll.contentView)
             }
         }
-        view.setAccessibilityRole(
+        bodySurface.setAccessibilityRole(
             content.showsOpenChat || content.showsRetry ? .group : .button
         )
-        view.setAccessibilityLabel(
+        bodySurface.setAccessibilityLabel(
             content.isExcerpt
                 ? "YumYum 답변 요약. 채팅에서 전체 답변을 열 수 있습니다."
                 : "YumYum 답변"
         )
-        view.setAccessibilityValue(content.displayText)
+        bodySurface.setAccessibilityValue(content.displayText)
     }
 
     @objc private func openChatPressed() { onOpenChat?() }
@@ -1395,6 +1468,34 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
             || !attachments.isEmpty
         composer.isEnabled = !state.isSending
         sendButton.isEnabled = hasDraft && !state.isSending
+        updateLayout()
+    }
+
+    func fitPanelHeight(_ height: CGFloat) {
+        composerHeightConstraint?.constant = composerSurfaceHeight
+        let surfaceCount: CGFloat = isInlineExpanded ? 4 : 3
+        let gapCount = surfaceCount - 1
+        let fixedHeight = Self.surfaceInset * 2 + Self.bodyInsets + retryHeight
+            + Self.actionHeight * 2 + composerSurfaceHeight
+        let spacing = min(Self.stackSpacing, max(0, (height - fixedHeight) / gapCount))
+        surfaceStack?.spacing = spacing
+        responseHeightConstraint?.constant = max(
+            0,
+            height - fixedHeight - spacing * gapCount
+        )
+        view.layoutSubtreeIfNeeded()
+    }
+
+    func resetActionInteractionState() {
+        inlineToggleButton.resetInteractionState()
+        openChatButton.resetInteractionState()
+    }
+
+    private func updateLayout() {
+        composerHeightConstraint?.constant = composerSurfaceHeight
+        surfaceStack?.spacing = Self.stackSpacing
+        responseHeightConstraint?.constant = visibleTextHeight
+        view.layoutSubtreeIfNeeded()
     }
 
 #if DEBUG
@@ -1413,10 +1514,13 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
 
     @objc
     private func toggleInline() {
+        if isInlineExpanded {
+            view.window?.makeFirstResponder(inlineToggleButton)
+        }
         isInlineExpanded.toggle()
         inlineToggleButton.state = isInlineExpanded ? .on : .off
-        inlineStack.isHidden = !isInlineExpanded
-        responseHeightConstraint?.constant = visibleTextHeight
+        composerSurface.isHidden = !isInlineExpanded
+        updateLayout()
         onPreferredSizeChanged?()
         if isInlineExpanded {
             onRequestInput?()
@@ -1434,6 +1538,133 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
 
 private final class ResponseDocumentView: NSView {
     override var isFlipped: Bool { true }
+}
+
+private final class ResponseActionButton: NSButton {
+    private var trackingAreaReference: NSTrackingArea?
+    private var isHovered = false
+    private var isPressed = false
+
+    init(title: String) {
+        super.init(frame: .zero)
+        self.title = title
+        isBordered = false
+        font = .systemFont(ofSize: 13, weight: .semibold)
+        focusRingType = .none
+        wantsLayer = true
+        layer?.cornerRadius = 10
+        layer?.cornerCurve = .continuous
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var acceptsFirstResponder: Bool { true }
+    override var isEnabled: Bool {
+        didSet { updateAppearance() }
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingAreaReference {
+            removeTrackingArea(trackingAreaReference)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.activeAlways, .mouseEnteredAndExited, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingAreaReference = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+        updateAppearance()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovered = false
+        updateAppearance()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        isPressed = true
+        updateAppearance()
+        super.mouseDown(with: event)
+        isPressed = false
+        updateAppearance()
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        updateAppearance()
+        return accepted
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let accepted = super.resignFirstResponder()
+        updateAppearance()
+        return accepted
+    }
+
+    func resetInteractionState() {
+        isHovered = false
+        isPressed = false
+        updateAppearance()
+    }
+
+    private func updateAppearance() {
+        alphaValue = isEnabled ? 1 : 0.42
+        let focused = window?.isKeyWindow == true && window?.firstResponder === self
+        layer?.backgroundColor = NSColor.white.withAlphaComponent(
+            isPressed ? 0.22 : (isHovered || focused ? 0.13 : 0)
+        ).cgColor
+        layer?.borderWidth = focused ? 1 : 0
+        layer?.borderColor = NSColor.keyboardFocusIndicatorColor
+            .withAlphaComponent(0.72).cgColor
+    }
+}
+
+@MainActor
+private final class ResponseSurfaceView: NSView {
+    let content = ClickableGlassView()
+
+    init(identifier: String) {
+        super.init(frame: .zero)
+        self.identifier = NSUserInterfaceItemIdentifier(identifier)
+        wantsLayer = true
+        layer?.masksToBounds = false
+        content.translatesAutoresizingMaskIntoConstraints = false
+        installGlassBackground(in: content, cornerRadius: 14)
+        addSubview(content)
+        NSLayoutConstraint.activate([
+            content.leadingAnchor.constraint(equalTo: leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: trailingAnchor),
+            content.topAnchor.constraint(equalTo: topAnchor),
+            content.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func applyTheme(_ theme: AppTheme, color: NSColor, opaque: Bool) {
+        content.layer?.backgroundColor = opaque ? color.cgColor : NSColor.clear.cgColor
+        content.layer?.borderWidth = NSWorkspace.shared
+            .accessibilityDisplayShouldIncreaseContrast ? 1 : 0.5
+        content.layer?.borderColor = theme.palette.border.cgColor
+        setGlassBackgroundsHidden(opaque, in: content)
+        layer?.shadowColor = theme.palette.shadow.cgColor
+        layer?.shadowOpacity = theme == .light ? 1 : 0
+        layer?.shadowRadius = 8
+        layer?.shadowOffset = CGSize(width: 0, height: -2)
+    }
 }
 
 private final class ClickableGlassView: NSView {
