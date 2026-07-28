@@ -100,7 +100,10 @@ final class QuickMenuPanelController: NSObject {
         chatController.onExplicitCancel = { [weak self] in
             self?.stopActivePresentation()
         }
-        chatController.onVisibilityChanged = { [weak self] _ in
+        chatController.onVisibilityChanged = { [weak self] isVisible in
+            if isVisible {
+                self?.responsePanel.orderOut(nil)
+            }
             self?.updateExternalThinkingVisibility()
         }
 
@@ -589,6 +592,10 @@ final class QuickMenuPanelController: NSObject {
         actionPanel.orderOut(nil)
         guard presentationEnabled else {
             flow.returnToPet()
+            return
+        }
+        guard !chatController.isVisible else {
+            responsePanel.orderOut(nil)
             return
         }
         petController.show()

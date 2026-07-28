@@ -7,6 +7,53 @@ import YumYumCore
 struct QuickMenuPanelControllerTests {
     @Test
     @MainActor
+    func completedExternalResponseDoesNotReappearAfterChatCloses() throws {
+        _ = NSApplication.shared
+        let pet = FloatingPetWindowController {}
+        let viewModel = YumYumAppViewModel(
+            fixtureProbe: UnusedFixtureProbe()
+        )
+        let feedback = AppFeedFeedback(petController: pet)
+        let controller = QuickMenuPanelController(
+            petController: pet,
+            viewModel: viewModel,
+            workflow: FeedWorkflow(
+                sender: viewModel.agentRuntime,
+                feedback: feedback
+            ),
+            openSettings: {}
+        )
+        defer { controller.prepareForTermination() }
+        controller.applyFeedStatus(
+            FeedStatusUpdate(generation: UUID(), status: .failed("retry"))
+        )
+        #expect(controller.responsePanel.isVisible)
+
+        try pressButton(
+            accessibilityLabel: "전체 답변을 채팅에서 열기",
+            in: controller.responsePanel.contentView
+        )
+        let chatPanel = try #require(
+            NSApp.windows.first { $0.title == "YumYum 대화" }
+        )
+        #expect(chatPanel.isVisible)
+        #expect(!controller.responsePanel.isVisible)
+
+        controller.applyFeedStatus(
+            FeedStatusUpdate(
+                generation: UUID(),
+                status: .completed("완료 응답")
+            )
+        )
+
+        #expect(!controller.responsePanel.isVisible)
+
+        try pressButton(accessibilityLabel: "대화 말풍선 닫기", in: chatPanel.contentView)
+        #expect(!controller.responsePanel.isVisible)
+    }
+
+    @Test
+    @MainActor
     func chatVisibilityControlsExternalThinkingWithoutStoppingIt() throws {
         _ = NSApplication.shared
         let pet = FloatingPetWindowController {}
@@ -23,6 +70,7 @@ struct QuickMenuPanelControllerTests {
             ),
             openSettings: {}
         )
+        defer { controller.prepareForTermination() }
         controller.show()
         try pressButton(titled: "채팅 열기", in: controller.actionPanel.contentView)
         let chatPanel = try #require(
@@ -60,8 +108,6 @@ struct QuickMenuPanelControllerTests {
         #expect(textFields(in: chatPanel.contentView).contains {
             $0.stringValue == "keep me"
         })
-
-        controller.prepareForTermination()
     }
 
     @MainActor
