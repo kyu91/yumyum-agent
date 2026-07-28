@@ -22,11 +22,28 @@ struct AppThemeTests {
     }
 
     @Test
-    func palettesUseFixedSurfaceAndTextColors() {
-        #expect(AppTheme.light.palette.surface == NSColor(calibratedWhite: 0.96, alpha: 0.98))
+    func lightPaletteIsOpaqueWhiteAndDarkPaletteIsUnchanged() {
+        #expect(AppTheme.light.palette.surface == NSColor(calibratedWhite: 1, alpha: 1))
+        #expect(AppTheme.light.palette.secondarySurface == NSColor(calibratedWhite: 0.97, alpha: 1))
         #expect(AppTheme.light.palette.text == NSColor(calibratedWhite: 0.10, alpha: 0.94))
+        #expect(AppTheme.light.palette.secondaryText == NSColor(calibratedWhite: 0.28, alpha: 1))
+        #expect(AppTheme.light.palette.border == NSColor(calibratedWhite: 0, alpha: 0.14))
+        #expect(AppTheme.light.palette.shadow == NSColor(calibratedWhite: 0, alpha: 0.16))
         #expect(AppTheme.dark.palette.surface == NSColor(calibratedWhite: 0.14, alpha: 0.96))
+        #expect(AppTheme.dark.palette.secondarySurface == NSColor(calibratedWhite: 0.25, alpha: 0.92))
+        #expect(AppTheme.dark.palette.userMessage == NSColor(
+            calibratedRed: 0.35,
+            green: 0.65,
+            blue: 1,
+            alpha: 0.24
+        ))
         #expect(AppTheme.dark.palette.text == NSColor(calibratedWhite: 1.00, alpha: 0.94))
+        #expect(AppTheme.dark.palette.error == NSColor(
+            calibratedRed: 1,
+            green: 0.38,
+            blue: 0.42,
+            alpha: 1
+        ))
     }
 
     @Test
@@ -111,6 +128,7 @@ struct AppThemeTests {
         ) as? NSColor
         #expect(markdownColor == AppTheme.light.palette.text)
         #expect(error.textColor == AppTheme.light.palette.error)
+        #expect(error.textColor != AppTheme.light.palette.secondaryText)
         #expect(layerBackgroundColors(in: controller.view).contains(
             AppTheme.light.palette.secondarySurface.cgColor
         ))
@@ -128,12 +146,47 @@ struct AppThemeTests {
         #expect(!send.isEnabled)
     }
 
+    @Test
+    @MainActor
+    func lightResponseDisablesVibrancyWithoutReplacingScrollState() throws {
+        let controller = ResponseBubbleViewController()
+        controller.loadView()
+        controller.render(PetResponseContent(
+            fullText: String(repeating: "response\n", count: 80),
+            displayText: String(repeating: "response\n", count: 80),
+            isExcerpt: false,
+            showsOpenChat: true
+        ))
+        controller.view.layoutSubtreeIfNeeded()
+        let scroll = try #require(
+            descendants(of: controller.view, as: NSScrollView.self).first
+        )
+        scroll.contentView.scroll(to: CGPoint(x: 0, y: 16))
+        let origin = scroll.contentView.bounds.origin
+
+        controller.applyTheme(.light)
+
+        let effect = try #require(
+            descendants(of: controller.view, as: NSView.self).first {
+                $0.identifier?.rawValue == "YumYumGlassBackground"
+            }
+        )
+        #expect(effect.isHidden)
+        #expect(controller.view.layer?.backgroundColor
+            == AppTheme.light.palette.surface.cgColor)
+        #expect(scroll.contentView.bounds.origin == origin)
+
+        controller.applyTheme(.dark)
+        #expect(!effect.isHidden)
+        #expect(scroll.contentView.bounds.origin == origin)
+    }
+
     @MainActor
     private func descendants<T: NSView>(
         of view: NSView,
         as type: T.Type
     ) -> [T] {
-        (view as? T).map { [$0] } ?? []
+        ((view as? T).map { [$0] } ?? [])
             + view.subviews.flatMap { descendants(of: $0, as: type) }
     }
 

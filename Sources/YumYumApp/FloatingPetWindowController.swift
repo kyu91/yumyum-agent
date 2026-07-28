@@ -212,6 +212,7 @@ final class FloatingPetWindowController: NSObject {
     var isVisible: Bool { panel.isVisible }
 
     private let layout = FloatingPetLayout()
+    private let hostingView: FloatingPetHostingView<YumYumPetView>
 
     init(onClick: @escaping @MainActor () -> Void) {
         let screen = Self.screen(containing: NSEvent.mouseLocation)
@@ -226,6 +227,13 @@ final class FloatingPetWindowController: NSObject {
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
+        )
+        hostingView = FloatingPetHostingView(
+            rootView: YumYumPetView(
+                presentationModel: presentationModel,
+                onClick: onClick
+            ),
+            onClick: onClick
         )
 
         super.init()
@@ -248,13 +256,6 @@ final class FloatingPetWindowController: NSObject {
             .ignoresCycle,
         ]
 
-        let hostingView = FloatingPetHostingView(
-            rootView: YumYumPetView(
-                presentationModel: presentationModel,
-                onClick: onClick
-            ),
-            onClick: onClick
-        )
         hostingView.onDragEnded = { [weak self] in
             self?.clampToVisibleScreen()
         }
@@ -292,6 +293,14 @@ final class FloatingPetWindowController: NSObject {
 
     func resetChewPresentation() {
         applyChewFrame(.resting)
+    }
+
+    func configureFileDrop(
+        canAccept: @escaping @MainActor ([URL]) -> Bool,
+        perform: @escaping @MainActor ([URL]) -> Bool
+    ) {
+        hostingView.canAcceptFileDrop = canAccept
+        hostingView.performFileDrop = perform
     }
 
     var mouthTargetFrame: CGRect {
@@ -351,6 +360,7 @@ final class FloatingPetWindowController: NSObject {
 @MainActor
 final class PetPresentationModel: ObservableObject {
     @Published var chewFrame = PetChewFrame.resting
+    @Published var isFileDropTarget = false
 }
 
 final class FloatingPetPanel: NSPanel {
@@ -359,10 +369,15 @@ final class FloatingPetPanel: NSPanel {
 }
 
 @MainActor
-private final class FloatingPetHostingView<Content: View>: NSHostingView<Content> {
+final class FloatingPetHostingView<Content: View>: NSHostingView<Content> {
     var onDragEnded: @MainActor () -> Void = {}
+    var canAcceptFileDrop: @MainActor ([URL]) -> Bool = { _ in false }
+    var performFileDrop: @MainActor ([URL]) -> Bool = { _ in false }
 
     private let onClick: @MainActor () -> Void
+    private var dropLifecycle = PetDropLifecycle()
+    private var dropGeneration: UUID?
+    private var dropPreviousChewFrame: PetChewFrame?
     private var mouseDownLocation: NSPoint?
     private var windowOriginAtMouseDown: NSPoint?
     private var didDrag = false
@@ -373,6 +388,7 @@ private final class FloatingPetHostingView<Content: View>: NSHostingView<Content
     ) {
         self.onClick = onClick
         super.init(rootView: rootView)
+        registerForDraggedTypes([.fileURL])
     }
 
     @available(*, unavailable)
@@ -433,9 +449,110 @@ private final class FloatingPetHostingView<Content: View>: NSHostingView<Content
             onClick()
         }
     }
+
+    override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        draggingEntered(pasteboard: sender.draggingPasteboard)
+    }
+
+    override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        draggingUpdated(pasteboard: sender.draggingPasteboard)
+    }
+
+    func draggingEntered(pasteboard: NSPasteboard) -> NSDragOperation {
+        resetDropPresentation()
+        let urls = Self.fileURLs(from: pasteboard)
+        dropGeneration = dropLifecycle.enter(
+            isAccepted: !urls.isEmpty && canAcceptFileDrop(urls)
+        )
+        if dropGeneration != nil {
+            dropPreviousChewFrame = petPresentationModel?.chewFrame
+        }
+        setDropPresentation(dropLifecycle.isHovering)
+        return dropLifecycle.isHovering ? .copy : []
+    }
+
+    func draggingUpdated(pasteboard: NSPasteboard) -> NSDragOperation {
+        let urls = Self.fileURLs(from: pasteboard)
+        guard !urls.isEmpty,
+              canAcceptFileDrop(urls),
+              dropLifecycle.isHovering else {
+            resetDropPresentation()
+            return []
+        }
+        return .copy
+    }
+
+    override func draggingExited(_ sender: (any NSDraggingInfo)?) {
+        cancelFileDrop()
+    }
+
+    override func draggingEnded(_ sender: any NSDraggingInfo) {
+        cancelFileDrop()
+    }
+
+    override func prepareForDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        draggingUpdated(sender) == .copy
+    }
+
+    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        performDragOperation(pasteboard: sender.draggingPasteboard)
+    }
+
+    func performDragOperation(pasteboard: NSPasteboard) -> Bool {
+        let urls = Self.fileURLs(from: pasteboard)
+        guard !urls.isEmpty,
+              canAcceptFileDrop(urls),
+              dropLifecycle.consume(dropGeneration) else {
+            resetDropPresentation()
+            return false
+        }
+        releaseDropPresentation()
+        return performFileDrop(urls)
+    }
+
+    override func concludeDragOperation(_ sender: (any NSDraggingInfo)?) {
+        cancelFileDrop()
+    }
+
+    func cancelFileDrop() {
+        resetDropPresentation()
+    }
+
+    static func fileURLs(from pasteboard: NSPasteboard) -> [URL] {
+        pasteboard.readObjects(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        ) as? [URL] ?? []
+    }
+
+    private var petPresentationModel: PetPresentationModel? {
+        (rootView as? YumYumPetView)?.presentationModel
+    }
+
+    private func setDropPresentation(_ isTarget: Bool) {
+        petPresentationModel?.isFileDropTarget = isTarget
+        if isTarget {
+            petPresentationModel?.chewFrame = .mouthOpen
+        }
+    }
+
+    private func resetDropPresentation() {
+        guard dropLifecycle.cancel(dropGeneration) else { return }
+        releaseDropPresentation()
+    }
+
+    private func releaseDropPresentation() {
+        dropGeneration = nil
+        petPresentationModel?.isFileDropTarget = false
+        if petPresentationModel?.chewFrame == .mouthOpen,
+           let dropPreviousChewFrame {
+            petPresentationModel?.chewFrame = dropPreviousChewFrame
+        }
+        dropPreviousChewFrame = nil
+    }
 }
 
-private struct YumYumPetView: View {
+struct YumYumPetView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovered = false
 
@@ -464,6 +581,15 @@ private struct YumYumPetView: View {
         )
         .offset(y: presentationModel.chewFrame.bodyOffsetY)
         .contentShape(Rectangle())
+        .overlay {
+            RoundedRectangle(cornerRadius: 18)
+                .stroke(
+                    Color(nsColor: .keyboardFocusIndicatorColor),
+                    lineWidth: presentationModel.isFileDropTarget ? 2 : 0
+                )
+                .padding(5)
+                .accessibilityHidden(true)
+        }
         .scaleEffect(isHovered && !reduceMotion ? 1.025 : 1)
         .animation(
             reduceMotion ? nil : .easeOut(duration: 0.16),

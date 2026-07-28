@@ -7,6 +7,42 @@ import YumYumCore
 struct QuickMenuPanelControllerTests {
     @Test
     @MainActor
+    func droppedFilesUseTheProductionWorkflowExactlyOnceAndRejectInvalidOrBusyDrops() async throws {
+        _ = NSApplication.shared
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("drop.txt")
+        let invalid = directory.appendingPathComponent("drop.zip")
+        try Data("drop".utf8).write(to: file)
+        try Data("invalid".utf8).write(to: invalid)
+
+        let sender = ControlledPromptSender()
+        let pet = FloatingPetWindowController {}
+        let controller = QuickMenuPanelController(
+            petController: pet,
+            viewModel: YumYumAppViewModel(fixtureProbe: UnusedFixtureProbe()),
+            workflow: FeedWorkflow(sender: sender, feedback: SilentFeedFeedback()),
+            openSettings: {}
+        )
+        defer { controller.prepareForTermination() }
+
+        #expect(controller.canAcceptDroppedFiles([file, file]))
+        #expect(!controller.canAcceptDroppedFiles([file, invalid]))
+        #expect(!controller.feedDroppedFiles([invalid]))
+        #expect(controller.feedDroppedFiles([file, file]))
+        #expect(!controller.feedDroppedFiles([file]))
+        #expect(await sender.waitForRequestCount(1))
+        let request = await sender.requests[0]
+        #expect(request.attachments.map(\.url) == [file])
+        #expect(!request.text.contains(file.path))
+
+        await sender.completeRequest(at: 0)
+    }
+
+    @Test
+    @MainActor
     func inlineReturnAndButtonUseTheProductionSessionExactlyOnce() async throws {
         _ = NSApplication.shared
         let attachment = FileManager.default.temporaryDirectory

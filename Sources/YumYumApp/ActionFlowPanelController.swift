@@ -33,6 +33,7 @@ final class QuickMenuPanelController: NSObject {
     private var thinkingGeneration: UUID?
     private var lastReduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
     private var lastActionSourceRect: CGRect?
+    private var theme = AppTheme.dark
 
     let actionPanel: ActionBubblePanel
     let thinkingPanel: NSPanel
@@ -141,6 +142,14 @@ final class QuickMenuPanelController: NSObject {
             name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
             object: nil
         )
+        petController.configureFileDrop(
+            canAccept: { [weak self] urls in
+                self?.canAcceptDroppedFiles(urls) == true
+            },
+            perform: { [weak self] urls in
+                self?.feedDroppedFiles(urls) == true
+            }
+        )
     }
 
     deinit {
@@ -162,12 +171,40 @@ final class QuickMenuPanelController: NSObject {
     }
 
     func applyTheme(_ theme: AppTheme) {
+        self.theme = theme
         actionPanel.appearance = theme.appearance
         thinkingPanel.appearance = theme.appearance
         responsePanel.appearance = theme.appearance
+        actionViewController.applyTheme(theme)
         chatController.applyTheme(theme)
         thinkingViewController.applyTheme(theme)
         responseViewController.applyTheme(theme)
+    }
+
+    func canAcceptDroppedFiles(_ urls: [URL]) -> Bool {
+        guard presentationEnabled, !chatController.isSending else {
+            return false
+        }
+        return (try? FeedValidator().validate(
+            FeedInput(fileURLs: urls)
+        ).attachments.isEmpty) == false
+    }
+
+    @discardableResult
+    func feedDroppedFiles(_ urls: [URL]) -> Bool {
+        guard presentationEnabled,
+              !chatController.isSending,
+              let validated = try? FeedValidator().validate(
+                  FeedInput(fileURLs: urls)
+              ) else {
+            return false
+        }
+        return chatController.feedAttachments(
+            validated.attachments.map {
+                ChatDraftAttachment(url: $0.url, isTemporary: false)
+            },
+            reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        )
     }
 
     func show() {
@@ -734,6 +771,7 @@ final class QuickMenuPanelController: NSObject {
     @objc
     private func accessibilityDisplayOptionsDidChange(_ notification: Notification) {
         lastReduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        applyTheme(theme)
         if let generation = thinkingGeneration {
             startThinking(generation: generation)
         }
@@ -831,6 +869,7 @@ private final class ActionBubbleViewController: NSViewController {
 
     private var buttons: [ActionRowButton] = []
     private var feedActionsEnabled = false
+    private var theme = AppTheme.dark
 
     override func loadView() {
         let background = makeGlassBackground(cornerRadius: 18)
@@ -861,6 +900,24 @@ private final class ActionBubbleViewController: NSViewController {
             buttons[index].nextKeyView = buttons[(index + 1) % buttons.count]
         }
         applyEnabledState()
+        applyTheme(theme)
+    }
+
+    func applyTheme(_ theme: AppTheme) {
+        self.theme = theme
+        guard isViewLoaded else { return }
+        view.appearance = theme.appearance
+        view.wantsLayer = true
+        let opaqueSurface = theme == .light
+            || NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
+        view.layer?.backgroundColor = opaqueSurface
+            ? theme.palette.surface.withAlphaComponent(1).cgColor
+            : NSColor.clear.cgColor
+        setGlassBackgroundsHidden(opaqueSurface, in: view)
+        view.layer?.borderWidth = theme == .light
+            ? (NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast ? 1 : 0.5)
+            : 0
+        view.layer?.borderColor = theme.palette.border.cgColor
     }
 
     func setFeedActionsEnabled(_ enabled: Bool) {
@@ -1065,9 +1122,16 @@ final class ThinkingBubbleViewController: NSViewController {
     func applyTheme(_ theme: AppTheme) {
         self.theme = theme
         guard isViewLoaded else { return }
-        view.layer?.backgroundColor = theme.palette.surface.cgColor
+        view.layer?.backgroundColor = NSWorkspace.shared
+            .accessibilityDisplayShouldReduceTransparency
+            ? theme.palette.surface.withAlphaComponent(1).cgColor
+            : theme.palette.surface.cgColor
         view.layer?.borderColor = theme.palette.text
-            .withAlphaComponent(0.28).cgColor
+            .withAlphaComponent(theme == .light ? 0.14 : 0.28).cgColor
+        view.layer?.shadowColor = theme.palette.shadow.cgColor
+        view.layer?.shadowOpacity = theme == .light ? 1 : 0
+        view.layer?.shadowRadius = 8
+        view.layer?.shadowOffset = CGSize(width: 0, height: -2)
         label.textColor = theme.palette.text
     }
 
@@ -1266,6 +1330,22 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
         self.theme = theme
         guard isViewLoaded else { return }
         view.appearance = theme.appearance
+        view.wantsLayer = true
+        let opaqueSurface = theme == .light
+            || NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
+        view.layer?.backgroundColor = opaqueSurface
+            ? theme.palette.surface.withAlphaComponent(1).cgColor
+            : NSColor.clear.cgColor
+        setGlassBackgroundsHidden(opaqueSurface, in: view)
+        view.layer?.borderWidth = theme == .light
+            ? (NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast ? 1 : 0.5)
+            : 0
+        view.layer?.borderColor = theme.palette.border.cgColor
+        view.layer?.shadowColor = theme.palette.shadow.cgColor
+        view.layer?.shadowOpacity = theme == .light ? 1 : 0
+        view.layer?.shadowRadius = 8
+        view.layer?.shadowOffset = CGSize(width: 0, height: -2)
+        attachmentLabel.textColor = theme.palette.secondaryText
         render(content, resetScroll: false)
     }
 
@@ -1534,6 +1614,7 @@ private func installGlassBackground(
             .withAlphaComponent(0.035).cgColor
         background = effect
     }
+    background.identifier = NSUserInterfaceItemIdentifier("YumYumGlassBackground")
     background.translatesAutoresizingMaskIntoConstraints = false
     container.addSubview(background)
     NSLayoutConstraint.activate([
@@ -1549,4 +1630,14 @@ private func installGlassBackground(
     container.layer?.masksToBounds = true
     container.layer?.borderWidth = 0.5
     container.layer?.borderColor = NSColor.white.withAlphaComponent(0.28).cgColor
+}
+
+@MainActor
+private func setGlassBackgroundsHidden(_ hidden: Bool, in view: NSView) {
+    for subview in view.subviews {
+        if subview.identifier?.rawValue == "YumYumGlassBackground" {
+            subview.isHidden = hidden
+        }
+        setGlassBackgroundsHidden(hidden, in: subview)
+    }
 }

@@ -330,10 +330,13 @@ enum AppTheme: String, CaseIterable, Identifiable {
         switch self {
         case .light:
             AppThemePalette(
-                surface: NSColor(calibratedWhite: 0.96, alpha: 0.98),
-                secondarySurface: NSColor(calibratedWhite: 0.88, alpha: 0.92),
+                surface: NSColor(calibratedWhite: 1, alpha: 1),
+                secondarySurface: NSColor(calibratedWhite: 0.97, alpha: 1),
                 userMessage: NSColor(calibratedRed: 0.13, green: 0.45, blue: 0.95, alpha: 0.18),
                 text: NSColor(calibratedWhite: 0.10, alpha: 0.94),
+                secondaryText: NSColor(calibratedWhite: 0.28, alpha: 1),
+                border: NSColor(calibratedWhite: 0, alpha: 0.14),
+                shadow: NSColor(calibratedWhite: 0, alpha: 0.16),
                 error: NSColor(calibratedRed: 0.78, green: 0.12, blue: 0.16, alpha: 1)
             )
         case .dark:
@@ -342,6 +345,9 @@ enum AppTheme: String, CaseIterable, Identifiable {
                 secondarySurface: NSColor(calibratedWhite: 0.25, alpha: 0.92),
                 userMessage: NSColor(calibratedRed: 0.35, green: 0.65, blue: 1, alpha: 0.24),
                 text: NSColor(calibratedWhite: 1.00, alpha: 0.94),
+                secondaryText: NSColor(calibratedWhite: 1.00, alpha: 0.68),
+                border: NSColor(calibratedWhite: 1.00, alpha: 0.18),
+                shadow: .clear,
                 error: NSColor(calibratedRed: 1, green: 0.38, blue: 0.42, alpha: 1)
             )
         }
@@ -361,6 +367,9 @@ struct AppThemePalette {
     let secondarySurface: NSColor
     let userMessage: NSColor
     let text: NSColor
+    let secondaryText: NSColor
+    let border: NSColor
+    let shadow: NSColor
     let error: NSColor
 }
 
@@ -1044,8 +1053,20 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
         self.theme = theme
         guard isViewLoaded else { return }
         view.appearance = theme.appearance
-        view.layer?.borderColor = theme.palette.text
-            .withAlphaComponent(0.18).cgColor
+        let opaqueSurface = theme == .light
+            || NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
+        view.layer?.backgroundColor = opaqueSurface
+            ? theme.palette.surface.withAlphaComponent(1).cgColor
+            : NSColor.clear.cgColor
+        view.layer?.borderWidth = theme == .light
+            && NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
+            ? 1
+            : 0.5
+        view.layer?.borderColor = theme.palette.border.cgColor
+        view.layer?.shadowColor = theme.palette.shadow.cgColor
+        view.layer?.shadowOpacity = theme == .light ? 1 : 0
+        view.layer?.shadowRadius = 10
+        view.layer?.shadowOffset = CGSize(width: 0, height: -2)
         transcriptStack.arrangedSubviews
             .compactMap { $0 as? ChatMessageRowView }
             .forEach { $0.applyTheme(theme) }
@@ -1054,7 +1075,7 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
         }
         statusLabel.textColor = statusIsError
             ? theme.palette.error
-            : theme.palette.text.withAlphaComponent(0.68)
+            : theme.palette.secondaryText
     }
 
     func render(
@@ -1206,6 +1227,7 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
             canRetry: renderedCanRetry,
             agentNotice: renderedAgentNotice
         )
+        applyTheme(theme)
     }
 
     func setPresented(_ presented: Bool) {
@@ -1343,6 +1365,7 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
             ])
             let label = NSTextField(labelWithString: attachment.displayName)
             label.font = .systemFont(ofSize: 12)
+            label.textColor = theme.palette.secondaryText
             label.lineBreakMode = .byTruncatingMiddle
             let remove = NSButton(
                 image: NSImage(
@@ -1379,7 +1402,7 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
         )
         statusLabel.textColor = isError
             ? theme.palette.error
-            : theme.palette.text.withAlphaComponent(0.68)
+            : theme.palette.secondaryText
         let accessibilityStatus = renderedState.isSending ? "응답 생성 중" : text
         statusLabel.setAccessibilityValue(accessibilityStatus)
         guard lastAnnouncedStatus != accessibilityStatus else { return }

@@ -92,6 +92,30 @@ public struct ValidatedFeed: Equatable, Sendable {
     }
 }
 
+struct FileMetadata: Equatable, Sendable {
+    let byteCount: Int64
+    let isReadable: Bool
+}
+
+protocol FileMetadataProviding: Sendable {
+    func metadata(for url: URL) throws -> FileMetadata
+}
+
+private struct FileManagerMetadataProvider: FileMetadataProviding {
+    func metadata(for url: URL) throws -> FileMetadata {
+        let fileManager = FileManager.default
+        let attributes = try fileManager.attributesOfItem(atPath: url.path)
+        guard attributes[.type] as? FileAttributeType == .typeRegular,
+              let size = (attributes[.size] as? NSNumber)?.int64Value else {
+            throw FeedValidationError.unavailableFile(url.path)
+        }
+        return FileMetadata(
+            byteCount: size,
+            isReadable: fileManager.isReadableFile(atPath: url.path)
+        )
+    }
+}
+
 public struct FeedValidator: Sendable {
     public static let maximumAttachmentBytes = 20 * 1_024 * 1_024
 
@@ -113,7 +137,15 @@ public struct FeedValidator: Sendable {
         "cer", "crt", "key", "mobileprovision", "p12", "pem",
     ]
 
-    public init() {}
+    private let metadataProvider: any FileMetadataProviding
+
+    public init() {
+        metadataProvider = FileManagerMetadataProvider()
+    }
+
+    init(metadataProvider: any FileMetadataProviding) {
+        self.metadataProvider = metadataProvider
+    }
 
     public func validate(_ input: FeedInput) throws -> ValidatedFeed {
         let text = input.text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -121,9 +153,31 @@ public struct FeedValidator: Sendable {
             throw FeedValidationError.blankInput
         }
 
+        let inspectedFiles = try inspect(input.fileURLs)
+        let attachments = inspectedFiles.map {
+            PromptAttachment(
+                url: $0.url,
+                kind: $0.kind,
+                byteCount: $0.byteCount,
+                isTemporary: input.temporaryFileURLs.contains($0.originalURL)
+                    || input.temporaryFileURLs.contains($0.url)
+            )
+        }
+        return ValidatedFeed(
+            text: text,
+            currentTurnText: input.currentTurnText?.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            ),
+            attachments: attachments
+        )
+    }
+
+    private func inspect(
+        _ fileURLs: [URL]
+    ) throws -> [(originalURL: URL, url: URL, kind: PromptAttachmentKind, byteCount: Int64)] {
         var seen: Set<String> = []
-        var attachments: [PromptAttachment] = []
-        for originalURL in input.fileURLs {
+        var files: [(URL, URL, PromptAttachmentKind, Int64)] = []
+        for originalURL in fileURLs {
             let url = originalURL.standardizedFileURL
             guard NSString(string: url.path).isAbsolutePath else {
                 throw FeedValidationError.pathMustBeAbsolute(originalURL.path)
@@ -138,18 +192,20 @@ public struct FeedValidator: Sendable {
                   !Self.blockedExtensions.contains(fileExtension) else {
                 throw FeedValidationError.credentialFileBlocked(url.path)
             }
+            if (try? url.resourceValues(forKeys: [.isAliasFileKey]))?.isAliasFile == true {
+                throw FeedValidationError.unavailableFile(url.path)
+            }
 
-            let attributes: [FileAttributeKey: Any]
+            let metadata: FileMetadata
             do {
-                attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+                metadata = try metadataProvider.metadata(for: url)
             } catch {
                 throw FeedValidationError.unavailableFile(url.path)
             }
-            guard attributes[.type] as? FileAttributeType == .typeRegular,
-                  let size = (attributes[.size] as? NSNumber)?.int64Value else {
+            guard metadata.isReadable else {
                 throw FeedValidationError.unavailableFile(url.path)
             }
-            guard size <= Int64(Self.maximumAttachmentBytes) else {
+            guard metadata.byteCount <= Int64(Self.maximumAttachmentBytes) else {
                 throw FeedValidationError.oversizedFile(
                     path: url.path,
                     maximumBytes: Int64(Self.maximumAttachmentBytes)
@@ -159,23 +215,9 @@ public struct FeedValidator: Sendable {
                 throw FeedValidationError.unsupportedFile(url.path)
             }
 
-            attachments.append(
-                PromptAttachment(
-                    url: url,
-                    kind: kind,
-                    byteCount: size,
-                    isTemporary: input.temporaryFileURLs.contains(originalURL)
-                        || input.temporaryFileURLs.contains(url)
-                )
-            )
+            files.append((originalURL, url, kind, metadata.byteCount))
         }
-        return ValidatedFeed(
-            text: text,
-            currentTurnText: input.currentTurnText?.trimmingCharacters(
-                in: .whitespacesAndNewlines
-            ),
-            attachments: attachments
-        )
+        return files
     }
 
     private func attachmentKind(forExtension fileExtension: String) -> PromptAttachmentKind? {

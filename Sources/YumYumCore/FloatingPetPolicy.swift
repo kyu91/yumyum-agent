@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 
 public struct FloatingPetLayout: Equatable, Sendable {
     public static let preferredSize = CGSize(width: 96, height: 96)
@@ -45,5 +46,41 @@ public struct FloatingPetVisibilityPolicy: Equatable, Sendable {
 
     public mutating func setVisible(_ isVisible: Bool) {
         self.isVisible = isVisible
+    }
+}
+
+package struct PetDropLifecycle: Equatable, Sendable {
+    private var generation: UUID?
+
+    package init() {}
+
+    package var isHovering: Bool { generation != nil }
+
+    @discardableResult
+    package mutating func enter(isAccepted: Bool) -> UUID? {
+        generation = isAccepted ? UUID() : nil
+        return generation
+    }
+
+    @discardableResult
+    package mutating func exit(_ owner: UUID?) -> Bool {
+        cancel(owner)
+    }
+
+    @discardableResult
+    package mutating func cancel(_ owner: UUID?) -> Bool {
+        guard generation == owner, owner != nil else {
+            return false
+        }
+        generation = nil
+        return true
+    }
+
+    package mutating func consume(_ candidate: UUID?) -> Bool {
+        guard let candidate, candidate == generation else {
+            return false
+        }
+        generation = nil
+        return true
     }
 }
