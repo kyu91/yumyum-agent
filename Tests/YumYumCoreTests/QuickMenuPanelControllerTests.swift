@@ -7,6 +7,44 @@ import YumYumCore
 struct QuickMenuPanelControllerTests {
     @Test
     @MainActor
+    func chatThemeDoesNotChangeRenderedActionThinkingOrResponseSurfaces() throws {
+        _ = NSApplication.shared
+        let pet = FloatingPetWindowController {}
+        let viewModel = YumYumAppViewModel(fixtureProbe: UnusedFixtureProbe())
+        let controller = QuickMenuPanelController(
+            petController: pet,
+            viewModel: viewModel,
+            workflow: FeedWorkflow(
+                sender: viewModel.agentRuntime,
+                feedback: AppFeedFeedback(petController: pet)
+            ),
+            openSettings: {}
+        )
+        defer { controller.prepareForTermination() }
+
+        controller.applyTheme(.light)
+        let action = try #require(controller.actionPanel.contentView?.layer)
+        let thinking = try #require(controller.thinkingPanel.contentView?.layer)
+        let responseBody = try surface(
+            "response-body-surface",
+            in: try #require(controller.responsePanel.contentView)
+        )
+
+        #expect(action.backgroundColor == NSColor(calibratedWhite: 1, alpha: 1).cgColor)
+        #expect(thinking.backgroundColor == NSColor(calibratedWhite: 1, alpha: 1).cgColor)
+        #expect(layerBackgroundColors(in: responseBody).contains(
+            NSColor(calibratedWhite: 1, alpha: 1).cgColor
+        ))
+        #expect(layerBackgroundColors(in: controller.responsePanel.contentView).contains(
+            AppTheme.light.palette.primaryAction.cgColor
+        ))
+        #expect(layerBackgroundColors(in: controller.responsePanel.contentView).contains(
+            AppTheme.light.palette.secondaryAction.cgColor
+        ))
+    }
+
+    @Test
+    @MainActor
     func responseUsesFourIndependentVerticalSurfacesOnATransparentRoot() throws {
         _ = NSApplication.shared
         let controller = ResponseBubbleViewController()
@@ -776,6 +814,13 @@ struct QuickMenuPanelControllerTests {
             }
         )
         button.performClick(nil)
+    }
+
+    @MainActor
+    private func layerBackgroundColors(in view: NSView?) -> [CGColor] {
+        guard let view else { return [] }
+        return [view.layer?.backgroundColor].compactMap { $0 }
+            + view.subviews.flatMap(layerBackgroundColors)
     }
 
     @MainActor

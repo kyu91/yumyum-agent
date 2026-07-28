@@ -22,28 +22,39 @@ struct AppThemeTests {
     }
 
     @Test
-    func lightPaletteIsOpaqueWhiteAndDarkPaletteIsUnchanged() {
-        #expect(AppTheme.light.palette.surface == NSColor(calibratedWhite: 1, alpha: 1))
-        #expect(AppTheme.light.palette.secondarySurface == NSColor(calibratedWhite: 0.97, alpha: 1))
-        #expect(AppTheme.light.palette.text == NSColor(calibratedWhite: 0.10, alpha: 0.94))
-        #expect(AppTheme.light.palette.secondaryText == NSColor(calibratedWhite: 0.28, alpha: 1))
-        #expect(AppTheme.light.palette.border == NSColor(calibratedWhite: 0, alpha: 0.14))
-        #expect(AppTheme.light.palette.shadow == NSColor(calibratedWhite: 0, alpha: 0.16))
-        #expect(AppTheme.dark.palette.surface == NSColor(calibratedWhite: 0.14, alpha: 0.96))
-        #expect(AppTheme.dark.palette.secondarySurface == NSColor(calibratedWhite: 0.25, alpha: 0.92))
-        #expect(AppTheme.dark.palette.userMessage == NSColor(
-            calibratedRed: 0.35,
-            green: 0.65,
-            blue: 1,
-            alpha: 0.24
-        ))
-        #expect(AppTheme.dark.palette.text == NSColor(calibratedWhite: 1.00, alpha: 0.94))
-        #expect(AppTheme.dark.palette.error == NSColor(
-            calibratedRed: 1,
-            green: 0.38,
-            blue: 0.42,
-            alpha: 1
-        ))
+    func chatPaletteIsWarmDistinctAndReadable() {
+        let light = AppTheme.light.palette
+        let dark = AppTheme.dark.palette
+
+        #expect(light.surface == NSColor(calibratedWhite: 1, alpha: 1))
+        #expect(light.secondarySurface == NSColor(calibratedWhite: 0.97, alpha: 1))
+        #expect(light.text == NSColor(calibratedWhite: 0.10, alpha: 0.94))
+        #expect(light.secondaryText == NSColor(calibratedWhite: 0.28, alpha: 1))
+        #expect(light.border == NSColor(calibratedWhite: 0, alpha: 0.14))
+        #expect(light.shadow == NSColor(calibratedWhite: 0, alpha: 0.16))
+        #expect(dark.surface == NSColor(calibratedWhite: 0.14, alpha: 0.96))
+        #expect(dark.secondarySurface == NSColor(calibratedWhite: 0.25, alpha: 0.92))
+        #expect(dark.text == NSColor(calibratedWhite: 1.00, alpha: 0.94))
+        #expect(dark.secondaryText == NSColor(calibratedWhite: 1.00, alpha: 0.68))
+        #expect(dark.border == NSColor(calibratedWhite: 1.00, alpha: 0.18))
+        #expect(dark.shadow == .clear)
+        #expect(warmChannels(light.chatCanvas))
+        #expect(warmChannels(light.assistantMessage))
+        #expect(warmChannels(light.userMessage))
+        #expect(warmChannels(light.composerSurface))
+        #expect(warmChannels(light.auxiliarySurface))
+        #expect(contrastRatio(light.chatText, light.assistantMessage) >= 4.5)
+        #expect(contrastRatio(light.chatText, light.userMessage) >= 4.5)
+        #expect(contrastRatio(light.chatSecondaryText, light.chatCanvas) >= 4.5)
+        #expect(warmChannels(dark.chatCanvas))
+        #expect(warmChannels(dark.assistantMessage))
+        #expect(warmChannels(dark.userMessage))
+        #expect(warmChannels(dark.composerSurface))
+        #expect(warmChannels(dark.auxiliarySurface))
+        #expect(contrastRatio(dark.chatText, dark.assistantMessage) >= 4.5)
+        #expect(contrastRatio(dark.chatText, dark.userMessage) >= 4.5)
+        #expect(contrastRatio(dark.chatSecondaryText, dark.chatCanvas) >= 4.5)
+
         for theme in AppTheme.allCases {
             let primary = theme.palette.primaryAction
             let secondary = theme.palette.secondaryAction
@@ -102,6 +113,43 @@ struct AppThemeTests {
         #expect(text.contains("draft"))
         #expect(text.contains("question"))
         #expect(text.contains("answer"))
+        #expect(descendants(of: controller.view, as: NSButton.self)
+            .first { $0.title == "재시도" }?.isHidden == false)
+    }
+
+    @Test
+    @MainActor
+    func emptyChatUpdatesThemeBothDirectionsWithoutReplacingDraftOrScroll() throws {
+        let controller = QuickMenuViewController()
+        controller.loadView()
+        controller.render(
+            state: ChatBubbleState(draftText: "preserved draft"),
+            canRetry: false,
+            agentNotice: nil
+        )
+        controller.view.layoutSubtreeIfNeeded()
+        let scroll = try #require(descendants(of: controller.view, as: NSScrollView.self).first)
+        scroll.contentView.scroll(to: CGPoint(x: 0, y: 3))
+        let origin = scroll.contentView.bounds.origin
+        let empty = try #require(
+            descendants(of: controller.view, as: NSTextField.self)
+                .first { $0.accessibilityLabel() == "아직 대화가 없습니다" }
+        )
+        let composer = try #require(
+            descendants(of: controller.view, as: NSTextField.self)
+                .first { $0.accessibilityLabel() == "대화 메시지" }
+        )
+
+        controller.applyTheme(.light)
+        #expect(empty.textColor == AppTheme.light.palette.chatSecondaryText)
+        #expect(contrastRatio(empty.textColor!, AppTheme.light.palette.chatCanvas) >= 4.5)
+        controller.applyTheme(.dark)
+        #expect(empty.textColor == AppTheme.dark.palette.chatSecondaryText)
+        #expect(contrastRatio(empty.textColor!, AppTheme.dark.palette.chatCanvas) >= 4.5)
+        controller.applyTheme(.light)
+        #expect(empty.textColor == AppTheme.light.palette.chatSecondaryText)
+        #expect(composer.stringValue == "preserved draft")
+        #expect(scroll.contentView.bounds.origin == origin)
     }
 
     @Test
@@ -130,6 +178,7 @@ struct AppThemeTests {
 
         controller.applyTheme(.light)
 
+        #expect(controller.view.layer?.backgroundColor == AppTheme.light.palette.chatCanvas.cgColor)
         let fields = descendants(of: controller.view, as: NSTextField.self)
         let markdown = try #require(fields.first { $0.stringValue == "answer" })
         let error = try #require(
@@ -144,15 +193,25 @@ struct AppThemeTests {
             at: 0,
             effectiveRange: nil
         ) as? NSColor
-        #expect(markdownColor == AppTheme.light.palette.text)
+        #expect(markdownColor == AppTheme.light.palette.chatText)
         #expect(error.textColor == AppTheme.light.palette.error)
-        #expect(error.textColor != AppTheme.light.palette.secondaryText)
+        #expect(error.textColor != AppTheme.light.palette.chatSecondaryText)
         #expect(layerBackgroundColors(in: controller.view).contains(
-            AppTheme.light.palette.secondarySurface.cgColor
+            AppTheme.light.palette.assistantMessage.cgColor
         ))
         #expect(layerBackgroundColors(in: controller.view).contains(
             AppTheme.light.palette.userMessage.cgColor
         ))
+        let composer = try #require(fields.first {
+            $0.accessibilityLabel() == "대화 메시지"
+        })
+        let capture = try #require(
+            descendants(of: controller.view, as: NSButton.self)
+                .first { $0.title == "캡처" }
+        )
+        #expect(composer.backgroundColor == AppTheme.light.palette.composerSurface)
+        #expect(capture.layer?.backgroundColor == AppTheme.light.palette.auxiliarySurface.cgColor)
+        #expect(capture.contentTintColor == AppTheme.light.palette.chatText)
         controller.render(
             state: ChatBubbleState(
                 draftText: "busy",
@@ -162,6 +221,155 @@ struct AppThemeTests {
             agentNotice: nil
         )
         #expect(!send.isEnabled)
+        #expect(composer.backgroundColor == .controlBackgroundColor)
+        #expect(composer.textColor == .disabledControlTextColor)
+        #expect(capture.alphaValue == 0.42)
+    }
+
+    @Test
+    @MainActor
+    func detailedChatCanvasIsOpaqueAndContainsNoGlassInEveryTheme() throws {
+        let controller = QuickMenuViewController()
+        controller.loadView()
+        let scroll = try #require(descendants(of: controller.view, as: NSScrollView.self).first)
+        let document = try #require(scroll.documentView)
+        let content = try #require(document.subviews.first)
+        let title = try #require(
+            descendants(of: controller.view, as: NSTextField.self)
+                .first { $0.stringValue == "YumYum" }
+        )
+        let header = try #require(title.superview)
+
+        for theme in AppTheme.allCases {
+            controller.applyTheme(theme)
+            let canvas = theme.palette.chatCanvas.cgColor
+
+            #expect(descendants(of: controller.view, as: NSVisualEffectView.self).isEmpty)
+            #expect(controller.view.layer?.backgroundColor == canvas)
+            #expect(header.layer?.backgroundColor == canvas)
+            #expect(scroll.layer?.backgroundColor == canvas)
+            #expect(scroll.contentView.layer?.backgroundColor == canvas)
+            #expect(document.layer?.backgroundColor == canvas)
+            #expect(content.layer?.backgroundColor == canvas)
+            for color in [
+                controller.view.layer?.backgroundColor,
+                header.layer?.backgroundColor,
+                scroll.layer?.backgroundColor,
+                scroll.contentView.layer?.backgroundColor,
+                document.layer?.backgroundColor,
+                content.layer?.backgroundColor,
+            ] {
+                #expect(color?.alpha == 1)
+                #expect(color != NSColor.clear.cgColor)
+            }
+        }
+    }
+
+    @Test
+    @MainActor
+    func chatProductionStatesKeepWarmStylingScopedToChatContentAndAuxiliaryInputs() throws {
+        let controller = QuickMenuViewController()
+        let panel = QuickMenuPanel(
+            contentRect: CGRect(x: 0, y: 0, width: 392, height: 520),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.contentViewController = controller
+        defer { panel.orderOut(nil) }
+        let fields = descendants(of: controller.view, as: NSTextField.self)
+        let buttons = descendants(of: controller.view, as: NSButton.self)
+        let composer = try #require(fields.first {
+            $0.accessibilityLabel() == "대화 메시지"
+        })
+        let capture = try #require(buttons.first { $0.title == "캡처" })
+        let file = try #require(buttons.first { $0.title == "파일" })
+        let send = try #require(buttons.first { $0.title == "보내기" })
+        let retry = try #require(buttons.first { $0.title == "재시도" })
+        let cancel = try #require(buttons.first { $0.title == "취소" })
+
+        for theme in AppTheme.allCases {
+            controller.render(
+                state: ChatBubbleState(
+                    draftText: "draft",
+                    draftAttachments: [
+                        ChatDraftAttachment(
+                            url: URL(fileURLWithPath: "/tmp/render.txt"),
+                            isTemporary: false
+                        ),
+                    ],
+                    messages: [
+                        ChatMessage(role: .user, text: "user"),
+                        ChatMessage(role: .assistant, text: "assistant"),
+                    ]
+                ),
+                canRetry: false,
+                agentNotice: nil
+            )
+            controller.applyTheme(theme)
+            #expect(layerBackgroundColors(in: controller.view).contains(
+                theme.palette.userMessage.cgColor
+            ))
+            #expect(layerBackgroundColors(in: controller.view).contains(
+                theme.palette.assistantMessage.cgColor
+            ))
+            #expect(composer.backgroundColor == theme.palette.composerSurface)
+            #expect(capture.layer?.backgroundColor == theme.palette.auxiliarySurface.cgColor)
+            #expect(file.layer?.backgroundColor == theme.palette.auxiliarySurface.cgColor)
+            #expect(send.layer?.backgroundColor == nil)
+            #expect(retry.layer?.backgroundColor == nil)
+            #expect(cancel.layer?.backgroundColor == nil)
+
+            controller.render(
+                state: ChatBubbleState(
+                    messages: [
+                        ChatMessage(role: .assistant, text: "", isLoading: true),
+                    ],
+                    phase: .sending(UUID())
+                ),
+                canRetry: false,
+                agentNotice: nil
+            )
+            #expect(!cancel.isHidden)
+            #expect(!send.isEnabled)
+            #expect(composer.backgroundColor == .controlBackgroundColor)
+            #expect(descendants(of: controller.view, as: NSTextField.self)
+                .contains { $0.accessibilityLabel() == "응답 생성 중" })
+
+            controller.render(
+                state: ChatBubbleState(phase: .failed("failed")),
+                canRetry: true,
+                agentNotice: nil
+            )
+            #expect(!retry.isHidden)
+            #expect(cancel.isHidden)
+            #expect(fields.first {
+                $0.accessibilityLabel() == "YumYum 상태"
+            }?.textColor == theme.palette.error)
+
+            controller.render(
+                state: ChatBubbleState(phase: .cancelled),
+                canRetry: false,
+                agentNotice: nil
+            )
+            #expect(retry.isHidden)
+            #expect(cancel.isHidden)
+            #expect(descendants(of: controller.view, as: NSTextField.self)
+                .contains { $0.accessibilityLabel() == "아직 대화가 없습니다" })
+        }
+
+        panel.makeKeyAndOrderFront(nil)
+        panel.makeFirstResponder(capture)
+        #expect(capture.layer?.borderWidth == 1)
+        #expect(capture.layer?.borderColor == NSColor.keyboardFocusIndicatorColor.cgColor)
+
+        controller.applyTheme(.dark)
+        controller.accessibilityDisplayOptionsDidChangeForTesting()
+        #expect(controller.view.layer?.backgroundColor == AppTheme.dark.palette.chatCanvas.cgColor)
+        controller.applyTheme(.light)
+        #expect(controller.view.layer?.borderWidth == (
+            NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast ? 1 : 0.5
+        ))
     }
 
     @Test

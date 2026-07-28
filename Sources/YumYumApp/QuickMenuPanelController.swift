@@ -332,11 +332,19 @@ enum AppTheme: String, CaseIterable, Identifiable {
             AppThemePalette(
                 surface: NSColor(calibratedWhite: 1, alpha: 1),
                 secondarySurface: NSColor(calibratedWhite: 0.97, alpha: 1),
-                userMessage: NSColor(calibratedRed: 0.13, green: 0.45, blue: 0.95, alpha: 0.18),
                 text: NSColor(calibratedWhite: 0.10, alpha: 0.94),
                 secondaryText: NSColor(calibratedWhite: 0.28, alpha: 1),
                 border: NSColor(calibratedWhite: 0, alpha: 0.14),
                 shadow: NSColor(calibratedWhite: 0, alpha: 0.16),
+                chatCanvas: NSColor(calibratedRed: 1.00, green: 0.98, blue: 0.93, alpha: 1),
+                assistantMessage: NSColor(calibratedRed: 0.98, green: 0.95, blue: 0.89, alpha: 1),
+                userMessage: NSColor(calibratedRed: 0.94, green: 0.82, blue: 0.75, alpha: 1),
+                composerSurface: NSColor(calibratedRed: 1.00, green: 0.995, blue: 0.98, alpha: 1),
+                auxiliarySurface: NSColor(calibratedRed: 0.88, green: 0.84, blue: 0.78, alpha: 1),
+                chatText: NSColor(calibratedRed: 0.14, green: 0.11, blue: 0.09, alpha: 1),
+                chatSecondaryText: NSColor(calibratedRed: 0.34, green: 0.29, blue: 0.25, alpha: 1),
+                chatBorder: NSColor(calibratedRed: 0.31, green: 0.24, blue: 0.20, alpha: 0.22),
+                chatShadow: NSColor(calibratedRed: 0.24, green: 0.16, blue: 0.12, alpha: 0.18),
                 error: NSColor(calibratedRed: 0.78, green: 0.12, blue: 0.16, alpha: 1),
                 primaryAction: NSColor(calibratedRed: 0.60, green: 0.20, blue: 0.07, alpha: 1),
                 secondaryAction: NSColor(calibratedRed: 0.64, green: 0.52, blue: 0.43, alpha: 1)
@@ -345,11 +353,19 @@ enum AppTheme: String, CaseIterable, Identifiable {
             AppThemePalette(
                 surface: NSColor(calibratedWhite: 0.14, alpha: 0.96),
                 secondarySurface: NSColor(calibratedWhite: 0.25, alpha: 0.92),
-                userMessage: NSColor(calibratedRed: 0.35, green: 0.65, blue: 1, alpha: 0.24),
                 text: NSColor(calibratedWhite: 1.00, alpha: 0.94),
                 secondaryText: NSColor(calibratedWhite: 1.00, alpha: 0.68),
                 border: NSColor(calibratedWhite: 1.00, alpha: 0.18),
                 shadow: .clear,
+                chatCanvas: NSColor(calibratedRed: 0.15, green: 0.13, blue: 0.11, alpha: 1),
+                assistantMessage: NSColor(calibratedRed: 0.24, green: 0.21, blue: 0.18, alpha: 1),
+                userMessage: NSColor(calibratedRed: 0.38, green: 0.23, blue: 0.17, alpha: 1),
+                composerSurface: NSColor(calibratedRed: 0.20, green: 0.18, blue: 0.16, alpha: 1),
+                auxiliarySurface: NSColor(calibratedRed: 0.30, green: 0.27, blue: 0.23, alpha: 1),
+                chatText: NSColor(calibratedRed: 0.96, green: 0.92, blue: 0.87, alpha: 1),
+                chatSecondaryText: NSColor(calibratedRed: 0.78, green: 0.72, blue: 0.65, alpha: 1),
+                chatBorder: NSColor(calibratedRed: 0.86, green: 0.76, blue: 0.66, alpha: 0.22),
+                chatShadow: .clear,
                 error: NSColor(calibratedRed: 1, green: 0.38, blue: 0.42, alpha: 1),
                 primaryAction: NSColor(calibratedRed: 0.68, green: 0.24, blue: 0.05, alpha: 1),
                 secondaryAction: NSColor(calibratedRed: 0.48, green: 0.35, blue: 0.27, alpha: 1)
@@ -369,11 +385,19 @@ enum AppTheme: String, CaseIterable, Identifiable {
 struct AppThemePalette {
     let surface: NSColor
     let secondarySurface: NSColor
-    let userMessage: NSColor
     let text: NSColor
     let secondaryText: NSColor
     let border: NSColor
     let shadow: NSColor
+    let chatCanvas: NSColor
+    let assistantMessage: NSColor
+    let userMessage: NSColor
+    let composerSurface: NSColor
+    let auxiliarySurface: NSColor
+    let chatText: NSColor
+    let chatSecondaryText: NSColor
+    let chatBorder: NSColor
+    let chatShadow: NSColor
     let error: NSColor
     let primaryAction: NSColor
     let secondaryAction: NSColor
@@ -841,15 +865,18 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
 
     private let transcriptStack = NSStackView()
     private let transcriptScroll = NSScrollView()
+    private let transcriptDocument = FlippedDocumentView()
+    private let header = NSStackView()
     private let attachmentStack = NSStackView()
     private let attachmentScroll = NSScrollView()
-    private let captureButton = NSButton(title: "캡처", target: nil, action: nil)
-    private let fileButton = NSButton(title: "파일", target: nil, action: nil)
+    private let captureButton = ChatAuxiliaryButton(title: "캡처")
+    private let fileButton = ChatAuxiliaryButton(title: "파일")
     private let composer = NSTextField()
     private let sendButton = NSButton(title: "보내기", target: nil, action: nil)
     private let statusLabel = ThinkingStatusField(
         wrappingLabelWithString: "대화를 입력하거나 자료를 첨부하세요."
     )
+    private weak var emptyTranscriptLabel: NSTextField?
     private let retryButton = NSButton(title: "재시도", target: nil, action: nil)
     private let cancelButton = NSButton(title: "취소", target: nil, action: nil)
     private var lastAnnouncedStatus = ""
@@ -870,10 +897,7 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
     }
 
     override func loadView() {
-        let background = NSVisualEffectView()
-        background.material = .popover
-        background.blendingMode = .behindWindow
-        background.state = .active
+        let background = NSView()
         background.wantsLayer = true
         background.layer?.cornerRadius = 20
         background.layer?.masksToBounds = true
@@ -900,27 +924,34 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
         closeButton.isBordered = false
         closeButton.contentTintColor = .secondaryLabelColor
         closeButton.setAccessibilityLabel("대화 말풍선 닫기")
-        let header = NSStackView(views: [title, NSView(), closeButton])
+        header.addArrangedSubview(title)
+        header.addArrangedSubview(NSView())
+        header.addArrangedSubview(closeButton)
         header.orientation = .horizontal
         header.alignment = .centerY
+        header.wantsLayer = true
 
         transcriptStack.orientation = .vertical
         transcriptStack.alignment = .leading
         transcriptStack.spacing = 10
         transcriptStack.edgeInsets = NSEdgeInsets(top: 8, left: 4, bottom: 8, right: 4)
         transcriptStack.translatesAutoresizingMaskIntoConstraints = false
+        transcriptStack.wantsLayer = true
         transcriptStack.setAccessibilityElement(true)
         transcriptStack.setAccessibilityRole(.list)
         transcriptStack.setAccessibilityLabel("대화 내용")
 
-        let document = FlippedDocumentView()
+        let document = transcriptDocument
         document.translatesAutoresizingMaskIntoConstraints = false
+        document.wantsLayer = true
         document.addSubview(transcriptStack)
         transcriptScroll.documentView = document
         transcriptScroll.hasVerticalScroller = true
         transcriptScroll.autohidesScrollers = true
         transcriptScroll.drawsBackground = false
         transcriptScroll.borderType = .noBorder
+        transcriptScroll.wantsLayer = true
+        transcriptScroll.contentView.wantsLayer = true
         NSLayoutConstraint.activate([
             document.leadingAnchor.constraint(equalTo: transcriptScroll.contentView.leadingAnchor),
             document.trailingAnchor.constraint(equalTo: transcriptScroll.contentView.trailingAnchor),
@@ -1059,29 +1090,35 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
         self.theme = theme
         guard isViewLoaded else { return }
         view.appearance = theme.appearance
-        let opaqueSurface = theme == .light
-            || NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
-        view.layer?.backgroundColor = opaqueSurface
-            ? theme.palette.surface.withAlphaComponent(1).cgColor
-            : NSColor.clear.cgColor
+        let chatCanvas = theme.palette.chatCanvas.withAlphaComponent(1)
+        view.layer?.backgroundColor = chatCanvas.cgColor
         view.layer?.borderWidth = theme == .light
             && NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
             ? 1
             : 0.5
-        view.layer?.borderColor = theme.palette.border.cgColor
-        view.layer?.shadowColor = theme.palette.shadow.cgColor
+        view.layer?.borderColor = theme.palette.chatBorder.cgColor
+        view.layer?.shadowColor = theme.palette.chatShadow.cgColor
         view.layer?.shadowOpacity = theme == .light ? 1 : 0
         view.layer?.shadowRadius = 10
         view.layer?.shadowOffset = CGSize(width: 0, height: -2)
+        header.layer?.backgroundColor = chatCanvas.cgColor
+        transcriptScroll.layer?.backgroundColor = chatCanvas.cgColor
+        transcriptScroll.contentView.layer?.backgroundColor = chatCanvas.cgColor
+        transcriptDocument.layer?.backgroundColor = chatCanvas.cgColor
+        transcriptStack.layer?.backgroundColor = chatCanvas.cgColor
+        applyComposerTheme()
+        captureButton.applyTheme(theme)
+        fileButton.applyTheme(theme)
         transcriptStack.arrangedSubviews
             .compactMap { $0 as? ChatMessageRowView }
             .forEach { $0.applyTheme(theme) }
         attachmentStack.arrangedSubviews.forEach {
-            $0.layer?.backgroundColor = theme.palette.secondarySurface.cgColor
+            $0.layer?.backgroundColor = theme.palette.userMessage.cgColor
         }
+        emptyTranscriptLabel?.textColor = theme.palette.chatSecondaryText
         statusLabel.textColor = statusIsError
             ? theme.palette.error
-            : theme.palette.secondaryText
+            : theme.palette.chatSecondaryText
     }
 
     func render(
@@ -1140,6 +1177,7 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
         sendButton.isEnabled = !isBusy && hasDraft
         retryButton.isHidden = !(canRetry && !isBusy)
         cancelButton.isHidden = !state.isSending
+        applyComposerTheme()
         setStatus(status, isError: isError)
     }
 
@@ -1328,15 +1366,17 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
             transcriptStack.removeArrangedSubview($0)
             $0.removeFromSuperview()
         }
+        emptyTranscriptLabel = nil
         if messages.isEmpty {
             let empty = NSTextField(
                 wrappingLabelWithString: "캡처나 파일을 첨부하고 메시지를 보내면 대화가 여기에 쌓입니다."
             )
             empty.font = .systemFont(ofSize: 13)
-            empty.textColor = .tertiaryLabelColor
+            empty.textColor = theme.palette.chatSecondaryText
             empty.alignment = .center
             empty.maximumNumberOfLines = 3
             empty.setAccessibilityLabel("아직 대화가 없습니다")
+            emptyTranscriptLabel = empty
             transcriptStack.addArrangedSubview(empty)
             empty.widthAnchor.constraint(equalTo: transcriptStack.widthAnchor, constant: -8).isActive = true
         } else {
@@ -1371,7 +1411,7 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
             ])
             let label = NSTextField(labelWithString: attachment.displayName)
             label.font = .systemFont(ofSize: 12)
-            label.textColor = theme.palette.secondaryText
+            label.textColor = theme.palette.chatSecondaryText
             label.lineBreakMode = .byTruncatingMiddle
             let remove = NSButton(
                 image: NSImage(
@@ -1390,7 +1430,7 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
             row.spacing = 6
             row.wantsLayer = true
             row.layer?.cornerRadius = 8
-            row.layer?.backgroundColor = theme.palette.secondarySurface.cgColor
+            row.layer?.backgroundColor = theme.palette.userMessage.cgColor
             row.edgeInsets = NSEdgeInsets(top: 4, left: 7, bottom: 4, right: 5)
             row.setAccessibilityElement(true)
             row.setAccessibilityRole(.group)
@@ -1408,7 +1448,7 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
         )
         statusLabel.textColor = isError
             ? theme.palette.error
-            : theme.palette.secondaryText
+            : theme.palette.chatSecondaryText
         let accessibilityStatus = renderedState.isSending ? "응답 생성 중" : text
         statusLabel.setAccessibilityValue(accessibilityStatus)
         guard lastAnnouncedStatus != accessibilityStatus else { return }
@@ -1421,6 +1461,15 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
                 .priority: NSAccessibilityPriorityLevel.medium.rawValue,
             ]
         )
+    }
+
+    private func applyComposerTheme() {
+        composer.backgroundColor = composer.isEnabled
+            ? theme.palette.composerSurface
+            : .controlBackgroundColor
+        composer.textColor = composer.isEnabled
+            ? theme.palette.chatText
+            : .disabledControlTextColor
     }
 
     @objc private func closePressed() { onClose?() }
@@ -1527,12 +1576,12 @@ private final class ChatMessageRowView: NSStackView {
                 label.attributedStringValue = AssistantMarkdownRenderer.render(
                     message.visibleText,
                     font: .systemFont(ofSize: 13),
-                    textColor: theme.palette.text,
+                    textColor: theme.palette.chatText,
                     isStreaming: isStreaming
                 )
             } else {
                 label.stringValue = message.visibleText
-                label.textColor = theme.palette.text
+                label.textColor = theme.palette.chatText
             }
             content = label
         }
@@ -1562,7 +1611,7 @@ private final class ChatMessageRowView: NSStackView {
         bubble.layer?.backgroundColor = (
             message.role == .user
                 ? theme.palette.userMessage
-                : theme.palette.secondarySurface
+                : theme.palette.assistantMessage
         ).cgColor
         render(message, isStreaming: isStreaming, loadingText: loadingLabel?.stringValue)
     }
@@ -1570,6 +1619,50 @@ private final class ChatMessageRowView: NSStackView {
 
 private final class FlippedDocumentView: NSView {
     override var isFlipped: Bool { true }
+}
+
+private final class ChatAuxiliaryButton: NSButton {
+    init(title: String) {
+        super.init(frame: .zero)
+        self.title = title
+        isBordered = false
+        wantsLayer = true
+        layer?.cornerRadius = 6
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var isEnabled: Bool {
+        didSet { updateAppearance() }
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        updateAppearance()
+        return accepted
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let accepted = super.resignFirstResponder()
+        updateAppearance()
+        return accepted
+    }
+
+    func applyTheme(_ theme: AppTheme) {
+        layer?.backgroundColor = theme.palette.auxiliarySurface.cgColor
+        contentTintColor = theme.palette.chatText
+        updateAppearance()
+    }
+
+    private func updateAppearance() {
+        alphaValue = isEnabled ? 1 : 0.42
+        let focused = window?.isKeyWindow == true && window?.firstResponder === self
+        layer?.borderWidth = focused ? 1 : 0
+        layer?.borderColor = NSColor.keyboardFocusIndicatorColor.cgColor
+    }
 }
 
 private final class ThinkingStatusField: NSTextField {
