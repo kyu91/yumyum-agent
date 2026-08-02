@@ -625,7 +625,7 @@ struct QuickMenuPanelControllerTests {
         })
         #expect(textFields(in: controller.view).contains {
             $0.stringValue == "Reselect the default agent in Settings."
-                && $0.accessibilityLabel() == "YumYum Status"
+                && $0.accessibilityLabel() == "YumYum Agent Status"
         })
 
         controller.applyLanguage(.korean)

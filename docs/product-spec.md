@@ -1,4 +1,4 @@
-# YumYum product specification
+# YumYum Agent product specification
 
 ## Document and evidence control
 
@@ -6,7 +6,7 @@ This is the default English public product specification. It separates verified 
 
 ## Product definition
 
-YumYum is a native macOS floating pet that sends user-selected screen regions or local files to an explicitly selected, verified local CLI agent and presents the streamed response in native speech bubbles and chat.
+YumYum Agent is a native macOS floating pet that sends user-selected screen regions or local files to an explicitly selected, verified local CLI agent and presents the streamed response in native speech bubbles and chat.
 
 ## Current implementation status
 
@@ -20,7 +20,7 @@ YumYum is a native macOS floating pet that sends user-selected screen regions or
 
 - Be present without interrupting the user's current app or stealing focus.
 - Process only material the user explicitly selects.
-- Keep YumYum an interface to existing agents, not another model, tool runtime, or credential store.
+- Keep YumYum Agent an interface to existing agents, not another model, tool runtime, or credential store.
 - Make agent selection and data scope explicit; never silently fall back to another installation.
 - Default deny external changes and protect credentials, paths, stderr, and tokens.
 - Prefer native, lightweight macOS behavior and keep character motion subordinate to function and accessibility.
@@ -29,16 +29,16 @@ YumYum is a native macOS floating pet that sends user-selected screen regions or
 
 ### First use and agent selection
 
-1. The user installs and signs in to a supported CLI outside YumYum.
-2. YumYum discovers only direct executables in fixed candidate directories or an exact absolute path supplied by the user.
+1. The user installs and signs in to a supported CLI outside YumYum Agent.
+2. YumYum Agent discovers only direct executables in fixed candidate directories or an exact absolute path supplied by the user.
 3. Discovery runs the executable directly, without a shell, against bounded `--version` and agent-specific `--help` contracts.
-4. The user explicitly selects one validated executable in **Settings → Agent**. YumYum stores only its definition ID and exact path.
-5. If that path later becomes invalid, sending stops and explicit reselection is required; YumYum does not fall back.
+4. The user explicitly selects one validated executable in **Settings → Agent**. YumYum Agent stores only its definition ID and exact path.
+5. If that path later becomes invalid, sending stops and explicit reselection is required; YumYum Agent does not fall back.
 
 ### Quick capture
 
 1. The user clicks the pet or presses `Control+Option+Space` and chooses **Capture**.
-2. YumYum hides its surfaces and shows selection overlays on all displays.
+2. YumYum Agent hides its surfaces and shows selection overlays on all displays.
 3. The user drags a rectangle at least 8 pt wide and high, or cancels.
 4. A successful selection becomes a temporary PNG and is sent immediately as one input after validation and preview motion.
 5. The pet shows thinking motion and a streaming response; completion opens a response bubble and retains the full exchange in chat.
@@ -67,7 +67,7 @@ Cancellation, denied permission, empty text with no attachment, invalid attachme
 | Codex | `codex exec` with read-only sandbox and untrusted approval policy | Images only via `--image` |
 | Claude Code | Structured print execution, plan permission mode, non-persistent process sessions | Prompt contract only; no invented attachment flags |
 
-All processes use the exact executable URL and argv without a shell. General connector runs have a 120-second timeout and a combined 2 MB stdout/stderr limit. Each CLI owns authentication, network access, model-provider processing, and response quality; YumYum does not read its login files or tokens.
+All processes use the exact executable URL and argv without a shell. General connector runs have a 120-second timeout and a combined 2 MB stdout/stderr limit. Each CLI owns authentication, network access, model-provider processing, and response quality; YumYum Agent does not read its login files or tokens.
 
 ## Input, attachment, and capture constraints
 
@@ -86,7 +86,7 @@ Hermes keeps an ACP connection and logical session while valid. Codex and Claude
 
 ## Soul behavior
 
-YumYum owns the plaintext file `~/Library/Application Support/YumYum/SOUL.md`. Settings edit a fixed, bounded profile format for name, user address, role/identity, personality, speaking style, and dislikes/avoidances. On save, whitespace is normalized; each field is limited to 2,000 characters and the complete profile to 12,000 characters.
+YumYum Agent owns the plaintext file `~/Library/Application Support/YumYum/SOUL.md`. Settings edit a fixed, bounded profile format for name, user address, role/identity, personality, speaking style, and dislikes/avoidances. On save, whitespace is normalized; each field is limited to 2,000 characters and the complete profile to 12,000 characters.
 
 Soul is injected only into the first prompt of a new logical session and has lower priority than safety, privacy, approval, attachment, and external-change policy. It has no hooks, includes, environment expansion, network access, or command execution syntax. External Soul import is not implemented. See the [Soul format](soul-format.md).
 
@@ -96,11 +96,11 @@ The interface supports English and Korean. The language selector displays `Engli
 
 ## Privacy, security, and external changes
 
-- YumYum sends no telemetry and does not read Keychain, CLI login files, or token files.
+- YumYum Agent sends no telemetry and does not read Keychain, CLI login files, or token files.
 - Only the selected input, necessary conversation context, and Soul at the defined session boundary are passed to the selected local CLI. That CLI may use the network under its own configuration.
 - Known credentials are blocked. User-facing errors and transcript content redact local paths, token-like strings, and raw stderr.
 - `ExternalChangeToolsetPolicy` denies external-change toolsets by default. `TaskApprovalGate` is only an in-memory one-time model and is not connected to UI or connector execution.
-- Hermes `session/request_permission` always returns `cancelled`. Current connectors are analysis-only and cannot perform YumYum-authorized external changes.
+- Hermes `session/request_permission` always returns `cancelled`. Current connectors are analysis-only and cannot perform YumYum Agent-authorized external changes.
 - Any future external change requires a separate execution-time approval bound to the exact task, approval, and toolset, consumed once. Previous, blanket, or cross-task approval must never be reused.
 
 ## Current architecture and main paths
@@ -119,7 +119,7 @@ The interface supports English and Korean. The language selector displays `Engli
 
 Verified facts: the package requires macOS 14 or later and Swift tools 6.0; the app is native SwiftUI/AppKit/ScreenCaptureKit with no external package dependency; manual verification currently targets Apple Silicon. Intel support is not verified. The local bundle is not signed, notarized, sandbox-distribution verified, or an App Store build.
 
-Targets, not verified guarantees: primary validation across macOS 14, 15, and 26 on Apple Silicon; idle CPU near 0%; idle memory approximately 30–70 MB; no YumYum telemetry or idle network; capture, OCR, and vision work only on demand; low-frequency or static idle animation; first UI feedback within 100 ms; capture preview within 300 ms; streaming visible when the connector supports it; cancellation feedback within 200 ms; no focus theft; stable 8-hour operation. These targets require measured release evidence before being claimed as achieved.
+Targets, not verified guarantees: primary validation across macOS 14, 15, and 26 on Apple Silicon; idle CPU near 0%; idle memory approximately 30–70 MB; no YumYum Agent telemetry or idle network; capture, OCR, and vision work only on demand; low-frequency or static idle animation; first UI feedback within 100 ms; capture preview within 300 ms; streaming visible when the connector supports it; cancellation feedback within 200 ms; no focus theft; stable 8-hour operation. These targets require measured release evidence before being claimed as achieved.
 
 ## Acceptance gates
 

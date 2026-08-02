@@ -65,7 +65,7 @@ final class QuickMenuPanelController: NSObject {
         )
         thinkingPanel = Self.makeBubblePanel(
             size: Self.thinkingPanelSize,
-            title: AppText.localized("YumYum 생각 중")
+            title: AppText.localized("YumYum Agent 생각 중")
         )
         responsePanel = ResponseBubblePanel(
             contentRect: CGRect(origin: .zero, size: CGSize(width: 360, height: 120)),
@@ -78,7 +78,7 @@ final class QuickMenuPanelController: NSObject {
         Self.configure(
             actionPanel,
             level: .popUpMenu,
-            title: AppText.localized("YumYum 액션")
+            title: AppText.localized("YumYum Agent 액션")
         )
         actionPanel.contentViewController = actionViewController
         actionPanel.onCancel = { [weak self] in self?.dismissActionBubble() }
@@ -93,7 +93,7 @@ final class QuickMenuPanelController: NSObject {
         }
 
         thinkingPanel.contentViewController = thinkingViewController
-        Self.configure(responsePanel, level: .floating, title: AppText.localized("YumYum 답변"))
+        Self.configure(responsePanel, level: .floating, title: AppText.localized("YumYum Agent 답변"))
         responsePanel.contentViewController = responseViewController
         responseViewController.onOpenChat = { [weak self] in
             self?.openChatFromResponse()
@@ -194,9 +194,9 @@ final class QuickMenuPanelController: NSObject {
         thinkingViewController.applyLanguage(language)
         responseViewController.applyLanguage(language)
         chatController.applyLanguage(language)
-        actionPanel.title = AppText.localized(english: "YumYum Actions", korean: "YumYum 액션", language: language)
-        thinkingPanel.title = AppText.localized(english: "YumYum is thinking", korean: "YumYum 생각 중", language: language)
-        responsePanel.title = AppText.localized(english: "YumYum Response", korean: "YumYum 답변", language: language)
+        actionPanel.title = AppText.localized(english: "YumYum Agent Actions", korean: "YumYum Agent 액션", language: language)
+        thinkingPanel.title = AppText.localized(english: "YumYum Agent is thinking", korean: "YumYum Agent 생각 중", language: language)
+        responsePanel.title = AppText.localized(english: "YumYum Agent Response", korean: "YumYum Agent 답변", language: language)
         if responsePanel.isVisible {
             updateResponseFrame()
             responseViewController.restoreResponseScrollOrigin(responseScrollOrigin)
@@ -720,7 +720,7 @@ final class QuickMenuPanelController: NSObject {
         preview: FeedPreview,
         frame: CGRect
     ) -> NSPanel {
-        let panel = Self.makeBubblePanel(size: frame.size, title: AppText.localized("YumYum 먹이 미리보기"))
+        let panel = Self.makeBubblePanel(size: frame.size, title: AppText.localized("YumYum Agent 먹이 미리보기"))
         panel.level = .popUpMenu
         panel.ignoresMouseEvents = true
         panel.setFrame(frame, display: false)
@@ -812,7 +812,7 @@ final class QuickMenuPanelController: NSObject {
             defer: false
         )
         configure(panel, level: .floating, title: title)
-        panel.ignoresMouseEvents = title == AppText.localized("YumYum 생각 중")
+        panel.ignoresMouseEvents = title == AppText.localized("YumYum Agent 생각 중")
         return panel
     }
 
@@ -919,7 +919,7 @@ private final class ActionBubbleViewController: NSViewController {
         stack.translatesAutoresizingMaskIntoConstraints = false
         stack.setAccessibilityElement(true)
         stack.setAccessibilityRole(.list)
-        stack.setAccessibilityLabel(AppText.localized("YumYum 액션"))
+        stack.setAccessibilityLabel(AppText.localized("YumYum Agent 액션"))
         background.addSubview(stack)
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: background.leadingAnchor, constant: 12),
@@ -1013,8 +1013,8 @@ private final class ActionBubbleViewController: NSViewController {
     func applyLanguage(_ language: AppLanguage = AppText.language) {
         buttons.forEach { $0.applyLanguage(language) }
         view.setAccessibilityLabel(AppText.localized(
-            english: "YumYum Actions",
-            korean: "YumYum 액션",
+            english: "YumYum Agent Actions",
+            korean: "YumYum Agent 액션",
             language: language
         ))
     }
@@ -1150,7 +1150,7 @@ final class ThinkingBubbleViewController: NSViewController {
             .withAlphaComponent(0.28).cgColor
         background.setAccessibilityElement(true)
         background.setAccessibilityRole(.group)
-        background.setAccessibilityLabel(AppText.localized("YumYum이 응답을 생각하는 중"))
+        background.setAccessibilityLabel(AppText.localized("YumYum Agent가 응답을 생각하는 중"))
         label.font = .systemFont(ofSize: 14, weight: .semibold)
         label.alignment = .center
         label.setAccessibilityElement(false)
@@ -1187,8 +1187,8 @@ final class ThinkingBubbleViewController: NSViewController {
 
     func applyLanguage(_ language: AppLanguage = AppText.language) {
         view.setAccessibilityLabel(AppText.localized(
-            english: "YumYum is thinking about the response",
-            korean: "YumYum이 응답을 생각하는 중",
+            english: "YumYum Agent is thinking about the response",
+            korean: "YumYum Agent가 응답을 생각하는 중",
             language: language
         ))
     }
@@ -1494,8 +1494,8 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
         )
         bodySurface.setAccessibilityLabel(
             content.isExcerpt
-                ? AppText.localized("YumYum 답변 요약. 채팅에서 전체 답변을 열 수 있습니다.", language: language)
-                : AppText.localized("YumYum 답변", language: language)
+                ? AppText.localized("YumYum Agent 답변 요약. 채팅에서 전체 답변을 열 수 있습니다.", language: language)
+                : AppText.localized("YumYum Agent 답변", language: language)
         )
         bodySurface.setAccessibilityValue(content.displayText(language: language))
     }
@@ -1815,8 +1815,8 @@ private final class FeedPreviewContentView: NSView {
         setAccessibilityElement(true)
         setAccessibilityRole(.image)
         setAccessibilityLabel(AppText.localized(
-            english: "Material being fed to YumYum: \(preview.label)",
-            korean: "YumYum에게 먹이는 자료: \(preview.label)"
+            english: "Material being fed to YumYum Agent: \(preview.label)",
+            korean: "YumYum Agent에게 먹이는 자료: \(preview.label)"
         ))
     }
 

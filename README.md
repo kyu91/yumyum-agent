@@ -1,8 +1,8 @@
-# YumYum
+# YumYum Agent
 
-YumYum is a Swift/AppKit macOS app that lets you “feed” a selected screen area or local file to a floating pet and read responses from an installed local CLI agent in native bubbles and chat.
+YumYum Agent is a Swift/AppKit macOS app that lets you “feed” a selected screen area or local file to a floating pet and read responses from an installed local CLI agent in native bubbles and chat.
 
-> **Developer preview (0.1.0):** YumYum is currently built from source. Distribution signing, notarization, and sandboxed distribution have not been implemented or verified.
+> **Developer preview (0.1.0):** YumYum Agent is currently built from source. Distribution signing, notarization, and sandboxed distribution have not been implemented or verified.
 
 ## Features
 
@@ -27,10 +27,10 @@ Manual verification currently targets Apple Silicon macOS. Intel Mac support is 
 swift build
 swift test
 ./scripts/build-app.sh
-open .build/YumYum.app
+open ".build/YumYum Agent.app"
 ```
 
-The script creates a local release `.build/YumYum.app` by default. Use `CONFIGURATION=debug ./scripts/build-app.sh` for a debug bundle.
+The script creates a local release `.build/YumYum Agent.app` by default. Use `CONFIGURATION=debug ./scripts/build-app.sh` for a debug bundle.
 
 Only when standalone Command Line Tools cannot find the `Testing` module, run this full regression command:
 
@@ -48,7 +48,7 @@ swift test \
 ## First use
 
 1. Install a supported CLI and complete its own sign-in flow.
-2. Run YumYum and explicitly select a discovered executable in **Settings → Agent**.
+2. Run YumYum Agent and explicitly select a discovered executable in **Settings → Agent**.
 3. If needed, grant Screen Recording, Input Monitoring, or Accessibility permission in macOS Settings.
 4. Click the pet or press `Control+Option+Space` to capture, choose files, or chat.
 
@@ -63,11 +63,11 @@ Cancellation, denied permission, empty input, invalid attachments, and no agent 
 | Codex | `codex exec`, read-only sandbox, untrusted approval |
 | Claude Code | Structured print execution, plan permission mode |
 
-These names are trademarks used only to describe compatibility. YumYum is independent of these vendors and does not claim sponsorship or endorsement. Each CLI owns its sign-in, network requests, model-provider processing, and results.
+These names are trademarks used only to describe compatibility. YumYum Agent is independent of these vendors and does not claim sponsorship or endorsement. Each CLI owns its sign-in, network requests, model-provider processing, and results.
 
 ## Privacy and Soul
 
-YumYum sends no telemetry and does not read Keychain or CLI sign-in files. The first request passes only user-selected text, files, or captures to the selected CLI. Follow-up requests also include transcript text and context, but local attachment paths are excluded from visible transcript text. The CLI may use the network according to its own configuration. Soul is stored in plaintext at `~/Library/Application Support/YumYum/SOUL.md` and is injected into the first prompt of a new logical session below safety policies in priority.
+YumYum Agent sends no telemetry and does not read Keychain or CLI sign-in files. The first request passes only user-selected text, files, or captures to the selected CLI. Follow-up requests also include transcript text and context, but local attachment paths are excluded from visible transcript text. The CLI may use the network according to its own configuration. Soul is stored in plaintext at `~/Library/Application Support/YumYum/SOUL.md` and is injected into the first prompt of a new logical session below safety policies in priority.
 
 See [Privacy](PRIVACY.md) and the [Soul format](docs/soul-format.md).
 

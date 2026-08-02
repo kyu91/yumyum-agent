@@ -1,7 +1,7 @@
 # Open-source readiness checklist
 
 - [ ] Confirm ownership and publication rights for source, documentation, and assets.
-- [ ] Decide trademark registration, use, and contributor-use policy for the YumYum name and logo.
+- [ ] Decide trademark registration, use, and contributor-use policy for the YumYum Agent name and logo.
 - [ ] Scan the complete Git history for secrets and retain results.
   - `gitleaks` and `trufflehog` are unavailable locally, so this is not yet done.
 - [ ] Decide whether to publish a clean snapshot or complete history.

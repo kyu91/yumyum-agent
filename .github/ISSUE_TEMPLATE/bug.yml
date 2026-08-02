@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible YumYum problem without sensitive data
+description: Report a reproducible YumYum Agent problem without sensitive data
 title: "[Bug]: "
 labels: [bug]
 body:

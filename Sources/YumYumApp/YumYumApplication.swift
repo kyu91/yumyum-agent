@@ -17,7 +17,7 @@ struct YumYumApplication: App {
     }
 
     var body: some Scene {
-        Window("YumYum", id: "main") {
+        Window("YumYum Agent", id: "main") {
             YumYumContentView(viewModel: viewModel, appDelegate: appDelegate)
                 .preferredColorScheme(appDelegate.currentTheme.colorScheme)
                 .background {
@@ -33,7 +33,7 @@ struct YumYumApplication: App {
             CommandGroup(replacing: .newItem) {}
         }
 
-        MenuBarExtra("YumYum", systemImage: "takeoutbag.and.cup.and.straw.fill") {
+        MenuBarExtra("YumYum Agent", systemImage: "takeoutbag.and.cup.and.straw.fill") {
             YumYumMenu(viewModel: viewModel, appDelegate: appDelegate)
                 .preferredColorScheme(appDelegate.currentTheme.colorScheme)
         }
@@ -87,7 +87,7 @@ private struct YumYumMenu: View {
     @ObservedObject var appDelegate: YumYumAppDelegate
 
     var body: some View {
-        Button(AppText.localized("YumYum 열기")) {
+        Button(AppText.localized("YumYum Agent 열기")) {
             NSApplication.shared.activate(ignoringOtherApps: true)
             openWindow(id: "main")
         }
@@ -99,7 +99,7 @@ private struct YumYumMenu: View {
                 set: { appDelegate.setPetVisible($0) }
             )
         )
-        .accessibilityHint(AppText.localized("화면 우하단의 YumYum 펫 표시 여부를 전환합니다"))
+        .accessibilityHint(AppText.localized("화면 우하단의 YumYum Agent 펫 표시 여부를 전환합니다"))
 
         Button(AppText.localized("빠른 메뉴 열기")) {
             appDelegate.showQuickMenu()
@@ -112,7 +112,7 @@ private struct YumYumMenu: View {
 
         Divider()
 
-        Button(AppText.localized("YumYum 종료")) {
+        Button(AppText.localized("YumYum Agent 종료")) {
             NSApplication.shared.terminate(nil)
         }
         .keyboardShortcut("q")
@@ -352,7 +352,7 @@ private struct YumYumContentView: View {
             }
             .pickerStyle(.segmented)
             .id(appDelegate.currentLanguage)
-            .accessibilityHint(AppText.localized("YumYum 화면의 밝은 테마와 어두운 테마를 전환합니다"))
+            .accessibilityHint(AppText.localized("YumYum Agent 화면의 밝은 테마와 어두운 테마를 전환합니다"))
             .padding(.top, 4)
         } label: {
             Label(AppText.localized("화면 테마"), systemImage: "circle.lefthalf.filled")
@@ -376,8 +376,8 @@ private struct YumYumContentView: View {
             .pickerStyle(.segmented)
             .accessibilityIdentifier("settings-language-picker")
             .accessibilityHint(AppText.localized(
-                english: "Changes the YumYum interface language immediately.",
-                korean: "YumYum 화면 언어를 즉시 변경합니다."
+                english: "Changes the YumYum Agent interface language immediately.",
+                korean: "YumYum Agent 화면 언어를 즉시 변경합니다."
             ))
             .padding(.top, 4)
         } label: {
@@ -397,7 +397,7 @@ private struct YumYumContentView: View {
                 .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 3) {
-                Text("YumYum")
+                Text("YumYum Agent")
                     .font(.title.bold())
                 Text(AppText.localized("검증된 로컬 에이전트와 빠른 메뉴"))
                     .foregroundStyle(.secondary)
@@ -729,7 +729,7 @@ private struct YumYumContentView: View {
                         .font(.caption2.weight(.bold))
                         .foregroundStyle(.secondary)
                 }
-                Text(AppText.localized("YumYum은 자격증명을 읽지 않으며 외부 변경은 Task 한정 일회성 승인 전까지 차단합니다."))
+                Text(AppText.localized("YumYum Agent는 자격증명을 읽지 않으며 외부 변경은 Task 한정 일회성 승인 전까지 차단합니다."))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

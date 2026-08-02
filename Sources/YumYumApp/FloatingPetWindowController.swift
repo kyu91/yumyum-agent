@@ -206,7 +206,7 @@ final class YumYumAppDelegate: NSObject, NSApplicationDelegate, ObservableObject
 
     private func captureMainWindow() {
         if let window = NSApplication.shared.windows.first(where: {
-            !($0 is NSPanel) && $0.title == "YumYum"
+            !($0 is NSPanel) && $0.title == "YumYum Agent"
         }) {
             mainWindow = window
             window.appearance = currentTheme.appearance
@@ -260,7 +260,7 @@ final class FloatingPetWindowController: NSObject {
         super.init()
 
         panel.identifier = Self.panelIdentifier
-        panel.title = "YumYum Pet"
+        panel.title = "YumYum Agent Pet"
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = true
@@ -394,7 +394,7 @@ final class PetPresentationModel: ObservableObject {
     @Published var language = AppText.language
 
     var accessibilityLabel: String {
-        AppText.localized("YumYum 플로팅 펫", language: language)
+        AppText.localized("YumYum Agent 플로팅 펫", language: language)
     }
 
     var accessibilityHint: String {

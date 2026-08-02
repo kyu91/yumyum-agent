@@ -1,6 +1,6 @@
 # Release readiness
 
-YumYum 0.1.0 is a source-build developer preview. Developer ID signing, hardened runtime, notarization, distribution checksums, and release automation are **not implemented**.
+YumYum Agent 0.1.0 is a source-build developer preview. Developer ID signing, hardened runtime, notarization, distribution checksums, and release automation are **not implemented**.
 
 ## Current source gate
 

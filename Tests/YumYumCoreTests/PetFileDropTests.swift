@@ -18,9 +18,9 @@ struct PetFileDropTests {
         model.isFileDropTarget = true
 
         controller.applyLanguage(.english)
-        #expect(model.accessibilityLabel == "YumYum floating pet")
+        #expect(model.accessibilityLabel == "YumYum Agent floating pet")
         #expect(model.accessibilityHint == "Click to open the quick menu. Drag to move.")
-        #expect(controller.panel.contentView?.accessibilityLabel() == "YumYum floating pet")
+        #expect(controller.panel.contentView?.accessibilityLabel() == "YumYum Agent floating pet")
         #expect(controller.panel.contentView?.accessibilityHelp() == "Click to open the quick menu. Drag to move.")
         controller.applyLanguage(.korean)
 
@@ -28,9 +28,9 @@ struct PetFileDropTests {
         #expect(controller.panel.frame == frame)
         #expect(model.chewFrame == .mouthClosedChew)
         #expect(model.isFileDropTarget)
-        #expect(model.accessibilityLabel == "YumYum 플로팅 펫")
+        #expect(model.accessibilityLabel == "YumYum Agent 플로팅 펫")
         #expect(model.accessibilityHint == "클릭하면 빠른 메뉴를 엽니다. 드래그하여 이동할 수 있습니다.")
-        #expect(controller.panel.contentView?.accessibilityLabel() == "YumYum 플로팅 펫")
+        #expect(controller.panel.contentView?.accessibilityLabel() == "YumYum Agent 플로팅 펫")
         #expect(controller.panel.contentView?.accessibilityHelp() == "클릭하면 빠른 메뉴를 엽니다. 드래그하여 이동할 수 있습니다.")
     }
 

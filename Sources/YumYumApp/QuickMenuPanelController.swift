@@ -521,7 +521,7 @@ final class ChatPanelController: NSObject {
         )
         super.init()
 
-        panel.title = AppText.localized("YumYum 대화")
+        panel.title = AppText.localized("YumYum Agent 대화")
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = true
@@ -604,7 +604,7 @@ final class ChatPanelController: NSObject {
     }
 
     func applyLanguage(_ language: AppLanguage = AppText.language) {
-        panel.title = AppText.localized(english: "YumYum Chat", korean: "YumYum 대화", language: language)
+        panel.title = AppText.localized(english: "YumYum Agent Chat", korean: "YumYum Agent 대화", language: language)
         viewController.applyLanguage(language)
     }
 
@@ -936,7 +936,7 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
             object: nil
         )
 
-        let title = NSTextField(labelWithString: "YumYum")
+        let title = NSTextField(labelWithString: "YumYum Agent")
         title.font = .systemFont(ofSize: 16, weight: .bold)
         let closeButton = NSButton(
             image: NSImage(
@@ -1062,7 +1062,7 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
         statusLabel.textColor = .secondaryLabelColor
         statusLabel.maximumNumberOfLines = 2
         statusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        statusLabel.setAccessibilityLabel(AppText.localized("YumYum 상태"))
+        statusLabel.setAccessibilityLabel(AppText.localized("YumYum Agent 상태"))
 
         retryButton.target = self
         retryButton.action = #selector(retryPressed)
@@ -1267,7 +1267,7 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
         composer.setAccessibilityLabel(AppText.localized("대화 메시지", language: language))
         composer.setAccessibilityHelp(AppText.localized("Return을 눌러 전송합니다", language: language))
         statusLabel.language = language
-        statusLabel.setAccessibilityLabel(AppText.localized("YumYum 상태", language: language))
+        statusLabel.setAccessibilityLabel(AppText.localized("YumYum Agent 상태", language: language))
         emptyTranscriptLabel?.stringValue = AppText.localized("캡처나 파일을 첨부하고 메시지를 보내면 대화가 여기에 쌓입니다.", language: language)
         emptyTranscriptLabel?.setAccessibilityLabel(AppText.localized("아직 대화가 없습니다", language: language))
         transcriptStack.arrangedSubviews.compactMap { $0 as? ChatMessageRowView }.forEach {
@@ -1554,7 +1554,7 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
         statusLabel.setAccessibilityLabel(
             renderedState.isSending
                 ? AppText.localized("응답 생성 중", language: language)
-                : AppText.localized("YumYum 상태", language: language)
+                : AppText.localized("YumYum Agent 상태", language: language)
         )
         statusLabel.textColor = isError
             ? theme.palette.error

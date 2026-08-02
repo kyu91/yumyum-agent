@@ -146,7 +146,7 @@ public actor HermesACPProtocolClient {
                 "clientCapabilities": [String: Any](),
                 "clientInfo": [
                     "name": "yumyum",
-                    "title": "YumYum",
+                    "title": "YumYum Agent",
                     "version": "0.1.0",
                 ],
             ]
@@ -288,7 +288,7 @@ public actor HermesACPProtocolClient {
             "id": id,
             "error": [
                 "code": -32_601,
-                "message": "YumYum does not expose client file-system or terminal methods.",
+                "message": "YumYum Agent does not expose client file-system or terminal methods.",
             ],
         ])
     }

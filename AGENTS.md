@@ -4,7 +4,7 @@ This document is a work instruction that applies to the entire repository.
 
 ## Project purpose and product safety principles
 
-YumYum is a Swift/AppKit app that "feeds" the user's selected screen area or local file to the macOS floating pet and displays the response of a verified local CLI agent (Hermes, OpenCode, Codex, Claude Code) as a native speech bubble and chat transcript.
+YumYum Agent is a Swift/AppKit app that "feeds" the user's selected screen area or local file to the macOS floating pet and displays the response of a verified local CLI agent (Hermes, OpenCode, Codex, Claude Code) as a native speech bubble and chat transcript.
 
 - The user must explicitly approve the action of changing the external state separately from the task just before execution. Previous approvals, comprehensive approvals, and approvals from other Task·approval·toolsets cannot be reused.
 - The current product does not execute external changes. `ExternalChangeToolsetPolicy` is a default rejection, and `TaskApprovalGate` only implements a one-time approval model in memory and is not connected to the UI and Connector execution flow.
@@ -75,10 +75,10 @@ Run from the storage root.
 swift build
 swift test
 ./scripts/build-app.sh
-open .build/YumYum.app
+open ".build/YumYum Agent.app"
 ```
 
-`scripts/build-app.sh` creates the default release bundle as `.build/YumYum.app`. The debug bundle is as follows.
+`scripts/build-app.sh` creates the default release bundle as `.build/YumYum Agent.app`. The debug bundle is as follows.
 
 ```sh
 CONFIGURATION=debug ./scripts/build-app.sh
@@ -143,7 +143,7 @@ If you change the app bundle or package settings, `swift build` and `./scripts/b
 - `AgentRuntime`, `StructuredCLIStreaming`: Only use the actual confirmed argv in each CLI. Do not abstract or add unconfirmed flags by adding the difference in attachment support.
 - `HermesACPTransport`: ACP v1 JSON-RPC order, connection/session reuse, permission `cancelled`, 2MB budget reset, preserves process termination and reconnection to the next request in case of timeout/cancel.
 - `ProcessRunner`: Continuously drain stdout/stderr at the same time and prevent child deadlock even after reaching the output limit. When timeout/cancel, terminate and kill if necessary. Even if a descendant grabs the pipe, it does not wait for the child to terminate directly.
-- `ScreenCaptureCoordinator`, `CaptureRegionPolicy`: Maintains API branch by macOS version and AppKit/ScreenCaptureKit coordinate system conversion. Hides all YumYum surfaces before capturing and keeps the source rect of the result as the starting point of the preview.
+- `ScreenCaptureCoordinator`, `CaptureRegionPolicy`: Maintains API branch by macOS version and AppKit/ScreenCaptureKit coordinate system conversion. Hides all YumYum Agent surfaces before capturing and keeps the source rect of the result as the starting point of the preview.
 - `FloatingPetWindowController`, panel controller: Corrects the pet drag position and all speech bubbles within the display `visibleFrame`. Preserves the order of the action four rows, 248pt width, keyboard movement, and VoiceOver label.
 - Markdown/Response UI: Hides incomplete delimiters while streaming and maintains block/inline style and original line breaks when completed. Long responses scroll through internal documents, not the speech bubbles themselves.
 - `Package.swift`, `AppBundle`, `scripts/build-app.sh`: the fixture must be included in the app Resources. The current bundle is for local development and the signing, notarization, and sandbox distribution have not been verified.

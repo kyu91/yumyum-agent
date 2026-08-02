@@ -182,7 +182,7 @@ struct AppThemeTests {
         let fields = descendants(of: controller.view, as: NSTextField.self)
         let markdown = try #require(fields.first { $0.stringValue == "answer" })
         let error = try #require(
-            fields.first { $0.accessibilityLabel() == "YumYum 상태" }
+            fields.first { $0.accessibilityLabel() == "YumYum Agent 상태" }
         )
         let send = try #require(
             descendants(of: controller.view, as: NSButton.self)
@@ -236,7 +236,7 @@ struct AppThemeTests {
         let content = try #require(document.subviews.first)
         let title = try #require(
             descendants(of: controller.view, as: NSTextField.self)
-                .first { $0.stringValue == "YumYum" }
+                .first { $0.stringValue == "YumYum Agent" }
         )
         let header = try #require(title.superview)
 
@@ -344,7 +344,7 @@ struct AppThemeTests {
             #expect(!retry.isHidden)
             #expect(cancel.isHidden)
             #expect(fields.first {
-                $0.accessibilityLabel() == "YumYum 상태"
+                $0.accessibilityLabel() == "YumYum Agent 상태"
             }?.textColor == theme.palette.error)
 
             controller.render(

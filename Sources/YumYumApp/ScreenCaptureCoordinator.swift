@@ -390,7 +390,7 @@ private final class CaptureOverlayWindow: NSWindow {
         level = .screenSaver
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         isReleasedWhenClosed = false
-        title = AppText.localized("YumYum 캡처 영역 선택")
+        title = AppText.localized("YumYum Agent 캡처 영역 선택")
         setAccessibilityLabel(AppText.localized("화면 캡처 영역 선택"))
     }
 

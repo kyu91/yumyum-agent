@@ -7,7 +7,7 @@ body:
     id: problem
     attributes:
       label: Problem
-      description: What concrete problem should YumYum solve?
+      description: What concrete problem should YumYum Agent solve?
     validations:
       required: true
   - type: textarea

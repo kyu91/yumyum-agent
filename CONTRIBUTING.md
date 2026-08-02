@@ -1,6 +1,6 @@
 # Contributing
 
-YumYum targets macOS 14 or later and Swift tools 6.0. Read [AGENTS.md](AGENTS.md) before working; its safety, architecture, and verification rules apply repository-wide.
+YumYum Agent targets macOS 14 or later and Swift tools 6.0. Read [AGENTS.md](AGENTS.md) before working; its safety, architecture, and verification rules apply repository-wide.
 
 ## Development workflow
 

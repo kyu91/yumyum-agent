@@ -5,7 +5,7 @@ set -eu
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 ROOT_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 CONFIGURATION=${CONFIGURATION:-release}
-APP_DIR=${YUMYUM_APP_OUTPUT:-"$ROOT_DIR/.build/YumYum.app"}
+APP_DIR=${YUMYUM_APP_OUTPUT:-"$ROOT_DIR/.build/YumYum Agent.app"}
 CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
