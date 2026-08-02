@@ -1,5 +1,7 @@
 # YumYum Agent
 
+[English](README.md) *(current)* | [한국어](README.ko.md)
+
 YumYum Agent is a Swift/AppKit macOS app that lets you “feed” a selected screen area or local file to a floating pet and read responses from an installed local CLI agent in native bubbles and chat.
 
 > **Developer preview (0.1.0):** The release pipeline is implemented, but no public signed/notarized release has been verified or published yet.
