@@ -228,10 +228,14 @@ struct ThinkingAnimationPolicyTests {
         for millisecond in [150, 450, 750] {
             #expect(policy.frame(at: millisecond, reduceMotion: false) == .mouthClosedChew)
         }
-        #expect(PetChewFrame.mouthClosedChew.bodyScaleX == 1.012)
-        #expect(PetChewFrame.mouthClosedChew.bodyScaleY == 0.985)
-        #expect(PetChewFrame.mouthClosedChew.bodyOffsetY == -1)
-        #expect(PetChewFrame.mouthClosedChew.cheekOffset == 1)
+        #expect(PetChewFrame.mouthOpen.bodyScaleX == 0.985)
+        #expect(PetChewFrame.mouthOpen.bodyScaleY == 1.025)
+        #expect(PetChewFrame.mouthOpen.bodyOffsetY == -2)
+        #expect(PetChewFrame.mouthOpen.cheekOffset == -1)
+        #expect(PetChewFrame.mouthClosedChew.bodyScaleX == 1.035)
+        #expect(PetChewFrame.mouthClosedChew.bodyScaleY == 0.955)
+        #expect(PetChewFrame.mouthClosedChew.bodyOffsetY == 2)
+        #expect(PetChewFrame.mouthClosedChew.cheekOffset == 3)
         #expect(policy.resetFrame == .resting)
     }
 

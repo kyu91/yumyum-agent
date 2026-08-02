@@ -366,17 +366,17 @@ public struct PetChewFrame: Equatable, Sendable {
     )
     public static let mouthOpen = PetChewFrame(
         mouth: .open,
-        bodyScaleX: 1,
-        bodyScaleY: 1,
-        bodyOffsetY: 0,
-        cheekOffset: 0
+        bodyScaleX: 0.985,
+        bodyScaleY: 1.025,
+        bodyOffsetY: -2,
+        cheekOffset: -1
     )
     public static let mouthClosedChew = PetChewFrame(
         mouth: .closed,
-        bodyScaleX: 1.012,
-        bodyScaleY: 0.985,
-        bodyOffsetY: -1,
-        cheekOffset: 1
+        bodyScaleX: 1.035,
+        bodyScaleY: 0.955,
+        bodyOffsetY: 2,
+        cheekOffset: 3
     )
     public static let reducedMotion = PetChewFrame(
         mouth: .halfClosed,

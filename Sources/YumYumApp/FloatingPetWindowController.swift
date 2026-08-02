@@ -560,18 +560,8 @@ struct YumYumPetView: View {
     let onClick: @MainActor () -> Void
 
     var body: some View {
-        ZStack {
-            Canvas { context, size in
-                drawPet(in: &context, size: size)
-            }
-            .accessibilityHidden(true)
-
-            Image(systemName: "fork.knife.circle.fill")
-                .font(.system(size: 17, weight: .semibold))
-                .symbolRenderingMode(.palette)
-                .foregroundStyle(.white, Color(red: 0.78, green: 0.25, blue: 0.08))
-                .offset(y: 24)
-                .accessibilityHidden(true)
+        Canvas { context, size in
+            drawPet(in: &context, size: size)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .scaleEffect(
@@ -737,22 +727,22 @@ struct YumYumPetView: View {
         switch presentationModel.chewFrame.mouth {
         case .open:
             context.fill(
-                Path(ellipseIn: rect(39, 48, 18, 16)),
+                Path(ellipseIn: rect(37, 47, 22, 19)),
                 with: .color(outline)
             )
             context.fill(
-                Path(ellipseIn: rect(43, 56, 10, 5)),
+                Path(ellipseIn: rect(42, 58.5, 12, 6)),
                 with: .color(Color(red: 1, green: 0.43, blue: 0.37))
             )
         case .halfClosed:
             context.fill(
-                Path(ellipseIn: rect(41, 51, 14, 6)),
+                Path(ellipseIn: rect(39.5, 50.5, 17, 7)),
                 with: .color(outline)
             )
         case .closed:
             var smile = Path()
-            smile.move(to: point(43, 49))
-            smile.addQuadCurve(to: point(53, 49), control: point(48, 56))
+            smile.move(to: point(42, 49))
+            smile.addQuadCurve(to: point(54, 49), control: point(48, 57))
             context.stroke(
                 smile,
                 with: .color(outline),
