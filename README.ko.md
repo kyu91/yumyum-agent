@@ -4,7 +4,7 @@
 
 YumYum Agent는 선택한 화면 영역이나 로컬 파일을 플로팅 펫에게 “먹이고”, 설치된 로컬 CLI 에이전트의 응답을 네이티브 말풍선과 채팅으로 확인할 수 있는 Swift/AppKit macOS 앱입니다.
 
-> **개발자 프리뷰(0.1.0):** 릴리스 파이프라인은 구현되었지만, 공개된 서명·공증 릴리스는 아직 검증되거나 배포되지 않았습니다.
+> **개발자 프리뷰(0.1.0):** 서명·공증 배포는 아직 검증되지 않았습니다. 수동 배포 workflow가 성공한 뒤 [Releases 페이지](https://github.com/kyu91/yumyum-agent/releases)에 **Unsigned Preview**로 명확히 표시된 prerelease가 제공될 수 있습니다.
 
 ## 기능
 
@@ -25,7 +25,7 @@ YumYum Agent는 선택한 화면 영역이나 로컬 파일을 플로팅 펫에�
 
 ## 다운로드 및 설치
 
-아직 공식 바이너리는 배포되지 않았습니다. 첫 공개 릴리스 이후 GitHub Releases에서 `YumYum-Agent-<version>-macOS.dmg`와 해당 `.sha256` 파일을 다운로드하고 체크섬을 검증한 다음, DMG를 열어 **YumYum Agent.app**을 **Applications**로 드래그하세요. 처음 실행할 때는 앱을 정상적으로 열고 macOS Gatekeeper 안내를 따르세요. 보안 우회 명령은 지원하지 않습니다.
+[GitHub Releases 페이지](https://github.com/kyu91/yumyum-agent/releases)에서 release label을 확인한 뒤 다운로드하세요. **Unsigned Preview**는 Developer ID로 서명되거나 Apple 공증을 받지 않았습니다. 공식 저장소의 asset만 신뢰하고 `shasum -a 256 -c YumYum-Agent-<version>-macOS.dmg.sha256`로 검증하세요. DMG를 열어 앱을 **Applications**로 드래그한 뒤 Control-클릭/우클릭하고 **Open(열기)**을 선택하세요. 차단되면 **System Settings → Privacy & Security → Open Anyway**를 사용하세요. 경고 문구는 버전에 따라 다릅니다. Gatekeeper를 전역으로 비활성화하지 마세요. macOS 개인정보 보호 권한은 여전히 요청될 수 있습니다. 두 architecture slice가 있어도 Intel 실행은 검증되지 않았습니다.
 
 로컬 개발자는 unsigned DMG를 명시적으로 생성하고 검증할 수 있습니다.
 
@@ -91,7 +91,7 @@ YumYum Agent는 telemetry를 전송하지 않으며 Keychain이나 CLI 로그인
 ## 안전 경계 및 제한 사항
 
 - 현재 connector는 분석 전용입니다. 외부 변경 UI와 실행 연결은 구현되지 않았습니다.
-- 로컬 build와 `--unsigned` DMG는 서명되거나 공증되지 않았습니다. 현재 App Store build, 자동 업데이트 또는 배포된 binary는 제공되지 않습니다.
+- 로컬 build와 **Unsigned Preview** DMG는 서명되거나 공증되지 않았습니다. App Store build와 자동 업데이트는 제공되지 않습니다.
 - 실제 모델 응답은 외부 CLI 설치, 로그인, 네트워크 및 provider 상태에 따라 달라집니다.
 - 화면 캡처는 직사각형 영역 선택만 지원합니다. 전역 단축키에는 macOS 개인정보 보호 권한이 필요할 수 있습니다.
 - 비정상 종료 후 남은 일반 `YumYum-Capture-*` 파일은 다음 앱 실행 시 best-effort 방식으로 정리됩니다.

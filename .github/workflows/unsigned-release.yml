@@ -1,0 +1,143 @@
+name: Unsigned Preview Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag (vX.Y.Z)
+        required: true
+        type: string
+      commit:
+        description: Exact 40-character commit SHA the tag must resolve to
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          fetch-depth: 0
+      - name: Select Xcode 26.6 and verify Swift
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
+          xcodebuild -version
+          XCODE_VERSION=$(xcodebuild -version | sed -nE 's/^Xcode ([0-9.]+)$/\1/p')
+          test "$XCODE_VERSION" = 26.6
+          SWIFT_MAJOR=$(swift --version | sed -nE 's/.*Swift version ([0-9]+).*/\1/p')
+          test "$SWIFT_MAJOR" -ge 6
+      - name: Validate tag, source, and bundle identifier
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_COMMIT: ${{ inputs.commit }}
+        run: |
+          set -eu
+          printf '%s\n' "$RELEASE_TAG" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          printf '%s\n' "$RELEASE_COMMIT" | grep -Eq '^[0-9a-f]{40}$'
+          VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' AppBundle/Info.plist)
+          test "$RELEASE_TAG" = "v${VERSION}"
+          TAG_COMMIT=$(git rev-parse "refs/tags/${RELEASE_TAG}^{commit}")
+          test "$TAG_COMMIT" = "$RELEASE_COMMIT"
+          test "$(git rev-parse HEAD)" = "$RELEASE_COMMIT"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' AppBundle/Info.plist)" = io.github.kyu91.yumyumagent
+      - name: Build and test
+        run: |
+          swift build
+          swift test
+      - name: Create and verify unsigned Universal DMG
+        id: prepare
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -eu
+          VERSION=${RELEASE_TAG#v}
+          ARCHITECTURES='arm64 x86_64' ./scripts/package-release.sh --version "$VERSION" --unsigned
+          EXPECTED_ARCHITECTURES='arm64 x86_64' \
+          ./scripts/test-release.sh ".build/release/YumYum-Agent-${VERSION}-macOS.dmg"
+          (cd .build/release && /usr/bin/shasum -a 256 -c "YumYum-Agent-${VERSION}-macOS.dmg.sha256")
+          STAGING="$RUNNER_TEMP/unsigned-release-assets"
+          mkdir "$STAGING"
+          cp ".build/release/YumYum-Agent-${VERSION}-macOS.dmg" "$STAGING/"
+          cp ".build/release/YumYum-Agent-${VERSION}-macOS.dmg.sha256" "$STAGING/"
+          printf 'version=%s\n' "$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Store release assets
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: unsigned-release-${{ inputs.tag }}
+          path: |
+            ${{ runner.temp }}/unsigned-release-assets/YumYum-Agent-${{ steps.prepare.outputs.version }}-macOS.dmg
+            ${{ runner.temp }}/unsigned-release-assets/YumYum-Agent-${{ steps.prepare.outputs.version }}-macOS.dmg.sha256
+          if-no-files-found: error
+
+  publish:
+    needs: build-and-test
+    runs-on: macos-26
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          fetch-depth: 0
+      - name: Validate release source
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_COMMIT: ${{ inputs.commit }}
+        run: |
+          set -eu
+          test "$(git rev-parse "refs/tags/${RELEASE_TAG}^{commit}")" = "$RELEASE_COMMIT"
+          test "$(git rev-parse HEAD)" = "$RELEASE_COMMIT"
+      - name: Download release assets
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: unsigned-release-${{ inputs.tag }}
+          path: ${{ runner.temp }}/unsigned-release-assets
+      - name: Publish unsigned prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -eu
+          VERSION=${RELEASE_TAG#v}
+          DMG_NAME="YumYum-Agent-${VERSION}-macOS.dmg"
+          CHECKSUM_NAME="${DMG_NAME}.sha256"
+          DMG="$RUNNER_TEMP/unsigned-release-assets/$DMG_NAME"
+          CHECKSUM="${DMG}.sha256"
+          NOTES="$RUNNER_TEMP/unsigned-release-notes.md"
+          test -f "$DMG"
+          test -f "$CHECKSUM"
+          (cd "$(dirname "$DMG")" && /usr/bin/shasum -a 256 -c "$CHECKSUM_NAME")
+          sed "s/<version>/$VERSION/g" docs/unsigned-release-notes.md > "$NOTES"
+          ! grep -Fq '<version>' "$NOTES"
+          if RELEASE_STATE=$(gh release view "$RELEASE_TAG" --json isDraft,isPrerelease --jq 'select(.isDraft == true and .isPrerelease == true) | "reusable"' 2>/dev/null); then
+            test "$RELEASE_STATE" = reusable || {
+              echo "Release $RELEASE_TAG already exists and is not an unsigned prerelease draft." >&2
+              exit 1
+            }
+            ASSET_STATE=$(gh release view "$RELEASE_TAG" --json assets --jq ".assets | select(all(.name == \"$DMG_NAME\" or .name == \"$CHECKSUM_NAME\")) | \"allowed-assets\"")
+            test "$ASSET_STATE" = allowed-assets || {
+              echo "Release $RELEASE_TAG contains an unexpected asset." >&2
+              exit 1
+            }
+            gh release edit "$RELEASE_TAG" \
+              --draft=true \
+              --prerelease \
+              --title "YumYum Agent ${VERSION} — Unsigned Preview" \
+              --notes-file "$NOTES"
+          else
+            gh release create "$RELEASE_TAG" \
+              --draft \
+              --prerelease \
+              --title "YumYum Agent ${VERSION} — Unsigned Preview" \
+              --notes-file "$NOTES" \
+              --verify-tag
+          fi
+          gh release upload "$RELEASE_TAG" "$DMG" "$CHECKSUM" --clobber
+          ASSET_STATE=$(gh release view "$RELEASE_TAG" --json assets --jq ".assets | select(length == 2 and ([.[] | select(.name == \"$DMG_NAME\")] | length) == 1 and ([.[] | select(.name == \"$CHECKSUM_NAME\")] | length) == 1) | \"exact-assets\"")
+          test "$ASSET_STATE" = exact-assets
+          gh release edit "$RELEASE_TAG" --draft=false --prerelease

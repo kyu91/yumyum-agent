@@ -1,9 +1,16 @@
-name: Release
+name: Signed Release
 
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag (vX.Y.Z)
+        required: true
+        type: string
+      commit:
+        description: Exact 40-character commit SHA the tag must resolve to
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -14,7 +21,7 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          ref: ${{ github.sha }}
+          ref: refs/tags/${{ inputs.tag }}
           fetch-depth: 0
       - name: Select Xcode 26.6 and verify Swift
         run: |
@@ -25,12 +32,18 @@ jobs:
           SWIFT_MAJOR=$(swift --version | sed -nE 's/.*Swift version ([0-9]+).*/\1/p')
           test "$SWIFT_MAJOR" -ge 6
       - name: Validate tag and source
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_COMMIT: ${{ inputs.commit }}
         run: |
           set -eu
+          printf '%s\n' "$RELEASE_TAG" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          printf '%s\n' "$RELEASE_COMMIT" | grep -Eq '^[0-9a-f]{40}$'
           VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' AppBundle/Info.plist)
-          test "${GITHUB_REF_NAME}" = "v${VERSION}"
-          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
-          test "$(git rev-parse "refs/tags/${GITHUB_REF_NAME}^{commit}")" = "${GITHUB_SHA}"
+          test "$RELEASE_TAG" = "v${VERSION}"
+          TAG_COMMIT=$(git rev-parse "refs/tags/${RELEASE_TAG}^{commit}")
+          test "$TAG_COMMIT" = "$RELEASE_COMMIT"
+          test "$(git rev-parse HEAD)" = "$RELEASE_COMMIT"
           swift build
           swift test
 
@@ -42,7 +55,7 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          ref: ${{ github.sha }}
+          ref: refs/tags/${{ inputs.tag }}
           fetch-depth: 0
       - name: Select Xcode 26.6 and verify Swift
         run: |
@@ -52,13 +65,19 @@ jobs:
           test "$XCODE_VERSION" = 26.6
           SWIFT_MAJOR=$(swift --version | sed -nE 's/.*Swift version ([0-9]+).*/\1/p')
           test "$SWIFT_MAJOR" -ge 6
-      - name: Validate tag and bundle identifier
+      - name: Validate tag, source, and bundle identifier
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_COMMIT: ${{ inputs.commit }}
         run: |
           set -eu
+          printf '%s\n' "$RELEASE_TAG" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          printf '%s\n' "$RELEASE_COMMIT" | grep -Eq '^[0-9a-f]{40}$'
           VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' AppBundle/Info.plist)
-          test "${GITHUB_REF_NAME}" = "v${VERSION}"
-          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
-          test "$(git rev-parse "refs/tags/${GITHUB_REF_NAME}^{commit}")" = "${GITHUB_SHA}"
+          test "$RELEASE_TAG" = "v${VERSION}"
+          TAG_COMMIT=$(git rev-parse "refs/tags/${RELEASE_TAG}^{commit}")
+          test "$TAG_COMMIT" = "$RELEASE_COMMIT"
+          test "$(git rev-parse HEAD)" = "$RELEASE_COMMIT"
           BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' AppBundle/Info.plist)
           if [ "$BUNDLE_ID" = kr.yumyum.phase0 ]; then
             echo 'The temporary CFBundleIdentifier is not releasable.' >&2
@@ -92,46 +111,60 @@ jobs:
           APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
           APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
           APPLE_NOTARY_PRIVATE_KEY_BASE64: ${{ secrets.APPLE_NOTARY_PRIVATE_KEY_BASE64 }}
+          RELEASE_TAG: ${{ inputs.tag }}
         run: |
           set -eu
           umask 077
           printf '%s' "$APPLE_NOTARY_PRIVATE_KEY_BASE64" | /usr/bin/base64 -D > "$RUNNER_TEMP/AuthKey.p8"
           chmod 600 "$RUNNER_TEMP/AuthKey.p8"
-          VERSION=${GITHUB_REF_NAME#v}
+          VERSION=${RELEASE_TAG#v}
           ARCHITECTURES='arm64 x86_64' \
           APPLE_NOTARY_PRIVATE_KEY_PATH="$RUNNER_TEMP/AuthKey.p8" \
           ./scripts/package-release.sh --version "$VERSION"
       - name: Verify release artifact
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
         run: |
           set -eu
-          VERSION=${GITHUB_REF_NAME#v}
+          VERSION=${RELEASE_TAG#v}
           EXPECTED_ARCHITECTURES='arm64 x86_64' SIGNED_RELEASE=true \
           ./scripts/test-release.sh ".build/release/YumYum-Agent-${VERSION}-macOS.dmg"
       - name: Upload and publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_COMMIT: ${{ inputs.commit }}
         run: |
           set -eu
-          VERSION=${GITHUB_REF_NAME#v}
-          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
-          test "$(git rev-parse "refs/tags/${GITHUB_REF_NAME}^{commit}")" = "${GITHUB_SHA}"
-          if RELEASE_IS_DRAFT=$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft 2>/dev/null); then
-            [ "$RELEASE_IS_DRAFT" = true ] || {
-              echo "Release $GITHUB_REF_NAME already exists and is not a draft." >&2
+          VERSION=${RELEASE_TAG#v}
+          DMG_NAME="YumYum-Agent-${VERSION}-macOS.dmg"
+          CHECKSUM_NAME="${DMG_NAME}.sha256"
+          test "$(git rev-parse HEAD)" = "$RELEASE_COMMIT"
+          test "$(git rev-parse "refs/tags/${RELEASE_TAG}^{commit}")" = "$RELEASE_COMMIT"
+          if RELEASE_STATE=$(gh release view "$RELEASE_TAG" --json isDraft,isPrerelease --jq 'select(.isDraft == true and .isPrerelease == false) | "reusable"' 2>/dev/null); then
+            test "$RELEASE_STATE" = reusable || {
+              echo "Release $RELEASE_TAG already exists and is not a stable draft." >&2
+              exit 1
+            }
+            ASSET_STATE=$(gh release view "$RELEASE_TAG" --json assets --jq ".assets | select(all(.name == \"$DMG_NAME\" or .name == \"$CHECKSUM_NAME\")) | \"allowed-assets\"")
+            test "$ASSET_STATE" = allowed-assets || {
+              echo "Release $RELEASE_TAG contains an unexpected asset." >&2
               exit 1
             }
           else
-            gh release create "$GITHUB_REF_NAME" \
+            gh release create "$RELEASE_TAG" \
               --draft \
               --generate-notes \
               --title "YumYum Agent ${VERSION}" \
               --verify-tag
           fi
-          gh release upload "$GITHUB_REF_NAME" \
-            ".build/release/YumYum-Agent-${VERSION}-macOS.dmg" \
-            ".build/release/YumYum-Agent-${VERSION}-macOS.dmg.sha256" \
+          gh release upload "$RELEASE_TAG" \
+            ".build/release/$DMG_NAME" \
+            ".build/release/$CHECKSUM_NAME" \
             --clobber
-          gh release edit "$GITHUB_REF_NAME" --draft=false
+          ASSET_STATE=$(gh release view "$RELEASE_TAG" --json assets --jq ".assets | select(length == 2 and ([.[] | select(.name == \"$DMG_NAME\")] | length) == 1 and ([.[] | select(.name == \"$CHECKSUM_NAME\")] | length) == 1) | \"exact-assets\"")
+          test "$ASSET_STATE" = exact-assets
+          gh release edit "$RELEASE_TAG" --draft=false --prerelease=false
       - name: Remove signing material
         if: always()
         run: |
