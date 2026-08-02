@@ -11,4 +11,4 @@ All notable changes to this project will be documented here.
 - Developer preview of the native macOS floating pet, capture, file, Finder drop, and chat flows.
 - Local CLI compatibility for Hermes ACP, OpenCode, Codex, and Claude Code with validated executable paths and help contracts.
 - Streaming responses, transcript continuity, Soul profiles, input validation, temporary capture cleanup, and default-deny external-change boundaries.
-- Source-build developer preview; no signed or notarized release artifact has been published.
+- Unsigned, unnotarized developer prerelease published with a Universal DMG and SHA-256 checksum; clean-machine Gatekeeper and Intel hardware execution remain unverified.

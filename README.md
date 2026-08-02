@@ -4,7 +4,7 @@
 
 YumYum Agent is a Swift/AppKit macOS app that lets you “feed” a selected screen area or local file to a floating pet and read responses from an installed local CLI agent in native bubbles and chat.
 
-> **Developer preview (0.1.0):** Signed/notarized distribution remains unverified. The [Releases page](https://github.com/kyu91/yumyum-agent/releases) may offer a clearly labeled **Unsigned Preview** prerelease after its manual publication workflow succeeds.
+> **Unsigned developer preview (0.1.0):** [YumYum Agent 0.1.0 — Unsigned Preview](https://github.com/kyu91/yumyum-agent/releases/tag/v0.1.0) is available as a prerelease. It is **not Developer ID signed or Apple notarized**.
 
 ## Features
 
@@ -25,7 +25,13 @@ This Apple Silicon Command Line Tools host has built and mounted a local unsigne
 
 ## Download and install
 
-On the [GitHub Releases page](https://github.com/kyu91/yumyum-agent/releases), check the release label before downloading. An **Unsigned Preview** is not Developer ID signed or Apple notarized. Trust only assets from the official repository and verify `shasum -a 256 -c YumYum-Agent-<version>-macOS.dmg.sha256`. Open the DMG, drag the app to **Applications**, then Control-click/right-click it and choose **Open**. If blocked, use **System Settings → Privacy & Security → Open Anyway**; warning text varies. Never disable Gatekeeper globally. macOS privacy permissions may still be requested. Intel execution remains unverified even though both architecture slices are present.
+Download both `YumYum-Agent-0.1.0-macOS.dmg` and `YumYum-Agent-0.1.0-macOS.dmg.sha256` from the [v0.1.0 release](https://github.com/kyu91/yumyum-agent/releases/tag/v0.1.0). This **Unsigned Preview** is not Developer ID signed or Apple notarized. Trust only assets from the official repository and verify them in the same directory:
+
+```sh
+shasum -a 256 -c YumYum-Agent-0.1.0-macOS.dmg.sha256
+```
+
+Open the DMG, drag the app to **Applications**, then Control-click/right-click it and choose **Open**. If blocked, use **System Settings → Privacy & Security → Open Anyway**; warning text varies. Never disable Gatekeeper globally. macOS privacy permissions may still be requested. Clean-machine Gatekeeper behavior and Intel hardware execution remain unverified even though both architecture slices are present.
 
 Local developers can explicitly create and verify an unsigned DMG:
 

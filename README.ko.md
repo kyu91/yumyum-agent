@@ -4,7 +4,7 @@
 
 YumYum Agent는 선택한 화면 영역이나 로컬 파일을 플로팅 펫에게 “먹이고”, 설치된 로컬 CLI 에이전트의 응답을 네이티브 말풍선과 채팅으로 확인할 수 있는 Swift/AppKit macOS 앱입니다.
 
-> **개발자 프리뷰(0.1.0):** 서명·공증 배포는 아직 검증되지 않았습니다. 수동 배포 workflow가 성공한 뒤 [Releases 페이지](https://github.com/kyu91/yumyum-agent/releases)에 **Unsigned Preview**로 명확히 표시된 prerelease가 제공될 수 있습니다.
+> **미서명 개발자 프리뷰(0.1.0):** [YumYum Agent 0.1.0 — Unsigned Preview](https://github.com/kyu91/yumyum-agent/releases/tag/v0.1.0)가 prerelease로 공개되었습니다. **Developer ID 서명 또는 Apple 공증을 받지 않았습니다.**
 
 ## 기능
 
@@ -25,7 +25,13 @@ YumYum Agent는 선택한 화면 영역이나 로컬 파일을 플로팅 펫에�
 
 ## 다운로드 및 설치
 
-[GitHub Releases 페이지](https://github.com/kyu91/yumyum-agent/releases)에서 release label을 확인한 뒤 다운로드하세요. **Unsigned Preview**는 Developer ID로 서명되거나 Apple 공증을 받지 않았습니다. 공식 저장소의 asset만 신뢰하고 `shasum -a 256 -c YumYum-Agent-<version>-macOS.dmg.sha256`로 검증하세요. DMG를 열어 앱을 **Applications**로 드래그한 뒤 Control-클릭/우클릭하고 **Open(열기)**을 선택하세요. 차단되면 **System Settings → Privacy & Security → Open Anyway**를 사용하세요. 경고 문구는 버전에 따라 다릅니다. Gatekeeper를 전역으로 비활성화하지 마세요. macOS 개인정보 보호 권한은 여전히 요청될 수 있습니다. 두 architecture slice가 있어도 Intel 실행은 검증되지 않았습니다.
+[v0.1.0 릴리스](https://github.com/kyu91/yumyum-agent/releases/tag/v0.1.0)에서 `YumYum-Agent-0.1.0-macOS.dmg`와 `YumYum-Agent-0.1.0-macOS.dmg.sha256`를 모두 다운로드하세요. 이 **Unsigned Preview**는 Developer ID 서명 또는 Apple 공증을 받지 않았습니다. 공식 저장소의 asset만 신뢰하고 두 파일이 있는 같은 디렉터리에서 검증하세요.
+
+```sh
+shasum -a 256 -c YumYum-Agent-0.1.0-macOS.dmg.sha256
+```
+
+DMG를 열어 앱을 **Applications**로 드래그한 뒤 Control-클릭/우클릭하고 **Open(열기)**을 선택하세요. 차단되면 **System Settings → Privacy & Security → Open Anyway**를 사용하세요. 경고 문구는 버전에 따라 다릅니다. Gatekeeper를 전역으로 비활성화하지 마세요. macOS 개인정보 보호 권한은 여전히 요청될 수 있습니다. 두 architecture slice가 있어도 clean-machine Gatekeeper 동작과 Intel 하드웨어 실행은 검증되지 않았습니다.
 
 로컬 개발자는 unsigned DMG를 명시적으로 생성하고 검증할 수 있습니다.
 

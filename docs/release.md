@@ -1,6 +1,6 @@
 # Release readiness
 
-YumYum Agent 0.1.0 remains a developer preview. A manually published unsigned prerelease is supported; an actual Developer ID signed, notarized, clean-machine release has not been produced or verified.
+YumYum Agent 0.1.0 is published as the prerelease [YumYum Agent 0.1.0 — Unsigned Preview](https://github.com/kyu91/yumyum-agent/releases/tag/v0.1.0). It is not a draft and contains exactly `YumYum-Agent-0.1.0-macOS.dmg` and `YumYum-Agent-0.1.0-macOS.dmg.sha256`. It is not Developer ID signed or Apple notarized; clean-machine Gatekeeper behavior and Intel hardware execution remain unverified.
 
 ## Current source gate
 
@@ -15,7 +15,9 @@ git diff --check
 
 The DMG contains `YumYum Agent.app` and an `/Applications` symlink. Its `.sha256` file uses `shasum -a 256` format. Packaging remains signed by default and refuses unsigned output unless `--unsigned` is explicit. The permanent identity is `io.github.kyu91.yumyumagent`.
 
-## Manual release paths
+## Release paths
+
+The published unsigned prerelease was produced by the manual [Unsigned Release workflow](https://github.com/kyu91/yumyum-agent/actions/workflows/unsigned-release.yml). The published assets were subsequently downloaded; their checksum, DMG mount, and `x86_64` and `arm64` slices were verified.
 
 Both workflows require an existing strict `vX.Y.Z` tag and its exact 40-character commit SHA. They check out `refs/tags/<tag>` with full history and require the tag commit, checked-out HEAD, supplied commit, and `v<CFBundleShortVersionString>` to match. Neither workflow runs on tag push.
 
@@ -35,4 +37,4 @@ Signed releases require these repository secrets:
 
 Temporary certificate/key material and the temporary keychain are removed with `always()`. Secrets must never be printed or committed.
 
-This Apple Silicon host has built, mounted, and checksum-verified a local unsigned Universal DMG and confirmed both slices in the app and fixture. Signed/notarized output, Gatekeeper assessment, clean-machine verification, and Intel hardware execution remain unverified.
+The published DMG has been downloaded, checksum-verified, mounted, and confirmed to contain `x86_64` and `arm64` slices. Signed/notarized output, clean-machine Gatekeeper verification, and Intel hardware execution remain unverified.
