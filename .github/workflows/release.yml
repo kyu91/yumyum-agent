@@ -10,16 +10,18 @@ permissions:
 
 jobs:
   build-and-test:
-    runs-on: macos-14
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
-      - name: Select Xcode 16.2 and verify Swift
+      - name: Select Xcode 26.6 and verify Swift
         run: |
-          sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
+          sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
           xcodebuild -version
+          XCODE_VERSION=$(xcodebuild -version | sed -nE 's/^Xcode ([0-9.]+)$/\1/p')
+          test "$XCODE_VERSION" = 26.6
           SWIFT_MAJOR=$(swift --version | sed -nE 's/.*Swift version ([0-9]+).*/\1/p')
           test "$SWIFT_MAJOR" -ge 6
       - name: Validate tag and source
@@ -34,7 +36,7 @@ jobs:
 
   release:
     needs: build-and-test
-    runs-on: macos-14
+    runs-on: macos-26
     permissions:
       contents: write
     steps:
@@ -42,10 +44,12 @@ jobs:
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
-      - name: Select Xcode 16.2 and verify Swift
+      - name: Select Xcode 26.6 and verify Swift
         run: |
-          sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
+          sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
           xcodebuild -version
+          XCODE_VERSION=$(xcodebuild -version | sed -nE 's/^Xcode ([0-9.]+)$/\1/p')
+          test "$XCODE_VERSION" = 26.6
           SWIFT_MAJOR=$(swift --version | sed -nE 's/.*Swift version ([0-9]+).*/\1/p')
           test "$SWIFT_MAJOR" -ge 6
       - name: Validate tag and bundle identifier

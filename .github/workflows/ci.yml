@@ -9,13 +9,15 @@ permissions:
 
 jobs:
   build-and-test:
-    runs-on: macos-14
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
-      - name: Select Xcode 16.2 and verify Swift
+      - name: Select Xcode 26.6 and verify Swift
         run: |
-          sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
+          sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
           xcodebuild -version
+          XCODE_VERSION=$(xcodebuild -version | sed -nE 's/^Xcode ([0-9.]+)$/\1/p')
+          test "$XCODE_VERSION" = 26.6
           SWIFT_MAJOR=$(swift --version | sed -nE 's/.*Swift version ([0-9]+).*/\1/p')
           test "$SWIFT_MAJOR" -ge 6
       - name: Diagnostics

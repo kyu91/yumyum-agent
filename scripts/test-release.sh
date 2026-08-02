@@ -44,9 +44,11 @@ check_sources() {
     [ "$(grep -Fc "$CHECKOUT" "$WORKFLOW")" -eq 2 ]
     [ "$(grep -Fc 'ref: ${{ github.sha }}' "$WORKFLOW")" -eq 2 ] || return 1
     [ "$(grep -Fc 'git rev-parse "refs/tags/${GITHUB_REF_NAME}^{commit}"' "$WORKFLOW")" -eq 3 ] || return 1
-    XCODE_SELECT='sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer'
+    [ "$(grep -Fc 'runs-on: macos-26' "$WORKFLOW")" -eq 2 ] || return 1
+    XCODE_SELECT='sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer'
     [ "$(grep -Fc "$XCODE_SELECT" "$WORKFLOW")" -eq 2 ] || return 1
-    [ "$(grep -Fc 'xcodebuild -version' "$WORKFLOW")" -eq 2 ] || return 1
+    [ "$(grep -Fc 'xcodebuild -version' "$WORKFLOW")" -eq 4 ] || return 1
+    [ "$(grep -Fc 'test "$XCODE_VERSION" = 26.6' "$WORKFLOW")" -eq 2 ] || return 1
     [ "$(grep -Fc 'test "$SWIFT_MAJOR" -ge 6' "$WORKFLOW")" -eq 2 ] || return 1
     FIRST_SELECT_LINE=$(grep -nF "$XCODE_SELECT" "$WORKFLOW" | sed -n '1s/:.*//p')
     SECOND_SELECT_LINE=$(grep -nF "$XCODE_SELECT" "$WORKFLOW" | sed -n '2s/:.*//p')
@@ -93,7 +95,9 @@ mutate_and_reject() {
 
 mutate_and_reject "printf '%s\n' 'test bundle = kr.yumyum.phase0' >> '$TEST_DIR/mutated/scripts/verify-release.sh'"
 mutate_and_reject "sed -i '' '/ref: \${{ github.sha }}/d' '$TEST_DIR/mutated/.github/workflows/release.yml'"
+mutate_and_reject "sed -i '' 's/runs-on: macos-26/runs-on: macos-14/' '$TEST_DIR/mutated/.github/workflows/release.yml'"
 mutate_and_reject "sed -i '' '/sudo xcode-select/d' '$TEST_DIR/mutated/.github/workflows/release.yml'"
+mutate_and_reject "sed -i '' 's/test \"\$XCODE_VERSION\" = 26.6/test \"\$XCODE_VERSION\" = 16.2/' '$TEST_DIR/mutated/.github/workflows/release.yml'"
 mutate_and_reject "sed -i '' '/git rev-parse \"refs\/tags\//d' '$TEST_DIR/mutated/.github/workflows/release.yml'"
 mutate_and_reject "sed -i '' '/gh release edit .*--draft=false/{h;d;}; /gh release upload/{x;p;x;}' '$TEST_DIR/mutated/.github/workflows/release.yml'"
 mutate_and_reject "sed -i '' '/xcrun stapler staple/d' '$TEST_DIR/mutated/scripts/package-release.sh'; printf '%s\n' 'xcrun stapler staple \"\$DMG_PATH\"' >> '$TEST_DIR/mutated/scripts/package-release.sh'"
