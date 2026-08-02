@@ -82,6 +82,8 @@ These names are trademarks used only to describe compatibility. YumYum Agent is 
 
 YumYum Agent sends no telemetry and does not read Keychain or CLI sign-in files. The first request passes only user-selected text, files, or captures to the selected CLI. Follow-up requests also include transcript text and context, but local attachment paths are excluded from visible transcript text. The CLI may use the network according to its own configuration. Soul is stored in plaintext at `~/Library/Application Support/YumYum/SOUL.md` and is injected into the first prompt of a new logical session below safety policies in priority.
 
+The public app identity is `io.github.kyu91.yumyumagent`. On its first launch after this migration is introduced, YumYum Agent checks the `kr.yumyum.phase0` preview preferences once and copies only its language, theme, shortcut, and selected-agent preferences when the corresponding new preference is absent. It does not check again on later launches, delete the preview preferences, or migrate Soul, credentials, paths outside the selected-agent preference, or macOS privacy permissions.
+
 See [Privacy](PRIVACY.md) and the [Soul format](docs/soul-format.md).
 
 The default English product reference is the [product specification](docs/product-spec.md). The [preserved Korean specification](YumYum-Agent-Product-Spec.ko.md) is the complete target-state source and does not override current source, tests, or this README.

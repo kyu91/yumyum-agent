@@ -63,7 +63,9 @@ check_sources() {
     [ -n "$TAG_LINE" ] && [ "$TAG_LINE" -lt "$CREATE_LINE" ]
     [ "$CREATE_LINE" -lt "$UPLOAD_LINE" ] && [ "$UPLOAD_LINE" -lt "$PUBLISH_LINE" ] || return 1
     grep -Fq '[ "$BUNDLE_ID" = kr.yumyum.phase0 ]' "$WORKFLOW" || return 1
-    grep -Fq 'Choose and update a permanent reverse-DNS CFBundleIdentifier before the first release.' "$WORKFLOW"
+    grep -Fq "''|.*|*.|*..*|*[!A-Za-z0-9.-]*) echo 'CFBundleIdentifier is empty or invalid.'" "$WORKFLOW"
+    grep -Fq '*.*) ;;' "$WORKFLOW"
+    grep -Fq 'test "$BUNDLE_ID" = io.github.kyu91.yumyumagent' "$WORKFLOW"
 
     STAPLE_LINE=$(line_number "$PACKAGE" 'xcrun stapler staple "$DMG_PATH"')
     CHECKSUM_LINE=$(line_number "$PACKAGE" '/usr/bin/shasum -a 256 "$DMG_NAME"')
@@ -103,6 +105,8 @@ mutate_and_reject "sed -i '' '/gh release edit .*--draft=false/{h;d;}; /gh relea
 mutate_and_reject "sed -i '' '/xcrun stapler staple/d' '$TEST_DIR/mutated/scripts/package-release.sh'; printf '%s\n' 'xcrun stapler staple \"\$DMG_PATH\"' >> '$TEST_DIR/mutated/scripts/package-release.sh'"
 mutate_and_reject "sed -i '' 's|/usr/bin/lipo -create \"\$UNIVERSAL_DIR/app-arm64\" \"\$UNIVERSAL_DIR/app-x86_64\"|/usr/bin/lipo -create \$APP_INPUTS|' '$TEST_DIR/mutated/scripts/build-app.sh'"
 mutate_and_reject "sed -i '' '/\[ \"\$BUNDLE_ID\" = kr.yumyum.phase0 \]/d' '$TEST_DIR/mutated/.github/workflows/release.yml'"
+mutate_and_reject "sed -i '' '/CFBundleIdentifier is empty or invalid/d' '$TEST_DIR/mutated/.github/workflows/release.yml'"
+mutate_and_reject "sed -i '' '/test \"\$BUNDLE_ID\" = io.github.kyu91.yumyumagent/d' '$TEST_DIR/mutated/.github/workflows/release.yml'"
 
 if [ -f "$ROOT_DIR/.build/release-arm64/arm64-apple-macosx/release/YumYum" ] && [ -f "$ROOT_DIR/.build/release-x86_64/x86_64-apple-macosx/release/YumYum" ]; then
     cp "$ROOT_DIR/.build/release-arm64/arm64-apple-macosx/release/YumYum" "$TEST_DIR/arm input"

@@ -14,7 +14,8 @@
 - [ ] Decide whether and with what permissions to enable Dependabot, CodeQL, or other GitHub features.
 - [x] Implement explicit unsigned DMG packaging, checksum, tag-only signing/notarization automation, and architecture checks.
 - [ ] Run the signed/notarized workflow with real credentials and verify the published artifacts.
-- [ ] Decide the permanent bundle ID and certificate ownership/custody; configure GitHub signing secrets.
+- [x] Set the permanent bundle ID to `io.github.kyu91.yumyumagent`.
+- [ ] Decide certificate ownership/custody and configure GitHub signing secrets.
 - [ ] Verify clean-machine TCC, installation, Intel execution, VoiceOver, and Reduce Motion; define rollback policy.
 
 No `NOTICE` is currently included because no separate third-party attribution requirement has been identified. Vendor names are used only to describe CLI compatibility; vendor logos are not included.

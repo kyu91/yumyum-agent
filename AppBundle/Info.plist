@@ -9,7 +9,7 @@
     <key>CFBundleExecutable</key>
     <string>YumYum</string>
     <key>CFBundleIdentifier</key>
-    <string>kr.yumyum.phase0</string>
+    <string>io.github.kyu91.yumyumagent</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>

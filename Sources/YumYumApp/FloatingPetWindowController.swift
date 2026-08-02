@@ -5,8 +5,8 @@ import YumYumCore
 @MainActor
 final class YumYumAppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     @Published private(set) var petVisibility = FloatingPetVisibilityPolicy()
-    @Published private(set) var shortcutChoice = GlobalShortcutChoice.load()
-    @Published private(set) var currentTheme = AppTheme.load()
+    @Published private(set) var shortcutChoice: GlobalShortcutChoice
+    @Published private(set) var currentTheme: AppTheme
     @Published private(set) var currentLanguage: AppLanguage
 
     private let languageStore: AppLanguageStore
@@ -23,6 +23,9 @@ final class YumYumAppDelegate: NSObject, NSApplicationDelegate, ObservableObject
     private var terminationReplyPending = false
 
     override init() {
+        LegacyPreferencesMigration.migrate()
+        shortcutChoice = GlobalShortcutChoice.load()
+        currentTheme = AppTheme.load()
         let languageStore = AppLanguageStore()
         let language = languageStore.load()
         self.languageStore = languageStore

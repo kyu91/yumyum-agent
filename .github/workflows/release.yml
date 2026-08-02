@@ -61,9 +61,15 @@ jobs:
           test "$(git rev-parse "refs/tags/${GITHUB_REF_NAME}^{commit}")" = "${GITHUB_SHA}"
           BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' AppBundle/Info.plist)
           if [ "$BUNDLE_ID" = kr.yumyum.phase0 ]; then
-            echo 'Choose and update a permanent reverse-DNS CFBundleIdentifier before the first release.' >&2
+            echo 'The temporary CFBundleIdentifier is not releasable.' >&2
             exit 1
           fi
+          case "$BUNDLE_ID" in
+            ''|.*|*.|*..*|*[!A-Za-z0-9.-]*) echo 'CFBundleIdentifier is empty or invalid.' >&2; exit 1 ;;
+            *.*) ;;
+            *) echo 'CFBundleIdentifier must use reverse-DNS form.' >&2; exit 1 ;;
+          esac
+          test "$BUNDLE_ID" = io.github.kyu91.yumyumagent
       - name: Import Developer ID certificate
         env:
           APPLE_DEVELOPER_ID_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_P12_BASE64 }}

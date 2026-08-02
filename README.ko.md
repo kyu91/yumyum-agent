@@ -82,6 +82,8 @@ swift test \
 
 YumYum Agent는 telemetry를 전송하지 않으며 Keychain이나 CLI 로그인 파일을 읽지 않습니다. 첫 요청에서는 사용자가 선택한 텍스트, 파일 또는 캡처만 선택된 CLI에 전달합니다. 후속 요청에는 대화 기록 텍스트와 맥락도 포함되지만, 로컬 첨부 파일 경로는 화면에 표시되는 대화 기록 텍스트에서 제외됩니다. CLI는 자체 설정에 따라 네트워크를 사용할 수 있습니다. Soul은 `~/Library/Application Support/YumYum/SOUL.md`에 plaintext로 저장되며, 새 논리 세션의 첫 prompt에 안전 정책보다 낮은 우선순위로 삽입됩니다.
 
+공개 앱 ID는 `io.github.kyu91.yumyumagent`입니다. 이 마이그레이션이 도입된 뒤 처음 실행할 때 `kr.yumyum.phase0` 프리뷰 설정을 한 번만 확인하고, 새 도메인에 해당 값이 없는 경우에만 언어, 테마, 단축키, 선택한 에이전트 설정을 복사합니다. 이후 실행에서는 다시 확인하지 않으며, 기존 프리뷰 설정을 삭제하거나 Soul, 자격증명, 선택한 에이전트 설정 외 경로, macOS 개인정보 보호 권한을 이전하지 않습니다.
+
 [개인정보 보호](PRIVACY.md) 및 [Soul 형식](docs/soul-format.md)을 참고하세요.
 
 기본 영어 제품 기준 문서는 [제품 명세](docs/product-spec.md)입니다. [보존된 한국어 명세](YumYum-Agent-Product-Spec.ko.md)는 완전한 목표 상태 원문이며, 현재 소스, 테스트 또는 이 README보다 우선하지 않습니다.

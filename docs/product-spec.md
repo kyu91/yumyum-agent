@@ -117,7 +117,7 @@ The interface supports English and Korean. The language selector displays `Engli
 
 ## Platform and performance status
 
-Verified facts: the package requires macOS 14 or later and Swift tools 6.0; the app is native SwiftUI/AppKit/ScreenCaptureKit with no external package dependency; release packaging, workflow, signing, and notarization logic are implemented; and a local unsigned Universal compressed read-only UDZO DMG has been built, checksum-checked, mounted, and architecture-verified. Actual Developer ID signing/notarization, a permanent bundle ID, GitHub publication, Intel hardware execution, Gatekeeper assessment, and clean-machine verification remain unverified and block a public release. App Store distribution and automatic updates remain separate future work.
+Verified facts: the package requires macOS 14 or later and Swift tools 6.0; the app is native SwiftUI/AppKit/ScreenCaptureKit with no external package dependency; the permanent bundle ID is `io.github.kyu91.yumyumagent`; release packaging, workflow, signing, and notarization logic are implemented; and a local unsigned Universal compressed read-only UDZO DMG has been built, checksum-checked, mounted, and architecture-verified. Actual Developer ID signing/notarization, GitHub publication, Intel hardware execution, Gatekeeper assessment, and clean-machine verification remain unverified and block a public release. App Store distribution and automatic updates remain separate future work.
 
 Targets, not verified guarantees: primary validation across macOS 14, 15, and 26 on Apple Silicon; idle CPU near 0%; idle memory approximately 30–70 MB; no YumYum Agent telemetry or idle network; capture, OCR, and vision work only on demand; low-frequency or static idle animation; first UI feedback within 100 ms; capture preview within 300 ms; streaming visible when the connector supports it; cancellation feedback within 200 ms; no focus theft; stable 8-hour operation. These targets require measured release evidence before being claimed as achieved.
 
@@ -139,7 +139,7 @@ Tests cover policy and state transitions, exact CLI executable/argv contracts, d
 
 On real supported macOS hardware, verify pet drag and visible-frame containment, keyboard navigation and VoiceOver labels, no unexpected focus theft, Reduce Motion, Light/Dark appearance, capture permission and cancellation, mixed-scale multi-display capture, actual Finder drop dispatch/hit testing, global shortcut behavior, live language switching and persistence, file-panel behavior, long-response scrolling, and supported CLIs using real installed paths and their own sign-in/network state.
 
-The implemented release scripts do not constitute evidence of actual Developer ID signing/notarization. A permanent bundle ID, signed/notarized artifact, GitHub publication, Intel hardware execution, Gatekeeper assessment, and clean-machine verification remain blocking release gates. App Store delivery and automatic updates are distinct future distribution work.
+The implemented release scripts do not constitute evidence of actual Developer ID signing/notarization. A signed/notarized artifact, GitHub publication, Intel hardware execution, Gatekeeper assessment, and clean-machine verification remain blocking release gates. App Store delivery and automatic updates are distinct future distribution work.
 
 ## Target roadmap
 
