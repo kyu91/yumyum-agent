@@ -7,6 +7,53 @@ import Testing
 struct AppShellViewModelTests {
     @Test
     @MainActor
+    func soulDraftSurvivesLateLoadAndFlushesNormalizedLatestRevision() async throws {
+        let store = ControlledSoulStore(loadedProfile: SoulProfile(name: "stored"))
+        let viewModel = YumYumAppViewModel(
+            fixtureProbe: ImmediateFixtureProbe(result: .success("unused")),
+            soulStore: store
+        )
+        let loadTask = Task { @MainActor in await viewModel.loadSoul() }
+        await store.waitForLoad()
+        let rawDraft = SoulProfile(name: "  latest   draft  ")
+        viewModel.updateSoulDraft(rawDraft)
+        await store.resumeLoad()
+        await loadTask.value
+
+        #expect(viewModel.isSoulLoaded)
+        #expect(viewModel.soulProfile == rawDraft)
+        await viewModel.flushSoul()
+        #expect(await store.savedProfiles == [rawDraft.normalized])
+        #expect(viewModel.soulProfile == rawDraft)
+        #expect(viewModel.soulSaveState == .savedWithNormalization)
+    }
+
+    @Test
+    @MainActor
+    func olderSoulSaveCannotPublishOrPersistAfterNewerRevision() async {
+        let store = ControlledSoulStore(loadedProfile: .empty, suspendsFirstSave: true)
+        let viewModel = YumYumAppViewModel(
+            fixtureProbe: ImmediateFixtureProbe(result: .success("unused")),
+            soulStore: store
+        )
+        await viewModel.loadSoul()
+        viewModel.updateSoulDraft(SoulProfile(name: "old"))
+        let oldSave = Task { @MainActor in await viewModel.saveSoul() }
+        await store.waitForSave()
+        viewModel.updateSoulDraft(SoulProfile(name: "new"))
+        let newSave = Task { @MainActor in await viewModel.saveSoul() }
+        await Task.yield()
+        await store.resumeSave()
+        await oldSave.value
+        await newSave.value
+
+        #expect(await store.savedProfiles.map(\.name) == ["old", "new"])
+        #expect(viewModel.soulProfile.name == "new")
+        #expect(viewModel.soulSaveState == .saved)
+    }
+
+    @Test
+    @MainActor
     func refreshesDiscoveredAgentsAndSharesTheExplicitDefaultSelection() async throws {
         let codex = AgentInstallation(
             definitionID: .codex,
@@ -287,6 +334,54 @@ struct AppShellViewModelTests {
             viewModel.probeState
                 == .failure(message: "안전한 fixture가 제한 시간 안에 응답하지 않았습니다.")
         )
+    }
+}
+
+private actor ControlledSoulStore: SoulProfileStoring {
+    let loadedProfile: SoulProfile
+    let suspendsFirstSave: Bool
+    private(set) var savedProfiles: [SoulProfile] = []
+    private var loadContinuation: CheckedContinuation<Void, Never>?
+    private var saveContinuation: CheckedContinuation<Void, Never>?
+    private var loadStarted = false
+    private var saveStarted = false
+
+    init(loadedProfile: SoulProfile, suspendsFirstSave: Bool = false) {
+        self.loadedProfile = loadedProfile
+        self.suspendsFirstSave = suspendsFirstSave
+    }
+
+    func load() async -> SoulProfile {
+        guard !suspendsFirstSave else { return loadedProfile }
+        loadStarted = true
+        await withCheckedContinuation { loadContinuation = $0 }
+        return loadedProfile
+    }
+
+    func save(_ profile: SoulProfile) async throws {
+        if suspendsFirstSave && savedProfiles.isEmpty {
+            saveStarted = true
+            await withCheckedContinuation { saveContinuation = $0 }
+        }
+        savedProfiles.append(profile)
+    }
+
+    func waitForLoad() async {
+        while !loadStarted { await Task.yield() }
+    }
+
+    func resumeLoad() {
+        loadContinuation?.resume()
+        loadContinuation = nil
+    }
+
+    func waitForSave() async {
+        while !saveStarted { await Task.yield() }
+    }
+
+    func resumeSave() {
+        saveContinuation?.resume()
+        saveContinuation = nil
     }
 }
 

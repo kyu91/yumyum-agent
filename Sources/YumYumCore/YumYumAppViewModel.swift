@@ -23,6 +23,14 @@ public enum FixtureProbeState: Equatable, Sendable {
     case failure(message: String)
 }
 
+public enum SoulSaveState: Equatable, Sendable {
+    case idle
+    case saving
+    case saved
+    case savedWithNormalization
+    case failed
+}
+
 @MainActor
 public final class YumYumAppViewModel: ObservableObject {
     @Published public private(set) var connectionState: HermesConnectionState = .idle
@@ -39,23 +47,32 @@ public final class YumYumAppViewModel: ObservableObject {
         selection: .unselected
     )
     @Published public private(set) var isDiscoveringAgents = false
+    @Published public var soulProfile = SoulProfile.empty
+    @Published public private(set) var soulSaveState = SoulSaveState.idle
+    @Published public private(set) var isSoulLoaded = false
 
     public let fixturePath: String
     public let agentRegistry: AgentRegistry
     public let agentRuntime: AgentRuntime
+    public let soulStore: any SoulProfileStoring
 
     private let fixtureProbe: any FixtureProbing
     private let connectionChecker: any HermesConnectionChecking
+    private var soulRevision = 0
+    private var savedSoulRevision = 0
+    private var soulPersistenceTask: Task<Void, Never>?
 
     public init(
         fixtureProbe: any FixtureProbing,
         connectionChecker: any HermesConnectionChecking = HermesConnectionService(),
         agentRegistry: AgentRegistry = AgentRegistry(),
-        connectors: [any AgentConnecting]? = nil
+        connectors: [any AgentConnecting]? = nil,
+        soulStore: any SoulProfileStoring = SoulProfileStore()
     ) {
         self.fixtureProbe = fixtureProbe
         self.connectionChecker = connectionChecker
         self.agentRegistry = agentRegistry
+        self.soulStore = soulStore
         let runtimeConnectors = connectors ?? [
             HermesACPConnector(transport: ACPProcessTransport()),
             OpenCodeConnector(),
@@ -64,9 +81,66 @@ public final class YumYumAppViewModel: ObservableObject {
         ]
         agentRuntime = AgentRuntime(
             selection: agentRegistry,
-            connectors: runtimeConnectors
+            connectors: runtimeConnectors,
+            soulStore: soulStore
         )
         fixturePath = fixtureProbe.fixturePath
+    }
+
+    public func loadSoul() async {
+        let revision = soulRevision
+        let loadedProfile = await soulStore.load()
+        isSoulLoaded = true
+        guard revision == soulRevision else { return }
+        soulProfile = loadedProfile
+        soulSaveState = .idle
+    }
+
+    public func updateSoulDraft(_ profile: SoulProfile) {
+        soulRevision += 1
+        soulProfile = profile
+    }
+
+    public func saveSoul(_ profile: SoulProfile) async {
+        if soulProfile != profile {
+            updateSoulDraft(profile)
+        }
+        await saveSoul()
+    }
+
+    public func saveSoul() async {
+        let revision = soulRevision
+        let draft = soulProfile
+        let normalized = draft.normalized
+        soulSaveState = .saving
+        let previousTask = soulPersistenceTask
+        let store = soulStore
+        let task = Task { @MainActor [weak self] in
+            await previousTask?.value
+            do {
+                try await store.save(normalized)
+                guard let self, revision == self.soulRevision else { return }
+                self.savedSoulRevision = revision
+                self.soulSaveState = draft == normalized ? .saved : .savedWithNormalization
+            } catch {
+                guard let self, revision == self.soulRevision else { return }
+                self.soulSaveState = .failed
+            }
+        }
+        soulPersistenceTask = task
+        await task.value
+    }
+
+    public func resetSoul() async {
+        if soulProfile != .empty {
+            updateSoulDraft(.empty)
+        }
+        await saveSoul()
+    }
+
+    public func flushSoul() async {
+        guard isSoulLoaded, savedSoulRevision != soulRevision else { return }
+        await saveSoul()
     }
 
     public var canSendPrompt: Bool {
@@ -91,6 +165,7 @@ public final class YumYumAppViewModel: ObservableObject {
     }
 
     public func shutdown() async {
+        await flushSoul()
         await agentRuntime.close()
     }
 

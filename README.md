@@ -34,6 +34,16 @@ swift test \
 
 ## 에이전트 발견과 선택
 
+설정 창은 `General`, `Agent`, `Soul`, `Diagnostics` 탭으로 나뉘며 각 탭은 독립적으로 스크롤된다. General에는 테마·전역 단축키·안전 상태, Agent에는 발견·선택·명시 경로, Diagnostics에는 Hermes 수동 진단과 fixture probe가 있다.
+
+## YumYum Soul
+
+Soul 탭에서 이름, 역할, 성격, 말투, 가치, 선호·회피, 사용자 호칭, 행동 원칙과 추가 지침을 편집한다. 입력은 자동 저장되며 초기화는 확인 뒤 실행된다. 비밀, 자격증명 또는 민감한 개인정보를 입력하지 않아야 한다.
+
+Soul은 `~/Library/Application Support/YumYum/SOUL.md`에 앱 소유 형식으로 원자 저장된다. 임의 Markdown 파일을 읽거나 첨부하지 않고 파일 경로와 본문을 transcript·오류에 표시하지 않는다. 누락·손상·과대 파일은 빈 기본값으로 안전하게 처리하며, 지원 필드만 왕복한다.
+
+Soul 텍스트는 YumYum 안전·개인정보·승인 정책보다 하위라는 문구와 함께 새 논리 세션의 첫 요청에만 내부 프롬프트로 적용된다. Hermes ACP 재사용 세션과 Codex/Claude resumed turn에는 반복하지 않으며, 매 실행이 새 세션인 OpenCode에는 매번 적용한다. 선택 변경, reset, 취소 또는 crash로 세션이 폐기되면 다음 새 세션에 현재 Soul을 다시 적용한다. Soul만으로 요청을 만들거나 보내지는 않는다.
+
 앱 시작, `다시 검색`, 빠른 메뉴 열기, 전송 직전에 다음 항목을 다시 확인한다.
 
 - 고정된 안전 후보 디렉터리의 직접 자식만 검사
@@ -116,6 +126,8 @@ Finder drop의 `NSDraggingDestination` override는 자동 검증하지만 실제
 11. `채팅창 상세`가 외부 생각·완료 답변 bubble을 숨겨 중복 표시하지 않고, 닫은 뒤 진행 중 생각만 복원하며 초안·첨부·busy·transcript·스크롤 위치를 유지하는지
 12. 선택한 CLI 삭제·교체 후 전송이 실패하고 자동 폴백하지 않는지
 13. Light 상세 채팅의 warm ivory·cream·pale terracotta·white·warm-neutral surface와 Dark warm charcoal이 구분되고 gray glass/vibrancy가 없으며, 테마·Increase Contrast·Reduce Transparency 즉시 변경 뒤 transcript·초안·첨부·busy·스크롤·인라인 펼침이 유지되는지
+14. 네 설정 탭이 최소 창 크기에서 독립 스크롤되고 VoiceOver가 Soul 필드·저장 상태·민감정보 경고·초기화 확인을 읽는지
+15. Soul 자동 저장 성공·오류 상태, 앱 재시작 후 복원, 확인 없는 초기화 방지가 동작하는지
 
 ## 현재 제한
 

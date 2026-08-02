@@ -148,20 +148,37 @@ private struct YumYumContentView: View {
     @State private var connectionTask: Task<Void, Never>?
     @State private var explicitAgentID = AgentDefinitionID.hermes
     @State private var explicitAgentPath = ""
+    @State private var soulProfile = SoulProfile.empty
+    @State private var soulSaveTask: Task<Void, Never>?
+    @State private var confirmsSoulReset = false
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                header
-                themeSection
-                agentSection
-                shortcutSection
-                hermesPathSection
-                safetySection
-                fixtureSection
+        VStack(alignment: .leading, spacing: 12) {
+            header.padding(.horizontal, 24).padding(.top, 18)
+            TabView {
+                settingsScroll {
+                    themeSection
+                    shortcutSection
+                    safetySection
+                }
+                .tabItem { Label("General", systemImage: "gearshape") }
+                .accessibilityIdentifier("settings-tab-general")
+
+                settingsScroll { agentSection }
+                    .tabItem { Label("Agent", systemImage: "cpu") }
+                    .accessibilityIdentifier("settings-tab-agent")
+
+                settingsScroll { soulSection }
+                    .tabItem { Label("Soul", systemImage: "heart.text.square") }
+                    .accessibilityIdentifier("settings-tab-soul")
+
+                settingsScroll {
+                    hermesPathSection
+                    fixtureSection
+                }
+                .tabItem { Label("Diagnostics", systemImage: "stethoscope") }
+                .accessibilityIdentifier("settings-tab-diagnostics")
             }
-            .padding(24)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .frame(minWidth: 560, minHeight: 620, alignment: .topLeading)
         .onAppear {
@@ -169,9 +186,150 @@ private struct YumYumContentView: View {
         }
         .task {
             await viewModel.refreshAgents(trigger: .appStart)
+            await viewModel.loadSoul()
+            soulProfile = viewModel.soulProfile
         }
         .onDisappear {
             connectionTask?.cancel()
+            soulSaveTask?.cancel()
+            Task { await viewModel.flushSoul() }
+        }
+        .confirmationDialog(
+            "Soul 설정을 초기화할까요?",
+            isPresented: $confirmsSoulReset,
+            titleVisibility: .visible
+        ) {
+            Button("초기화", role: .destructive) {
+                soulProfile = .empty
+                viewModel.updateSoulDraft(.empty)
+                soulSaveTask?.cancel()
+                Task { await viewModel.resetSoul() }
+            }
+            Button("취소", role: .cancel) {}
+        }
+    }
+
+    private func settingsScroll<Content: View>(
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) { content() }
+                .padding(24)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+    }
+
+    private var soulSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label(
+                "비밀, 자격증명 또는 민감한 개인정보를 입력하지 마세요.",
+                systemImage: "exclamationmark.shield"
+            )
+            .foregroundStyle(.orange)
+            .accessibilityIdentifier("soul-sensitive-data-warning")
+
+            soulField("이름", keyPath: \.name, identifier: "soul-name")
+            soulField("역할 / 정체성", keyPath: \.role, identifier: "soul-role")
+            soulField("성격", keyPath: \.personality, identifier: "soul-personality")
+            soulField("말투", keyPath: \.speakingStyle, identifier: "soul-speaking-style")
+            soulField("핵심 가치", keyPath: \.coreValues, identifier: "soul-core-values")
+            soulField("좋아하는 것", keyPath: \.likes, identifier: "soul-likes")
+            soulField("싫어하거나 피할 것", keyPath: \.dislikes, identifier: "soul-dislikes")
+            soulField("사용자를 부르는 호칭", keyPath: \.userAddress, identifier: "soul-user-address")
+            soulField("행동 원칙", keyPath: \.behaviorPrinciples, identifier: "soul-behavior-principles")
+            soulField("추가 지침", keyPath: \.additionalInstructions, identifier: "soul-additional-instructions")
+
+            if soulProfile != soulProfile.normalized {
+                Text("저장 시 공백을 정리하고 필드당 2,000자, 전체 12,000자로 제한합니다.")
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+                    .accessibilityIdentifier("soul-normalization-warning")
+            }
+
+            HStack {
+                Label(soulSaveText, systemImage: soulSaveIcon)
+                    .font(.callout)
+                    .foregroundStyle(viewModel.soulSaveState == .failed ? .red : .secondary)
+                    .accessibilityIdentifier("soul-save-status")
+                Spacer()
+                Button("기본값으로 초기화", role: .destructive) {
+                    confirmsSoulReset = true
+                }
+                .accessibilityIdentifier("soul-reset-button")
+            }
+        }
+        .disabled(!viewModel.isSoulLoaded)
+    }
+
+    private func soulField(
+        _ title: String,
+        keyPath: KeyPath<SoulProfile, String>,
+        identifier: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title).font(.callout.weight(.semibold))
+            TextEditor(text: Binding(
+                get: { soulProfile[keyPath: keyPath] },
+                set: { value in
+                    soulProfile = replacingSoulField(keyPath, with: value)
+                    viewModel.updateSoulDraft(soulProfile)
+                    scheduleSoulSave()
+                }
+            ))
+            .font(.body)
+            .frame(minHeight: title == "이름" ? 38 : 64)
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(.separator))
+            .accessibilityLabel(title)
+            .accessibilityIdentifier(identifier)
+        }
+    }
+
+    private func replacingSoulField(
+        _ keyPath: KeyPath<SoulProfile, String>,
+        with value: String
+    ) -> SoulProfile {
+        return SoulProfile(
+            name: keyPath == \.name ? value : soulProfile.name,
+            role: keyPath == \.role ? value : soulProfile.role,
+            personality: keyPath == \.personality ? value : soulProfile.personality,
+            speakingStyle: keyPath == \.speakingStyle ? value : soulProfile.speakingStyle,
+            coreValues: keyPath == \.coreValues ? value : soulProfile.coreValues,
+            likes: keyPath == \.likes ? value : soulProfile.likes,
+            dislikes: keyPath == \.dislikes ? value : soulProfile.dislikes,
+            userAddress: keyPath == \.userAddress ? value : soulProfile.userAddress,
+            behaviorPrinciples: keyPath == \.behaviorPrinciples ? value : soulProfile.behaviorPrinciples,
+            additionalInstructions: keyPath == \.additionalInstructions
+                ? value
+                : soulProfile.additionalInstructions
+        )
+    }
+
+    private func scheduleSoulSave() {
+        soulSaveTask?.cancel()
+        soulSaveTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled else { return }
+            await viewModel.saveSoul()
+        }
+    }
+
+    private var soulSaveText: String {
+        switch viewModel.soulSaveState {
+        case .idle: "저장된 Soul을 불러왔습니다"
+        case .saving: "저장 중…"
+        case .saved: "저장됨"
+        case .savedWithNormalization: "정리 및 길이 제한 후 저장됨"
+        case .failed: "저장할 수 없습니다"
+        }
+    }
+
+    private var soulSaveIcon: String {
+        switch viewModel.soulSaveState {
+        case .idle: "doc"
+        case .saving: "arrow.triangle.2.circlepath"
+        case .saved: "checkmark.circle"
+        case .savedWithNormalization: "checkmark.circle"
+        case .failed: "exclamationmark.triangle"
         }
     }
 

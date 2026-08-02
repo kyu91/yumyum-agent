@@ -86,7 +86,7 @@ public actor HermesACPProtocolClient {
                     for: request,
                     text: isResumingSession
                         ? request.currentTurnText ?? request.text
-                        : request.text
+                        : firstSessionPromptText(for: request)
                 ),
             ]
         )

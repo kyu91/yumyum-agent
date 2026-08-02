@@ -113,7 +113,8 @@ struct HermesACPProtocolTests {
         let first = try await client.send(
             PromptRequest(
                 text: "사용자: 첫 질문",
-                currentTurnText: "첫 질문"
+                currentTurnText: "첫 질문",
+                soulMarkdown: SoulProfile(name: "Momo").markdown
             ),
             onEvent: { events.append($0) }
         )
@@ -151,10 +152,11 @@ struct HermesACPProtocolTests {
         #expect(await transport.outputBudgetResetCount() == 2)
         let firstPrompt = try #require(sent[2]["params"] as? [String: Any])
         let firstBlocks = try #require(firstPrompt["prompt"] as? [[String: Any]])
-        #expect(firstBlocks[0]["text"] as? String == "사용자: 첫 질문")
+        #expect((firstBlocks[0]["text"] as? String)?.contains("# YumYum Soul") == true)
         let secondPrompt = try #require(sent[3]["params"] as? [String: Any])
         let secondBlocks = try #require(secondPrompt["prompt"] as? [[String: Any]])
         #expect(secondBlocks[0]["text"] as? String == "둘째 질문")
+        #expect((secondBlocks[0]["text"] as? String)?.contains("# YumYum Soul") == false)
         #expect(secondBlocks[1]["uri"] as? String == "file:///selected/follow-up.pdf")
     }
 
@@ -257,7 +259,10 @@ struct HermesACPProtocolTests {
         let cancelled = Task {
             let events = try await collectEvents(
                 transport.sendEvents(
-                    PromptRequest(text: "취소할 질문"),
+                    PromptRequest(
+                        text: "취소할 질문",
+                        soulMarkdown: SoulProfile(name: "Momo").normalized.markdown
+                    ),
                     executableURL: executable,
                     environment: ["PATH": "/mock"],
                     timeout: .seconds(2),
@@ -280,7 +285,10 @@ struct HermesACPProtocolTests {
 
         let reconnected = try await collectEvents(
             transport.sendEvents(
-                PromptRequest(text: "새 질문"),
+                PromptRequest(
+                    text: "새 질문",
+                    soulMarkdown: SoulProfile(name: "Momo").normalized.markdown
+                ),
                 executableURL: executable,
                 environment: ["PATH": "/mock"],
                 timeout: .seconds(1),
@@ -296,6 +304,7 @@ struct HermesACPProtocolTests {
         #expect(await factory.makeCount() == 2)
         let secondMethods = try await decodedMethods(second.sentLines())
         #expect(secondMethods == ["initialize", "session/new", "session/prompt"])
+        #expect(try await decodedPromptTexts(second.sentLines()).first?.contains("# YumYum Soul") == true)
         await transport.close()
     }
 
@@ -328,7 +337,10 @@ struct HermesACPProtocolTests {
             do {
                 _ = try await collectEvents(
                     transport.sendEvents(
-                        PromptRequest(text: "응답이 멈출 질문"),
+                        PromptRequest(
+                            text: "응답이 멈출 질문",
+                            soulMarkdown: SoulProfile(name: "Momo").normalized.markdown
+                        ),
                         executableURL: URL(fileURLWithPath: "/mock/hermes"),
                         environment: ["PATH": "/mock"],
                         timeout: .milliseconds(20),
@@ -354,7 +366,10 @@ struct HermesACPProtocolTests {
 
         let recovered = try await collectEvents(
             transport.sendEvents(
-                PromptRequest(text: "복구 후 질문"),
+                PromptRequest(
+                    text: "복구 후 질문",
+                    soulMarkdown: SoulProfile(name: "Momo").normalized.markdown
+                ),
                 executableURL: URL(fileURLWithPath: "/mock/hermes"),
                 environment: ["PATH": "/mock"],
                 timeout: .seconds(1),
@@ -366,6 +381,7 @@ struct HermesACPProtocolTests {
             .completed(PromptResponse(text: "복구 완료")),
         ])
         #expect(await factory.makeCount() == 2)
+        #expect(try await decodedPromptTexts(second.sentLines()).first?.contains("# YumYum Soul") == true)
         await transport.close()
     }
 
@@ -428,6 +444,18 @@ private func decodedMethods(_ lines: [Data]) throws -> [String] {
             JSONSerialization.jsonObject(with: line) as? [String: Any]
         )
         return message["method"] as? String
+    }
+}
+
+private func decodedPromptTexts(_ lines: [Data]) throws -> [String] {
+    try lines.compactMap { line in
+        let message = try #require(
+            JSONSerialization.jsonObject(with: line) as? [String: Any]
+        )
+        guard message["method"] as? String == "session/prompt",
+              let params = message["params"] as? [String: Any],
+              let blocks = params["prompt"] as? [[String: Any]] else { return nil }
+        return blocks.first?["text"] as? String
     }
 }
 

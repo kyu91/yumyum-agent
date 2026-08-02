@@ -13,7 +13,7 @@ func runOpenCodeStreaming(
     for attachment in request.attachments {
         arguments.append(contentsOf: ["--file", attachment.url.path])
     }
-    arguments.append(promptText(for: request))
+    arguments.append(firstSessionPromptText(for: request))
 
     do {
         let result = try await runStreamingProcess(
@@ -106,15 +106,16 @@ actor CodexStreamingSession {
         if let resumedSessionID {
             arguments.append(contentsOf: ["resume", resumedSessionID])
         }
-        let standardInput = Data(
-            promptText(
+        let inputText = resumedSessionID == nil ? firstSessionPromptText(
                 for: request,
-                text: resumedSessionID == nil
-                    ? request.text
-                    : request.currentTurnText ?? request.text,
+                text: request.text,
                 visibleAttachments: request.attachments.filter { $0.kind != .image }
-            ).utf8
-        )
+            ) : promptText(
+                for: request,
+                text: request.currentTurnText ?? request.text,
+                visibleAttachments: request.attachments.filter { $0.kind != .image }
+            )
+        let standardInput = Data(inputText.utf8)
 
         do {
             let result = try await runStreamingProcess(
@@ -240,15 +241,16 @@ actor ClaudeStreamingSession {
         } else {
             arguments.append(contentsOf: ["--resume", activeSessionID])
         }
-        let standardInput = Data(
-            promptText(
+        let inputText = resumedSessionID == nil ? firstSessionPromptText(
                 for: request,
-                text: resumedSessionID == nil
-                    ? request.text
-                    : request.currentTurnText ?? request.text,
+                text: request.text,
                 visibleAttachments: request.attachments
-            ).utf8
-        )
+            ) : promptText(
+                for: request,
+                text: request.currentTurnText ?? request.text,
+                visibleAttachments: request.attachments
+            )
+        let standardInput = Data(inputText.utf8)
 
         do {
             let result = try await runStreamingProcess(

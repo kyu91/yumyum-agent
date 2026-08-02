@@ -31,17 +31,20 @@ public struct PromptRequest: Equatable, Sendable {
     public let text: String
     public let currentTurnText: String?
     public let attachments: [PromptAttachment]
+    public let soulMarkdown: String?
 
     public init(
         id: UUID = UUID(),
         text: String,
         currentTurnText: String? = nil,
-        attachments: [PromptAttachment] = []
+        attachments: [PromptAttachment] = [],
+        soulMarkdown: String? = nil
     ) {
         self.id = id
         self.text = text
         self.currentTurnText = currentTurnText
         self.attachments = attachments
+        self.soulMarkdown = soulMarkdown
     }
 }
 
@@ -196,12 +199,15 @@ public enum AgentRuntimeError: Error, Equatable, LocalizedError, Sendable {
 public struct AgentRuntime: Sendable {
     private let selection: any AgentSelectionValidating
     private let connectors: [AgentDefinitionID: any AgentConnecting]
+    private let soulStore: (any SoulProfileStoring)?
 
     public init(
         selection: any AgentSelectionValidating,
-        connectors: [any AgentConnecting]
+        connectors: [any AgentConnecting],
+        soulStore: (any SoulProfileStoring)? = nil
     ) {
         self.selection = selection
+        self.soulStore = soulStore
         var connectorMap: [AgentDefinitionID: any AgentConnecting] = [:]
         for connector in connectors {
             connectorMap[connector.definitionID] = connector
@@ -219,7 +225,7 @@ public struct AgentRuntime: Sendable {
             throw AgentRuntimeError.invalidSelectedPath(installation.path)
         }
         return try await connector.send(
-            request,
+            await requestWithSoul(request),
             executableURL: URL(fileURLWithPath: path).standardizedFileURL
         )
     }
@@ -239,7 +245,7 @@ public struct AgentRuntime: Sendable {
                         throw AgentRuntimeError.invalidSelectedPath(installation.path)
                     }
                     let events = connector.sendEvents(
-                        request,
+                        await requestWithSoul(request),
                         executableURL: URL(fileURLWithPath: path).standardizedFileURL
                     )
                     for try await event in events {
@@ -264,6 +270,17 @@ public struct AgentRuntime: Sendable {
         for connector in connectors.values {
             await connector.close()
         }
+    }
+
+    private func requestWithSoul(_ request: PromptRequest) async -> PromptRequest {
+        guard let profile = await soulStore?.load(), !profile.isEmpty else { return request }
+        return PromptRequest(
+            id: request.id,
+            text: request.text,
+            currentTurnText: request.currentTurnText,
+            attachments: request.attachments,
+            soulMarkdown: profile.markdown
+        )
     }
 }
 
@@ -532,4 +549,18 @@ func promptText(
         prompt += "\n- \(attachment.url.path)"
     }
     return prompt
+}
+
+func firstSessionPromptText(
+    for request: PromptRequest,
+    text: String? = nil,
+    visibleAttachments: [PromptAttachment] = []
+) -> String {
+    let prompt = promptText(
+        for: request,
+        text: text,
+        visibleAttachments: visibleAttachments
+    )
+    guard let soul = request.soulMarkdown, !soul.isEmpty else { return prompt }
+    return "\(soul)\n---\n\n# User Request\n\n\(prompt)"
 }

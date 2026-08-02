@@ -5,6 +5,77 @@ import Testing
 @Suite
 struct AgentConnectorTests {
     @Test
+    func runtimeLoadsCurrentSoulAtTheCommonRequestBoundary() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = SoulProfileStore(fileURL: directory.appendingPathComponent("SOUL.md"))
+        try await store.save(SoulProfile(name: "Momo"))
+        let connector = RuntimeConnector(definitionID: .openCode)
+        let runtime = AgentRuntime(
+            selection: RuntimeSelection(installation: AgentInstallation(
+                definitionID: .openCode,
+                path: "/selected/opencode",
+                version: "1",
+                runtimeContract: .openCodeRun,
+                availability: .available
+            )),
+            connectors: [connector],
+            soulStore: store
+        )
+
+        _ = try await runtime.send(PromptRequest(text: "hello"))
+
+        let request = try #require(await connector.requests.first)
+        #expect(request.text == "hello")
+        #expect(request.soulMarkdown?.contains("## Name\n\nMomo") == true)
+        #expect(request.attachments.isEmpty)
+    }
+
+    @Test
+    func soulIsInjectedForNewConnectorSessionsOnly() async throws {
+        let runner = StructuredConnectorProcessRunner()
+        let executableDirectory = URL(fileURLWithPath: "/safe/bin", isDirectory: true)
+        let soul = SoulProfile(name: "Momo").markdown
+        let first = PromptRequest(text: "first", currentTurnText: "first", soulMarkdown: soul)
+        let second = PromptRequest(
+            text: "history second", currentTurnText: "second",
+            attachments: [PromptAttachment(
+                url: URL(fileURLWithPath: "/selected/follow-up.swift"),
+                kind: .source, byteCount: 12
+            )],
+            soulMarkdown: soul
+        )
+        let codex = CodexConnector(processRunner: runner)
+        let claude = ClaudeCodeConnector(processRunner: runner)
+
+        _ = try await OpenCodeConnector(processRunner: runner).send(
+            first, executableURL: executableDirectory.appendingPathComponent("opencode")
+        )
+        _ = try await OpenCodeConnector(processRunner: runner).send(
+            second, executableURL: executableDirectory.appendingPathComponent("opencode")
+        )
+        _ = try await codex.send(first, executableURL: executableDirectory.appendingPathComponent("codex"))
+        _ = try await codex.send(second, executableURL: executableDirectory.appendingPathComponent("codex"))
+        _ = try await claude.send(first, executableURL: executableDirectory.appendingPathComponent("claude"))
+        _ = try await claude.send(second, executableURL: executableDirectory.appendingPathComponent("claude"))
+
+        let openCodePrompts = await runner.commands(for: "opencode").compactMap(\.arguments.last)
+        #expect(openCodePrompts.allSatisfy { $0.contains("# YumYum Soul") })
+        for name in ["codex", "claude"] {
+            let inputs = await runner.commands(for: name)
+                .compactMap { $0.standardInput.map { String(decoding: $0, as: UTF8.self) } }
+            #expect(inputs.count == 2)
+            #expect(inputs[0].contains("# YumYum Soul"))
+            #expect(inputs[0].components(separatedBy: "# YumYum Soul").count == 2)
+            #expect(!inputs[1].contains("# YumYum Soul"))
+            #expect(inputs[1].contains("second"))
+            #expect(inputs[1].components(separatedBy: "/selected/follow-up.swift").count == 2)
+            #expect(!inputs[1].contains("history second"))
+        }
+    }
+
+    @Test
     func runtimeRevalidatesTheExactSelectionBeforeEverySend() async throws {
         let selected = AgentInstallation(
             definitionID: .openCode,
@@ -359,7 +430,7 @@ struct AgentConnectorTests {
         do {
             _ = try await collectConnectorEvents(
                 codex.sendEvents(
-                    PromptRequest(text: "중단될 Codex 요청"),
+                    PromptRequest(text: "중단될 Codex 요청", soulMarkdown: SoulProfile(name: "Momo").normalized.markdown),
                     executableURL: codexURL
                 )
             )
@@ -371,7 +442,7 @@ struct AgentConnectorTests {
         }
         let recoveredCodex = try await collectConnectorEvents(
             codex.sendEvents(
-                PromptRequest(text: "복구된 Codex 요청"),
+                PromptRequest(text: "복구된 Codex 요청", soulMarkdown: SoulProfile(name: "Momo").normalized.markdown),
                 executableURL: codexURL
             )
         )
@@ -382,6 +453,11 @@ struct AgentConnectorTests {
         let codexCommands = await codexRunner.commands(for: "codex")
         #expect(codexCommands.count == 2)
         #expect(!codexCommands[1].arguments.contains("resume"))
+        #expect(codexCommands.allSatisfy { command in
+            command.standardInput.map {
+                String(decoding: $0, as: UTF8.self).contains("# YumYum Soul")
+            } == true
+        })
 
         let claudeRunner = CrashRecoveryProcessRunner()
         let claude = ClaudeCodeConnector(processRunner: claudeRunner)
@@ -390,7 +466,7 @@ struct AgentConnectorTests {
         do {
             _ = try await collectConnectorEvents(
                 claude.sendEvents(
-                    PromptRequest(text: "중단될 Claude 요청"),
+                    PromptRequest(text: "중단될 Claude 요청", soulMarkdown: SoulProfile(name: "Momo").normalized.markdown),
                     executableURL: claudeURL
                 )
             )
@@ -402,7 +478,7 @@ struct AgentConnectorTests {
         }
         let recoveredClaude = try await collectConnectorEvents(
             claude.sendEvents(
-                PromptRequest(text: "복구된 Claude 요청"),
+                PromptRequest(text: "복구된 Claude 요청", soulMarkdown: SoulProfile(name: "Momo").normalized.markdown),
                 executableURL: claudeURL
             )
         )
@@ -423,6 +499,11 @@ struct AgentConnectorTests {
                 != claudeCommands[1].arguments[secondSessionIndex + 1]
         )
         #expect(!claudeCommands[1].arguments.contains("--resume"))
+        #expect(claudeCommands.allSatisfy { command in
+            command.standardInput.map {
+                String(decoding: $0, as: UTF8.self).contains("# YumYum Soul")
+            } == true
+        })
     }
 
     @Test
@@ -487,31 +568,41 @@ struct AgentConnectorTests {
         let executableDirectory = URL(fileURLWithPath: "/safe/bin", isDirectory: true)
         let codex = CodexConnector(processRunner: runner)
         _ = try await codex.send(
-            PromptRequest(text: "첫 Codex 요청"),
+            PromptRequest(text: "첫 Codex 요청", soulMarkdown: SoulProfile(name: "Momo").normalized.markdown),
             executableURL: executableDirectory.appendingPathComponent("codex")
         )
         await codex.reset()
         _ = try await codex.send(
-            PromptRequest(text: "새 Codex 요청"),
+            PromptRequest(text: "새 Codex 요청", soulMarkdown: SoulProfile(name: "Momo").normalized.markdown),
             executableURL: executableDirectory.appendingPathComponent("codex")
         )
         let codexCommands = await runner.commands(for: "codex")
         #expect(codexCommands.count == 2)
         #expect(!codexCommands[1].arguments.contains("resume"))
+        #expect(codexCommands.allSatisfy { command in
+            command.standardInput.map {
+                String(decoding: $0, as: UTF8.self).contains("# YumYum Soul")
+            } == true
+        })
 
         let claude = ClaudeCodeConnector(processRunner: runner)
         _ = try await claude.send(
-            PromptRequest(text: "첫 Claude 요청"),
+            PromptRequest(text: "첫 Claude 요청", soulMarkdown: SoulProfile(name: "Momo").normalized.markdown),
             executableURL: executableDirectory.appendingPathComponent("claude")
         )
         await claude.reset()
         _ = try await claude.send(
-            PromptRequest(text: "새 Claude 요청"),
+            PromptRequest(text: "새 Claude 요청", soulMarkdown: SoulProfile(name: "Momo").normalized.markdown),
             executableURL: executableDirectory.appendingPathComponent("claude")
         )
         let claudeCommands = await runner.commands(for: "claude")
         #expect(claudeCommands.count == 2)
         #expect(!claudeCommands[1].arguments.contains("--resume"))
+        #expect(claudeCommands.allSatisfy { command in
+            command.standardInput.map {
+                String(decoding: $0, as: UTF8.self).contains("# YumYum Soul")
+            } == true
+        })
 
         let hermesTransport = RecordingHermesTransport()
         let hermesRuntime = AgentRuntime(
@@ -544,7 +635,7 @@ struct AgentConnectorTests {
         let cancelled = Task {
             do {
                 for try await event in connector.sendEvents(
-                    PromptRequest(text: "취소할 요청"),
+                    PromptRequest(text: "취소할 요청", soulMarkdown: SoulProfile(name: "Momo").normalized.markdown),
                     executableURL: executable
                 ) {
                     cancelledEvents.append(event)
@@ -577,7 +668,7 @@ struct AgentConnectorTests {
         let recoveredTask = Task {
             try await collectConnectorEvents(
                 connector.sendEvents(
-                    PromptRequest(text: "새 요청"),
+                    PromptRequest(text: "새 요청", soulMarkdown: SoulProfile(name: "Momo").normalized.markdown),
                     executableURL: executable
                 )
             )
@@ -599,6 +690,11 @@ struct AgentConnectorTests {
         let commands = await runner.commands
         #expect(commands.count == 2)
         #expect(!commands[1].arguments.contains("resume"))
+        #expect(commands.allSatisfy { command in
+            command.standardInput.map {
+                String(decoding: $0, as: UTF8.self).contains("# YumYum Soul")
+            } == true
+        })
     }
 }
 
