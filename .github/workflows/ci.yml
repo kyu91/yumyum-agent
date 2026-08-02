@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Diagnostics
+        run: |
+          uname -m
+          sw_vers
+          swift --version
+          xcodebuild -version
+      - name: Build
+        run: swift build
+      - name: Test
+        run: swift test
+      - name: Build app bundle
+        run: ./scripts/build-app.sh
+      - name: Verify app bundle
+        run: |
+          test -x .build/YumYum.app/Contents/MacOS/YumYum
+          test -x .build/YumYum.app/Contents/Resources/yumyum-process-fixture
+          /usr/bin/cmp AppBundle/Info.plist .build/YumYum.app/Contents/Info.plist
+          test "$(/usr/bin/find .build/YumYum.app/Contents -type f | LC_ALL=C /usr/bin/sort | /usr/bin/wc -l | /usr/bin/tr -d ' ')" = 3
