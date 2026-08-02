@@ -1,3 +1,5 @@
+> **Preserved Korean target-state specification.** Current behavior is defined by source and tests, then `README.md`. English readers should use [`docs/product-spec.md`](docs/product-spec.md). This notice does not change the requirements below.
+
 # YumYum Agent 제품 기획서
 
 - 문서 상태: 승인된 목표 요구사항과 현재 구현 상태 병행 관리

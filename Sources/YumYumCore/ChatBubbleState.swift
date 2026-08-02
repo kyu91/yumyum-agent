@@ -52,7 +52,7 @@ public struct ChatMessage: Identifiable, Equatable, Sendable {
     public var visibleText: String {
         let attachmentText = attachmentNames.isEmpty
             ? ""
-            : "첨부: \(attachmentNames.joined(separator: ", "))"
+            : AppText.localized(english: "Attachments: \(attachmentNames.joined(separator: ", "))", korean: "첨부: \(attachmentNames.joined(separator: ", "))")
         if text.isEmpty {
             return attachmentText
         }
@@ -85,9 +85,9 @@ public enum ChatBubbleStateError: Error, Equatable, LocalizedError, Sendable {
     public var errorDescription: String? {
         switch self {
         case .blankDraft:
-            "대화 내용을 입력하거나 파일을 선택하세요."
+            AppText.localized("대화 내용을 입력하거나 파일을 선택하세요.")
         case .busy:
-            "현재 응답을 기다리는 중입니다."
+            AppText.localized("현재 응답을 기다리는 중입니다.")
         }
     }
 }
@@ -360,15 +360,15 @@ public struct ChatBubbleState: Sendable {
             }
             switch message.role {
             case .user:
-                return "사용자: \(message.text)"
+                return "User: \(message.text)"
             case .assistant:
-                return "어시스턴트: \(message.text)"
+                return "Assistant: \(message.text)"
             }
         }
         let currentText = currentUserText.isEmpty
-            ? "선택한 첨부 파일을 분석해 주세요."
+            ? "Analyze the selected attachments."
             : currentUserText
-        lines.append("사용자: \(currentText)")
+        lines.append("User: \(currentText)")
         return lines.joined(separator: "\n")
     }
 

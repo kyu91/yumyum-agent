@@ -14,17 +14,17 @@ enum ScreenCaptureCoordinatorError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .alreadyPresenting:
-            "이미 화면 캡처 영역을 선택하고 있습니다."
+            AppText.localized("이미 화면 캡처 영역을 선택하고 있습니다.")
         case .permissionDenied:
-            "화면 캡처 권한이 필요합니다."
+            AppText.localized("화면 캡처 권한이 필요합니다.")
         case .noDisplays:
-            "캡처할 디스플레이를 찾지 못했습니다."
+            AppText.localized("캡처할 디스플레이를 찾지 못했습니다.")
         case .regionTooSmall:
-            "가로와 세로가 각각 8pt 이상인 영역을 선택하세요."
+            AppText.localized("가로와 세로가 각각 8pt 이상인 영역을 선택하세요.")
         case .captureFailed:
-            "선택한 영역을 캡처하지 못했습니다."
+            AppText.localized("선택한 영역을 캡처하지 못했습니다.")
         case .encodingFailed:
-            "선택한 화면을 PNG로 저장하지 못했습니다."
+            AppText.localized("선택한 화면을 PNG로 저장하지 못했습니다.")
         }
     }
 }
@@ -390,8 +390,8 @@ private final class CaptureOverlayWindow: NSWindow {
         level = .screenSaver
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         isReleasedWhenClosed = false
-        title = "YumYum 캡처 영역 선택"
-        setAccessibilityLabel("화면 캡처 영역 선택")
+        title = AppText.localized("YumYum 캡처 영역 선택")
+        setAccessibilityLabel(AppText.localized("화면 캡처 영역 선택"))
     }
 
     override var canBecomeKey: Bool { true }
@@ -413,7 +413,7 @@ private final class CaptureOverlayView: NSView {
         super.init(frame: CGRect(origin: .zero, size: screenFrame.size))
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
-        setAccessibilityLabel("드래그하여 캡처할 영역 선택, Escape로 취소")
+        setAccessibilityLabel(AppText.localized("드래그하여 캡처할 영역 선택, Escape로 취소"))
     }
 
     @available(*, unavailable)
@@ -444,7 +444,7 @@ private final class CaptureOverlayView: NSView {
             border.stroke()
         }
 
-        let instruction = "드래그하여 영역 선택 · Esc 취소" as NSString
+        let instruction = AppText.localized("드래그하여 영역 선택 · Esc 취소") as NSString
         let attributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 15, weight: .semibold),
             .foregroundColor: NSColor.white,

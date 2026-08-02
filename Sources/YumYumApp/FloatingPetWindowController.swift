@@ -7,6 +7,9 @@ final class YumYumAppDelegate: NSObject, NSApplicationDelegate, ObservableObject
     @Published private(set) var petVisibility = FloatingPetVisibilityPolicy()
     @Published private(set) var shortcutChoice = GlobalShortcutChoice.load()
     @Published private(set) var currentTheme = AppTheme.load()
+    @Published private(set) var currentLanguage: AppLanguage
+
+    private let languageStore: AppLanguageStore
 
     private var petWindowController: FloatingPetWindowController?
     private var quickMenuController: QuickMenuPanelController?
@@ -18,6 +21,15 @@ final class YumYumAppDelegate: NSObject, NSApplicationDelegate, ObservableObject
     private var runtimeShutdownTask: Task<Void, Never>?
     private var didShutdownRuntime = false
     private var terminationReplyPending = false
+
+    override init() {
+        let languageStore = AppLanguageStore()
+        let language = languageStore.load()
+        self.languageStore = languageStore
+        currentLanguage = language
+        AppText.setLanguage(language)
+        super.init()
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NotificationCenter.default.addObserver(
@@ -142,6 +154,15 @@ final class YumYumAppDelegate: NSObject, NSApplicationDelegate, ObservableObject
         quickMenuController?.applyTheme(theme)
     }
 
+    func setLanguage(_ language: AppLanguage) {
+        guard language != currentLanguage else { return }
+        currentLanguage = language
+        languageStore.save(language)
+        AppText.setLanguage(language)
+        petWindowController?.applyLanguage(language)
+        quickMenuController?.applyLanguage(language)
+    }
+
     func showQuickMenu() {
         guard petVisibility.isVisible,
               let quickMenuController,
@@ -260,6 +281,7 @@ final class FloatingPetWindowController: NSObject {
             self?.clampToVisibleScreen()
         }
         panel.contentView = hostingView
+        applyLanguage(AppText.language)
 
         NotificationCenter.default.addObserver(
             self,
@@ -293,6 +315,14 @@ final class FloatingPetWindowController: NSObject {
 
     func resetChewPresentation() {
         applyChewFrame(.resting)
+    }
+
+    func applyLanguage(_ language: AppLanguage) {
+        presentationModel.language = language
+        hostingView.setAccessibilityElement(true)
+        hostingView.setAccessibilityRole(.button)
+        hostingView.setAccessibilityLabel(presentationModel.accessibilityLabel)
+        hostingView.setAccessibilityHelp(presentationModel.accessibilityHint)
     }
 
     func configureFileDrop(
@@ -361,6 +391,18 @@ final class FloatingPetWindowController: NSObject {
 final class PetPresentationModel: ObservableObject {
     @Published var chewFrame = PetChewFrame.resting
     @Published var isFileDropTarget = false
+    @Published var language = AppText.language
+
+    var accessibilityLabel: String {
+        AppText.localized("YumYum 플로팅 펫", language: language)
+    }
+
+    var accessibilityHint: String {
+        AppText.localized(
+            "클릭하면 빠른 메뉴를 엽니다. 드래그하여 이동할 수 있습니다.",
+            language: language
+        )
+    }
 }
 
 final class FloatingPetPanel: NSPanel {
@@ -587,8 +629,8 @@ struct YumYumPetView: View {
         )
         .onHover { isHovered = $0 }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("YumYum 플로팅 펫")
-        .accessibilityHint("클릭하면 빠른 메뉴를 엽니다. 드래그하여 이동할 수 있습니다.")
+        .accessibilityLabel(presentationModel.accessibilityLabel)
+        .accessibilityHint(presentationModel.accessibilityHint)
         .accessibilityAddTraits(.isButton)
         .accessibilityAction {
             onClick()

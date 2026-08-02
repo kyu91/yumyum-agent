@@ -172,9 +172,9 @@ struct ChatBubbleStateTests {
         state.draftText = "후속 질문"
         let followUp = try state.beginSend(id: UUID())
 
-        #expect(followUp.input.text.contains("사용자: 첫 질문"))
-        #expect(followUp.input.text.contains("어시스턴트: 첫 답변"))
-        #expect(followUp.input.text.hasSuffix("사용자: 후속 질문"))
+        #expect(followUp.input.text.contains("User: 첫 질문"))
+        #expect(followUp.input.text.contains("Assistant: 첫 답변"))
+        #expect(followUp.input.text.hasSuffix("User: 후속 질문"))
         #expect(followUp.input.currentTurnText == "후속 질문")
         #expect(!followUp.input.text.contains("/private/tmp"))
         #expect(state.messages.map(\.role) == [.user, .assistant, .user, .assistant])
@@ -596,7 +596,7 @@ struct ChatBubbleSessionTests {
         let followUp = await submitter.inputs[1]
         #expect(!followUp.text.contains("실패할 질문"))
         #expect(!followUp.text.contains("실패 전 부분 응답"))
-        #expect(followUp.text == "사용자: 후속 질문")
+        #expect(followUp.text == "User: 후속 질문")
 
         await submitter.yield(
             .completed(PromptResponse(text: "후속 응답")),
@@ -629,7 +629,7 @@ struct ChatBubbleSessionTests {
         let followUp = await submitter.inputs[1]
         #expect(!followUp.text.contains("취소될 질문"))
         #expect(!followUp.text.contains("취소 전 부분 응답"))
-        #expect(followUp.text == "사용자: 새 질문")
+        #expect(followUp.text == "User: 새 질문")
 
         await submitter.yield(
             .completed(PromptResponse(text: "새 응답")),

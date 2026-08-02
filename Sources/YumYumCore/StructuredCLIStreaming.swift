@@ -774,17 +774,17 @@ private enum StructuredCLIParseError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidJSON:
-            "에이전트가 유효하지 않은 JSON 스트림을 반환했습니다."
+            AppText.localized("에이전트가 유효하지 않은 JSON 스트림을 반환했습니다.")
         case .invalidEvent:
-            "에이전트가 지원되지 않는 JSON 이벤트를 반환했습니다."
+            AppText.localized("에이전트가 지원되지 않는 JSON 이벤트를 반환했습니다.")
         case .missingSessionID:
-            "에이전트가 세션 ID를 반환하지 않았습니다."
+            AppText.localized("에이전트가 세션 ID를 반환하지 않았습니다.")
         case .missingCompletion:
-            "에이전트 스트림이 완료 이벤트 없이 종료되었습니다."
+            AppText.localized("에이전트 스트림이 완료 이벤트 없이 종료되었습니다.")
         case .sessionMismatch:
-            "에이전트가 요청한 세션과 다른 세션을 반환했습니다."
+            AppText.localized("에이전트가 요청한 세션과 다른 세션을 반환했습니다.")
         case .inactiveParser:
-            "종료된 에이전트 스트림을 다시 처리할 수 없습니다."
+            AppText.localized("종료된 에이전트 스트림을 다시 처리할 수 없습니다.")
         case let .agentError(message):
             message
         }

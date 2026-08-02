@@ -209,18 +209,18 @@ public final class YumYumAppViewModel: ObservableObject {
             switch error {
             case .pathMustBeAbsolute, .executableUnavailable:
                 connectionState = .pathError(
-                    message: error.errorDescription ?? "Hermes 경로를 확인할 수 없습니다."
+                    message: error.errorDescription ?? AppText.localized("Hermes 경로를 확인할 수 없습니다.")
                 )
             case .timedOut:
                 connectionState = .timedOut
             case .executionFailed, .emptyVersionOutput, .launchFailed:
                 connectionState = .executionError(
-                    message: error.errorDescription ?? "Hermes 연결 확인을 완료하지 못했습니다."
+                    message: error.errorDescription ?? AppText.localized("Hermes 연결 확인을 완료하지 못했습니다.")
                 )
             }
         } catch {
             connectionState = .executionError(
-                message: "Hermes 연결 확인을 완료하지 못했습니다."
+                message: AppText.localized("Hermes 연결 확인을 완료하지 못했습니다.")
             )
         }
     }
@@ -237,10 +237,10 @@ public final class YumYumAppViewModel: ObservableObject {
             probeState = .idle
         } catch let error as FixtureProbeError {
             probeState = .failure(
-                message: error.errorDescription ?? "안전한 fixture probe를 완료하지 못했습니다."
+                message: error.errorDescription ?? AppText.localized("안전한 fixture probe를 완료하지 못했습니다.")
             )
         } catch {
-            probeState = .failure(message: "안전한 fixture probe를 완료하지 못했습니다.")
+            probeState = .failure(message: AppText.localized("안전한 fixture probe를 완료하지 못했습니다."))
         }
     }
 }

@@ -32,6 +32,9 @@ final class QuickMenuPanelController: NSObject {
     private var thinkingTask: Task<Void, Never>?
     private var thinkingGeneration: UUID?
     private var lastReduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+#if DEBUG
+    private(set) var responseFrameUpdateCountForTesting = 0
+#endif
     private var lastActionSourceRect: CGRect?
     private var theme = AppTheme.dark
 
@@ -62,7 +65,7 @@ final class QuickMenuPanelController: NSObject {
         )
         thinkingPanel = Self.makeBubblePanel(
             size: Self.thinkingPanelSize,
-            title: "YumYum 생각 중"
+            title: AppText.localized("YumYum 생각 중")
         )
         responsePanel = ResponseBubblePanel(
             contentRect: CGRect(origin: .zero, size: CGSize(width: 360, height: 120)),
@@ -75,7 +78,7 @@ final class QuickMenuPanelController: NSObject {
         Self.configure(
             actionPanel,
             level: .popUpMenu,
-            title: "YumYum 액션"
+            title: AppText.localized("YumYum 액션")
         )
         actionPanel.contentViewController = actionViewController
         actionPanel.onCancel = { [weak self] in self?.dismissActionBubble() }
@@ -90,7 +93,7 @@ final class QuickMenuPanelController: NSObject {
         }
 
         thinkingPanel.contentViewController = thinkingViewController
-        Self.configure(responsePanel, level: .floating, title: "YumYum 답변")
+        Self.configure(responsePanel, level: .floating, title: AppText.localized("YumYum 답변"))
         responsePanel.contentViewController = responseViewController
         responseViewController.onOpenChat = { [weak self] in
             self?.openChatFromResponse()
@@ -181,6 +184,25 @@ final class QuickMenuPanelController: NSObject {
         responseViewController.applyTheme(theme)
         if responsePanel.isVisible {
             updateResponseFrame()
+        }
+    }
+
+    func applyLanguage(_ language: AppLanguage = AppText.language) {
+        let responseScrollOrigin = responseViewController.responseScrollOrigin
+        let firstResponder = responsePanel.firstResponder
+        actionViewController.applyLanguage(language)
+        thinkingViewController.applyLanguage(language)
+        responseViewController.applyLanguage(language)
+        chatController.applyLanguage(language)
+        actionPanel.title = AppText.localized(english: "YumYum Actions", korean: "YumYum 액션", language: language)
+        thinkingPanel.title = AppText.localized(english: "YumYum is thinking", korean: "YumYum 생각 중", language: language)
+        responsePanel.title = AppText.localized(english: "YumYum Response", korean: "YumYum 답변", language: language)
+        if responsePanel.isVisible {
+            updateResponseFrame()
+            responseViewController.restoreResponseScrollOrigin(responseScrollOrigin)
+            if let firstResponder {
+                responsePanel.makeFirstResponder(firstResponder)
+            }
         }
     }
 
@@ -469,13 +491,13 @@ final class QuickMenuPanelController: NSObject {
                     finishCapture(.permissionDenied, generation: generation)
                 default:
                     finishCapture(
-                        .failed(error.errorDescription ?? "화면을 캡처하지 못했습니다."),
+                        .failed(error.errorDescription ?? AppText.localized("화면을 캡처하지 못했습니다.")),
                         generation: generation
                     )
                 }
             } catch {
                 finishCapture(
-                    .failed("화면을 캡처하지 못했습니다."),
+                    .failed(AppText.localized("화면을 캡처하지 못했습니다.")),
                     generation: generation
                 )
             }
@@ -529,8 +551,8 @@ final class QuickMenuPanelController: NSObject {
         fileGeneration = generation
         let openPanel = NSOpenPanel()
         activeOpenPanel = openPanel
-        openPanel.title = "먹일 파일 선택"
-        openPanel.prompt = "먹이기"
+        openPanel.title = AppText.localized("먹일 파일 선택")
+        openPanel.prompt = AppText.localized("먹이기")
         openPanel.allowsMultipleSelection = true
         openPanel.canChooseDirectories = false
         openPanel.canChooseFiles = true
@@ -698,7 +720,7 @@ final class QuickMenuPanelController: NSObject {
         preview: FeedPreview,
         frame: CGRect
     ) -> NSPanel {
-        let panel = Self.makeBubblePanel(size: frame.size, title: "YumYum 먹이 미리보기")
+        let panel = Self.makeBubblePanel(size: frame.size, title: AppText.localized("YumYum 먹이 미리보기"))
         panel.level = .popUpMenu
         panel.ignoresMouseEvents = true
         panel.setFrame(frame, display: false)
@@ -753,6 +775,9 @@ final class QuickMenuPanelController: NSObject {
     }
 
     private func updateResponseFrame() {
+#if DEBUG
+        responseFrameUpdateCountForTesting += 1
+#endif
         let size = responseViewController.preferredSize
         let frame = layout.panelFrame(
             petFrame: petController.panel.frame,
@@ -787,7 +812,7 @@ final class QuickMenuPanelController: NSObject {
             defer: false
         )
         configure(panel, level: .floating, title: title)
-        panel.ignoresMouseEvents = title == "YumYum 생각 중"
+        panel.ignoresMouseEvents = title == AppText.localized("YumYum 생각 중")
         return panel
     }
 
@@ -894,7 +919,7 @@ private final class ActionBubbleViewController: NSViewController {
         stack.translatesAutoresizingMaskIntoConstraints = false
         stack.setAccessibilityElement(true)
         stack.setAccessibilityRole(.list)
-        stack.setAccessibilityLabel("YumYum 액션")
+        stack.setAccessibilityLabel(AppText.localized("YumYum 액션"))
         background.addSubview(stack)
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: background.leadingAnchor, constant: 12),
@@ -983,6 +1008,15 @@ private final class ActionBubbleViewController: NSViewController {
             return
         }
         view.window?.makeFirstResponder(buttons[target])
+    }
+
+    func applyLanguage(_ language: AppLanguage = AppText.language) {
+        buttons.forEach { $0.applyLanguage(language) }
+        view.setAccessibilityLabel(AppText.localized(
+            english: "YumYum Actions",
+            korean: "YumYum 액션",
+            language: language
+        ))
     }
 
     @objc
@@ -1094,6 +1128,11 @@ private final class ActionRowButton: NSButton {
         layer.borderColor = NSColor.keyboardFocusIndicatorColor
             .withAlphaComponent(0.72).cgColor
     }
+
+    func applyLanguage(_ language: AppLanguage = AppText.language) {
+        title = actionItem.title(language: language)
+        setAccessibilityLabel(title)
+    }
 }
 
 @MainActor
@@ -1111,7 +1150,7 @@ final class ThinkingBubbleViewController: NSViewController {
             .withAlphaComponent(0.28).cgColor
         background.setAccessibilityElement(true)
         background.setAccessibilityRole(.group)
-        background.setAccessibilityLabel("YumYum이 응답을 생각하는 중")
+        background.setAccessibilityLabel(AppText.localized("YumYum이 응답을 생각하는 중"))
         label.font = .systemFont(ofSize: 14, weight: .semibold)
         label.alignment = .center
         label.setAccessibilityElement(false)
@@ -1145,6 +1184,14 @@ final class ThinkingBubbleViewController: NSViewController {
         guard label.stringValue != text else { return }
         label.stringValue = text
     }
+
+    func applyLanguage(_ language: AppLanguage = AppText.language) {
+        view.setAccessibilityLabel(AppText.localized(
+            english: "YumYum is thinking about the response",
+            korean: "YumYum이 응답을 생각하는 중",
+            language: language
+        ))
+    }
 }
 
 @MainActor
@@ -1168,12 +1215,12 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
 
     private let label = NSTextField(wrappingLabelWithString: "")
     private let responseScroll = NSScrollView()
-    private let inlineToggleButton = ResponseActionButton(title: "채팅 입력하기")
-    private let openChatButton = ResponseActionButton(title: "채팅창 상세")
-    private let retryButton = NSButton(title: "재시도", target: nil, action: nil)
+    private let inlineToggleButton = ResponseActionButton(title: AppText.localized("채팅 입력하기"))
+    private let openChatButton = ResponseActionButton(title: AppText.localized("채팅창 상세"))
+    private let retryButton = NSButton(title: AppText.localized("재시도"), target: nil, action: nil)
     private let retryRow = NSStackView()
     private let composer = NSTextField()
-    private let sendButton = NSButton(title: "전송", target: nil, action: nil)
+    private let sendButton = NSButton(title: AppText.localized("전송"), target: nil, action: nil)
     private let attachmentLabel = NSTextField(labelWithString: "")
     private let inlineStack = NSStackView()
     private let bodySurface = ResponseSurfaceView(identifier: "response-body-surface")
@@ -1190,7 +1237,9 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
         isExcerpt: false,
         showsOpenChat: false
     )
+    private var chatState = ChatBubbleState()
     private var theme = AppTheme.dark
+    private var language = AppText.language
 
     var preferredSize: CGSize {
         CGSize(
@@ -1201,7 +1250,7 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
 
     private var renderedText: NSAttributedString {
         AssistantMarkdownRenderer.render(
-            content.displayText,
+            content.displayText(language: language),
             font: .systemFont(ofSize: 13.5),
             textColor: content.isError ? theme.palette.error : theme.palette.text
         )
@@ -1260,7 +1309,7 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
         bodySurface.content.onClick = { [weak self] in self?.onOpenChat?() }
         bodySurface.setAccessibilityElement(true)
         bodySurface.setAccessibilityRole(.group)
-        bodySurface.setAccessibilityHelp("누르면 전체 채팅을 엽니다.")
+        bodySurface.setAccessibilityHelp(AppText.localized("누르면 전체 채팅을 엽니다."))
 
         label.font = .systemFont(ofSize: 13.5)
         label.maximumNumberOfLines = 0
@@ -1292,29 +1341,29 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
 
         openChatButton.target = self
         openChatButton.action = #selector(openChatPressed)
-        openChatButton.setAccessibilityLabel("전체 답변을 채팅에서 열기")
+        openChatButton.setAccessibilityLabel(AppText.localized("전체 답변을 채팅에서 열기"))
         inlineToggleButton.target = self
         inlineToggleButton.action = #selector(toggleInline)
-        inlineToggleButton.setAccessibilityLabel("응답 말풍선에서 채팅 입력하기")
+        inlineToggleButton.setAccessibilityLabel(AppText.localized("응답 말풍선에서 채팅 입력하기"))
         retryButton.target = self
         retryButton.action = #selector(retryPressed)
         retryButton.bezelStyle = .rounded
-        retryButton.setAccessibilityLabel("마지막 입력 재시도")
+        retryButton.setAccessibilityLabel(AppText.localized("마지막 입력 재시도"))
 
-        composer.placeholderString = "메시지 입력"
+        composer.placeholderString = AppText.localized("메시지 입력")
         composer.delegate = self
         composer.target = self
         composer.action = #selector(sendPressed)
-        composer.setAccessibilityLabel("인라인 채팅 메시지")
-        composer.setAccessibilityHelp("Return을 눌러 전송합니다")
+        composer.setAccessibilityLabel(AppText.localized("인라인 채팅 메시지"))
+        composer.setAccessibilityHelp(AppText.localized("Return을 눌러 전송합니다"))
         sendButton.target = self
         sendButton.action = #selector(sendPressed)
         sendButton.keyEquivalent = "\r"
-        sendButton.setAccessibilityLabel("인라인 메시지 전송")
+        sendButton.setAccessibilityLabel(AppText.localized("인라인 메시지 전송"))
         attachmentLabel.font = .systemFont(ofSize: 11)
         attachmentLabel.textColor = .secondaryLabelColor
         attachmentLabel.lineBreakMode = .byTruncatingMiddle
-        attachmentLabel.setAccessibilityLabel("전송 예정 첨부")
+        attachmentLabel.setAccessibilityLabel(AppText.localized("전송 예정 첨부"))
         let composerRow = NSStackView(views: [composer, sendButton])
         composerRow.orientation = .horizontal
         composerRow.spacing = 8
@@ -1445,16 +1494,17 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
         )
         bodySurface.setAccessibilityLabel(
             content.isExcerpt
-                ? "YumYum 답변 요약. 채팅에서 전체 답변을 열 수 있습니다."
-                : "YumYum 답변"
+                ? AppText.localized("YumYum 답변 요약. 채팅에서 전체 답변을 열 수 있습니다.", language: language)
+                : AppText.localized("YumYum 답변", language: language)
         )
-        bodySurface.setAccessibilityValue(content.displayText)
+        bodySurface.setAccessibilityValue(content.displayText(language: language))
     }
 
     @objc private func openChatPressed() { onOpenChat?() }
     @objc private func retryPressed() { onRetry?() }
 
     func renderChat(_ state: ChatBubbleState) {
+        chatState = state
         guard isViewLoaded else { return }
         if composer.stringValue != state.draftText {
             composer.stringValue = state.draftText
@@ -1462,7 +1512,11 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
         let attachments = state.draftAttachments
         attachmentLabel.stringValue = attachments.isEmpty
             ? ""
-            : "\(attachments.first?.displayName ?? "") · \(attachments.count)개 첨부"
+            : AppText.localized(
+                english: "\(attachments.first?.displayName ?? "") · \(attachments.count) attached",
+                korean: "\(attachments.first?.displayName ?? "") · \(attachments.count)개 첨부",
+                language: language
+            )
         attachmentLabel.isHidden = attachments.isEmpty
         let hasDraft = !state.draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || !attachments.isEmpty
@@ -1489,6 +1543,37 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
     func resetActionInteractionState() {
         inlineToggleButton.resetInteractionState()
         openChatButton.resetInteractionState()
+    }
+
+    func applyLanguage(_ language: AppLanguage = AppText.language) {
+        self.language = language
+        inlineToggleButton.title = AppText.localized(english: "Reply", korean: "채팅 입력하기", language: language)
+        openChatButton.title = AppText.localized(english: "Open Chat", korean: "채팅창 상세", language: language)
+        retryButton.title = AppText.localized(english: "Retry", korean: "재시도", language: language)
+        sendButton.title = AppText.localized(english: "Send", korean: "전송", language: language)
+        composer.placeholderString = AppText.localized(english: "Message", korean: "메시지 입력", language: language)
+        bodySurface.setAccessibilityHelp(AppText.localized("누르면 전체 채팅을 엽니다.", language: language))
+        openChatButton.setAccessibilityLabel(AppText.localized("전체 답변을 채팅에서 열기", language: language))
+        inlineToggleButton.setAccessibilityLabel(AppText.localized("응답 말풍선에서 채팅 입력하기", language: language))
+        retryButton.setAccessibilityLabel(AppText.localized("마지막 입력 재시도", language: language))
+        composer.setAccessibilityLabel(AppText.localized("인라인 채팅 메시지", language: language))
+        composer.setAccessibilityHelp(AppText.localized("Return을 눌러 전송합니다", language: language))
+        sendButton.setAccessibilityLabel(AppText.localized("인라인 메시지 전송", language: language))
+        attachmentLabel.setAccessibilityLabel(AppText.localized("전송 예정 첨부", language: language))
+        let scrollOrigin = responseScroll.contentView.bounds.origin
+        render(content, resetScroll: false)
+        renderChat(chatState)
+        responseScroll.contentView.scroll(to: scrollOrigin)
+        responseScroll.reflectScrolledClipView(responseScroll.contentView)
+    }
+
+    var responseScrollOrigin: CGPoint {
+        responseScroll.contentView.bounds.origin
+    }
+
+    func restoreResponseScrollOrigin(_ origin: CGPoint) {
+        responseScroll.contentView.scroll(to: origin)
+        responseScroll.reflectScrolledClipView(responseScroll.contentView)
     }
 
     private func updateLayout() {
@@ -1729,7 +1814,10 @@ private final class FeedPreviewContentView: NSView {
         }
         setAccessibilityElement(true)
         setAccessibilityRole(.image)
-        setAccessibilityLabel("YumYum에게 먹이는 자료: \(preview.label)")
+        setAccessibilityLabel(AppText.localized(
+            english: "Material being fed to YumYum: \(preview.label)",
+            korean: "YumYum에게 먹이는 자료: \(preview.label)"
+        ))
     }
 
     @available(*, unavailable)

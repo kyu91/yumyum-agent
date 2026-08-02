@@ -1,10 +1,10 @@
 # YumYum Soul format
 
-YumYum이 소유하는 Soul 파일은 `~/Library/Application Support/YumYum/SOUL.md`입니다. 현재 앱에는 외부 파일 가져오기 기능이 없으며, [예제](../Examples/Souls/)는 참고용입니다.
+YumYum owns `~/Library/Application Support/YumYum/SOUL.md`. The app does not currently import external Soul files; [examples](../Examples/Souls/) are reference material only.
 
-## 문법
+## Grammar
 
-파일은 정확히 `# YumYum Soul`, 빈 줄, 고정 안전 문장으로 시작합니다. 그 뒤 아래 heading 중 값이 있는 항목만 이 순서로 나타날 수 있습니다.
+The file begins with exactly `# YumYum Soul`, a blank line, and the fixed safety statement. Only nonempty fields may follow, in this order:
 
 1. `Name`
 2. `Role / Identity`
@@ -17,6 +17,6 @@ YumYum이 소유하는 Soul 파일은 `~/Library/Application Support/YumYum/SOUL
 9. `Behavior Principles`
 10. `Additional Instructions`
 
-각 필드는 정규화 후 최대 2,000자이고 전체 필드 합계는 앞 순서부터 최대 12,000자입니다. CRLF는 LF로 바뀌고 줄의 연속 공백은 하나로 정규화됩니다. 필드 본문의 `## ` 또는 `\`로 시작하는 줄은 저장 시 `\`로 escape됩니다. 알 수 없는 heading, 중복·역순 heading, 잘못된 prefix, 비정규화 내용, 과대 파일은 파싱되지 않고 빈 프로필로 처리됩니다.
+After normalization, each field is limited to 2,000 characters and all fields together to 12,000 characters in field order. CRLF becomes LF and consecutive inline whitespace becomes one space. Body lines beginning with `## ` or `\` are escaped with `\` when saved. Unknown, duplicate, or out-of-order headings; invalid prefixes; non-normalized content; and oversized files fail closed to an empty profile.
 
-Soul은 새 논리 세션의 첫 프롬프트에만 적용되며 YumYum의 안전, 개인정보, 승인, 첨부 및 외부 변경 정책보다 낮은 우선순위입니다. hooks, includes, 환경변수 확장, 네트워크 접근 또는 명령 실행 문법은 없습니다. 비밀·자격증명·민감한 개인정보를 넣지 마세요.
+Soul applies only to the first prompt of a new logical session and is subordinate to YumYum safety, privacy, approval, attachment, and external-change policies. It has no hooks, includes, environment expansion, network access, or command execution syntax. Do not include secrets, credentials, or sensitive personal data.

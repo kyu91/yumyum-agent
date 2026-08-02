@@ -8,6 +8,33 @@ import Testing
 @Suite
 struct PetFileDropTests {
     @Test
+    @MainActor
+    func languageRefreshChangesPetAccessibilityWithoutReplacingPresentationState() {
+        _ = NSApplication.shared
+        let controller = FloatingPetWindowController {}
+        let frame = controller.panel.frame
+        let model = controller.presentationModel
+        model.chewFrame = .mouthClosedChew
+        model.isFileDropTarget = true
+
+        controller.applyLanguage(.english)
+        #expect(model.accessibilityLabel == "YumYum floating pet")
+        #expect(model.accessibilityHint == "Click to open the quick menu. Drag to move.")
+        #expect(controller.panel.contentView?.accessibilityLabel() == "YumYum floating pet")
+        #expect(controller.panel.contentView?.accessibilityHelp() == "Click to open the quick menu. Drag to move.")
+        controller.applyLanguage(.korean)
+
+        #expect(controller.presentationModel === model)
+        #expect(controller.panel.frame == frame)
+        #expect(model.chewFrame == .mouthClosedChew)
+        #expect(model.isFileDropTarget)
+        #expect(model.accessibilityLabel == "YumYum 플로팅 펫")
+        #expect(model.accessibilityHint == "클릭하면 빠른 메뉴를 엽니다. 드래그하여 이동할 수 있습니다.")
+        #expect(controller.panel.contentView?.accessibilityLabel() == "YumYum 플로팅 펫")
+        #expect(controller.panel.contentView?.accessibilityHelp() == "클릭하면 빠른 메뉴를 엽니다. 드래그하여 이동할 수 있습니다.")
+    }
+
+    @Test
     func preflightAcceptsRegularFilesDeduplicatesAndRejectsInvalidBatches() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

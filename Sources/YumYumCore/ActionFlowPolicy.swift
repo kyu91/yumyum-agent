@@ -8,13 +8,19 @@ public enum ActionBubbleAction: Int, CaseIterable, Equatable, Sendable {
     case settings
 
     public var title: String {
+        title(language: AppText.language)
+    }
+
+    public func title(language: AppLanguage) -> String {
         switch self {
-        case .capture: "캡처하기"
-        case .findFile: "파일 찾기"
-        case .openChat: "채팅 열기"
-        case .settings: "설정"
+        case .capture: AppText.localized(english: "Capture", korean: "캡처하기", language: language)
+        case .findFile: AppText.localized(english: "Choose Files", korean: "파일 찾기", language: language)
+        case .openChat: AppText.localized(english: "Open Chat", korean: "채팅 열기", language: language)
+        case .settings: AppText.localized(english: "Settings", korean: "설정", language: language)
         }
     }
+
+    public var localizedTitle: String { title }
 
     public var symbolName: String {
         switch self {
@@ -428,8 +434,17 @@ public struct ThinkingAnimationPolicy: Equatable, Sendable {
 }
 
 public struct PetResponseContent: Equatable, Sendable {
-    public let fullText: String
-    public let displayText: String
+    private let storedFullText: String
+    private let storedDisplayText: String
+    public let errorCategory: UserFacingErrorCategory?
+    public var fullText: String { fullText(language: AppText.language) }
+    public var displayText: String { displayText(language: AppText.language) }
+    public func fullText(language: AppLanguage) -> String {
+        errorCategory?.message(language: language) ?? storedFullText
+    }
+    public func displayText(language: AppLanguage) -> String {
+        errorCategory?.message(language: language) ?? storedDisplayText
+    }
     public let isExcerpt: Bool
     public let showsOpenChat: Bool
     public let showsRetry: Bool
@@ -441,10 +456,12 @@ public struct PetResponseContent: Equatable, Sendable {
         isExcerpt: Bool,
         showsOpenChat: Bool,
         showsRetry: Bool = false,
-        isError: Bool = false
+        isError: Bool = false,
+        errorCategory: UserFacingErrorCategory? = nil
     ) {
-        self.fullText = fullText
-        self.displayText = displayText
+        storedFullText = fullText
+        storedDisplayText = displayText
+        self.errorCategory = errorCategory
         self.isExcerpt = isExcerpt
         self.showsOpenChat = showsOpenChat
         self.showsRetry = showsRetry
@@ -463,14 +480,16 @@ public enum PetResponsePolicy {
     }
 
     public static func error(message: String) -> PetResponseContent {
-        let safeMessage = UserFacingErrorRedactor.sanitize(message)
+        let category = UserFacingErrorRedactor.category(forSafeMessage: message)
+        let safeMessage = category.message
         return PetResponseContent(
             fullText: safeMessage,
             displayText: safeMessage,
             isExcerpt: false,
             showsOpenChat: true,
             showsRetry: true,
-            isError: true
+            isError: true,
+            errorCategory: category
         )
     }
 }

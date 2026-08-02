@@ -570,7 +570,7 @@ struct QuickMenuPanelControllerTests {
         controller.render(
             state: ChatBubbleState(phase: .failed("실패")),
             canRetry: true,
-            agentNotice: "에이전트 상태"
+            agentNotice: .selectDefault
         )
 
         controller.accessibilityDisplayOptionsDidChangeForTesting()
@@ -580,10 +580,111 @@ struct QuickMenuPanelControllerTests {
         controller.render(
             state: ChatBubbleState(),
             canRetry: false,
-            agentNotice: "에이전트 상태"
+            agentNotice: .selectDefault
         )
         controller.accessibilityDisplayOptionsDidChangeForTesting()
-        #expect(textFields(in: controller.view).contains { $0.stringValue == "에이전트 상태" })
+        #expect(textFields(in: controller.view).contains {
+            $0.stringValue == AppText.localized("설정에서 기본 에이전트를 선택하세요.")
+        })
+    }
+
+    @Test
+    @MainActor
+    func openChatLanguageRefreshUpdatesPersistentAccessibilityInPlaceAndRelocalizesTypedNotice() throws {
+        _ = NSApplication.shared
+        let controller = QuickMenuViewController()
+        _ = controller.view
+        let attachment = ChatDraftAttachment(
+            url: URL(fileURLWithPath: "/private/tmp/report.pdf"),
+            isTemporary: false
+        )
+        controller.render(
+            state: ChatBubbleState(
+                draftText: "keep draft",
+                draftAttachments: [attachment],
+                messages: [ChatMessage(role: .assistant, text: "answer")]
+            ),
+            canRetry: true,
+            agentNotice: .reselectDefault
+        )
+        let messageRow = try #require(flattened(controller.view).first {
+            $0.accessibilityLabel()?.contains("answer") == true
+        })
+        let attachmentRow = try #require(flattened(controller.view).first {
+            $0.accessibilityLabel()?.contains("report.pdf") == true
+                && !($0 is NSButton)
+        })
+
+        controller.applyLanguage(.english)
+        #expect(messageRow.accessibilityLabel() == "Assistant: answer")
+        #expect(attachmentRow.accessibilityLabel() == "Attached file report.pdf")
+        #expect(buttons(in: controller.view).contains {
+            $0.title == "Capture"
+                && $0.accessibilityLabel() == "Attach Screen Capture"
+                && $0.accessibilityHelp() == "Attaches the selected screen area to the draft without sending it"
+        })
+        #expect(textFields(in: controller.view).contains {
+            $0.stringValue == "Reselect the default agent in Settings."
+                && $0.accessibilityLabel() == "YumYum Status"
+        })
+
+        controller.applyLanguage(.korean)
+        #expect(messageRow.accessibilityLabel() == "어시스턴트: answer")
+        #expect(attachmentRow.accessibilityLabel() == "첨부 파일 report.pdf")
+        #expect(textFields(in: controller.view).contains {
+            $0.stringValue == "keep draft"
+                && $0.placeholderString == "대화를 입력하거나 자료를 첨부하세요."
+                && $0.accessibilityLabel() == "대화 메시지"
+        })
+        #expect(textFields(in: controller.view).contains {
+            $0.stringValue == "설정에서 기본 에이전트를 다시 선택하세요."
+                && $0.accessibilityValue() == "설정에서 기본 에이전트를 다시 선택하세요."
+        })
+        #expect(flattened(controller.view).contains { $0 === messageRow })
+        #expect(flattened(controller.view).contains { $0 === attachmentRow })
+    }
+
+    @Test
+    @MainActor
+    func visibleResponseLanguageRefreshReflowsFrameAndPreservesInputState() throws {
+        _ = NSApplication.shared
+        let pet = FloatingPetWindowController {}
+        let viewModel = YumYumAppViewModel(fixtureProbe: UnusedFixtureProbe())
+        let controller = QuickMenuPanelController(
+            petController: pet,
+            viewModel: viewModel,
+            workflow: FeedWorkflow(
+                sender: viewModel.agentRuntime,
+                feedback: AppFeedFeedback(petController: pet)
+            ),
+            openSettings: {}
+        )
+        defer { controller.prepareForTermination() }
+        controller.applyFeedStatus(FeedStatusUpdate(
+            generation: UUID(),
+            status: .failed(UserFacingErrorCategory.invalidFile.message(language: .english))
+        ))
+        controller.applyLanguage(.english)
+        try pressButton(titled: "Reply", in: controller.responsePanel.contentView)
+        let composer = try #require(textFields(in: controller.responsePanel.contentView).first {
+            $0.accessibilityLabel() == "Inline chat message"
+        })
+        composer.stringValue = "keep draft"
+        composer.delegate?.controlTextDidChange?(
+            Notification(name: NSControl.textDidChangeNotification, object: composer)
+        )
+        controller.responsePanel.makeFirstResponder(composer)
+        let responder = controller.responsePanel.firstResponder
+        let updateCount = controller.responseFrameUpdateCountForTesting
+
+        controller.applyLanguage(.korean)
+
+        #expect(controller.responseFrameUpdateCountForTesting == updateCount + 1)
+        #expect(controller.responsePanel.isVisible)
+        #expect(composer.stringValue == "keep draft")
+        #expect(composer.accessibilityLabel() == "인라인 채팅 메시지")
+        #expect(controller.responsePanel.firstResponder === responder)
+        #expect(NSScreen.screens.contains { $0.visibleFrame.contains(controller.responsePanel.frame) })
     }
 
     @Test
@@ -610,6 +711,47 @@ struct QuickMenuPanelControllerTests {
 
         #expect(controller.preferredSize.height >= collapsedHeight + 48)
         #expect(!controller.view.hasAmbiguousLayout)
+    }
+
+    @Test
+    @MainActor
+    func responseLanguageRefreshPreservesContentDraftAttachmentsExpansionAndScroll() throws {
+        _ = NSApplication.shared
+        let controller = ResponseBubbleViewController()
+        _ = controller.view
+        controller.applyLanguage(.english)
+        controller.render(PetResponsePolicy.error(
+            message: UserFacingErrorCategory.invalidFile.message(language: .english)
+        ))
+        controller.renderChat(ChatBubbleState(
+            draftText: "keep draft",
+            draftAttachments: [
+                ChatDraftAttachment(
+                    url: URL(fileURLWithPath: "/private/tmp/report.pdf"),
+                    isTemporary: false
+                ),
+            ]
+        ))
+        try pressButton(titled: "Reply", in: controller.view)
+        controller.responseScrollOriginForTesting = CGPoint(x: 0, y: 4)
+
+        controller.applyLanguage(.korean)
+
+        #expect(buttons(in: controller.view).contains { $0.title == "채팅창 상세" })
+        #expect(buttons(in: controller.view).contains { $0.title == "재시도" && !$0.isHidden })
+        #expect(textFields(in: controller.view).contains {
+            $0.stringValue == "keep draft"
+                && $0.accessibilityLabel() == "인라인 채팅 메시지"
+                && $0.accessibilityHelp() == "Return을 눌러 전송합니다"
+        })
+        #expect(textFields(in: controller.view).contains {
+            $0.stringValue == "report.pdf · 1개 첨부"
+                && $0.accessibilityLabel() == "전송 예정 첨부"
+        })
+        #expect(textFields(in: controller.view).contains {
+            $0.stringValue == UserFacingErrorCategory.invalidFile.message(language: .korean)
+        })
+        #expect(controller.responseScrollOriginForTesting == CGPoint(x: 0, y: 4))
     }
 
     @Test

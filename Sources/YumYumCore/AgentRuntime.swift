@@ -93,15 +93,15 @@ public enum AgentConnectorError: Error, Equatable, LocalizedError, Sendable {
     public var errorDescription: String? {
         switch self {
         case .timedOut:
-            "에이전트 응답 시간이 초과되었습니다."
+            AppText.localized("에이전트 응답 시간이 초과되었습니다.")
         case let .failed(exitStatus, message):
-            "에이전트 실행이 실패했습니다(\(exitStatus.map(String.init) ?? "알 수 없음")): \(message)"
+            AppText.localized(english: "Agent execution failed (\(exitStatus.map(String.init) ?? "unknown")): \(message)", korean: "에이전트 실행이 실패했습니다(\(exitStatus.map(String.init) ?? "알 수 없음")): \(message)")
         case .emptyResponse:
-            "에이전트가 응답 텍스트를 반환하지 않았습니다."
+            AppText.localized("에이전트가 응답 텍스트를 반환하지 않았습니다.")
         case let .launchFailed(message):
-            "에이전트 프로세스를 시작하지 못했습니다: \(message)"
+            AppText.localized(english: "Could not start the agent process: \(message)", korean: "에이전트 프로세스를 시작하지 못했습니다: \(message)")
         case let .hermesACPUnavailable(reason):
-            "Hermes ACP를 사용할 수 없습니다: \(reason)"
+            AppText.localized(english: "Hermes ACP is unavailable: \(reason)", korean: "Hermes ACP를 사용할 수 없습니다: \(reason)")
         }
     }
 }
@@ -189,9 +189,9 @@ public enum AgentRuntimeError: Error, Equatable, LocalizedError, Sendable {
     public var errorDescription: String? {
         switch self {
         case let .connectorUnavailable(definitionID):
-            "\(definitionID.displayName) 전용 Connector를 사용할 수 없습니다."
+            AppText.localized(english: "No connector is available for \(definitionID.displayName).", korean: "\(definitionID.displayName) 전용 Connector를 사용할 수 없습니다.")
         case let .invalidSelectedPath(path):
-            "선택한 에이전트의 정확한 절대 경로가 유효하지 않습니다: \(path ?? "없음")"
+            AppText.localized(english: "The selected agent's exact absolute path is invalid: \(path ?? "none")", korean: "선택한 에이전트의 정확한 절대 경로가 유효하지 않습니다: \(path ?? "없음")")
         }
     }
 }
@@ -539,12 +539,12 @@ func promptText(
 ) -> String {
     let trimmed = (text ?? request.text)
         .trimmingCharacters(in: .whitespacesAndNewlines)
-    var prompt = trimmed.isEmpty ? "선택한 첨부 파일을 분석해 주세요." : trimmed
+    var prompt = trimmed.isEmpty ? "Analyze the selected attachments." : trimmed
     guard !visibleAttachments.isEmpty else {
         return prompt
     }
 
-    prompt += "\n\n사용자가 명시적으로 선택한 로컬 첨부 파일 경로입니다. 이 경로만 입력 자료로 사용하세요:"
+    prompt += "\n\nThese are paths to local attachments explicitly selected by the user. Use only these paths as input:"
     for attachment in visibleAttachments {
         prompt += "\n- \(attachment.url.path)"
     }

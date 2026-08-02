@@ -73,11 +73,20 @@ public struct QuickMenuActionState: Equatable, Sendable {
     public init(snapshot: AgentRegistrySnapshot, isBusy: Bool) {
         isInputEnabled = snapshot.canSend && !isBusy
         if let selected = snapshot.selectedInstallation {
-            statusText = "\(selected.definitionID.displayName) 준비됨"
+            statusText = AppText.localized(
+                english: "\(selected.definitionID.displayName) ready",
+                korean: "\(selected.definitionID.displayName) 준비됨"
+            )
         } else if snapshot.requiresExplicitReselection {
-            statusText = "기존 에이전트를 사용할 수 없습니다. 다시 선택하세요."
+            statusText = AppText.localized(
+                english: "The previous agent is unavailable. Select it again.",
+                korean: "기존 에이전트를 사용할 수 없습니다. 다시 선택하세요."
+            )
         } else {
-            statusText = "검증된 기본 에이전트를 선택하세요."
+            statusText = AppText.localized(
+                english: "Select a verified default agent.",
+                korean: "검증된 기본 에이전트를 선택하세요."
+            )
         }
     }
 }

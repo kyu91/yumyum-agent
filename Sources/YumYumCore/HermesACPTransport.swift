@@ -23,17 +23,17 @@ public enum HermesACPProtocolError: Error, Equatable, LocalizedError, Sendable {
     public var errorDescription: String? {
         switch self {
         case .connectionClosed:
-            "Hermes ACP 연결이 응답 전에 종료되었습니다."
+            AppText.localized("Hermes ACP 연결이 응답 전에 종료되었습니다.")
         case .invalidMessage:
-            "Hermes ACP가 유효한 JSON-RPC 메시지를 반환하지 않았습니다."
+            AppText.localized("Hermes ACP가 유효한 JSON-RPC 메시지를 반환하지 않았습니다.")
         case let .incompatibleProtocolVersion(version):
-            "Hermes ACP 프로토콜 버전 \(version)은 지원되지 않습니다."
+            AppText.localized(english: "Hermes ACP protocol version \(version) is unsupported.", korean: "Hermes ACP 프로토콜 버전 \(version)은 지원되지 않습니다.")
         case let .requestFailed(message):
-            "Hermes ACP 요청이 실패했습니다: \(message)"
+            AppText.localized(english: "Hermes ACP request failed: \(message)", korean: "Hermes ACP 요청이 실패했습니다: \(message)")
         case .missingSessionID:
-            "Hermes ACP가 세션 ID를 반환하지 않았습니다."
+            AppText.localized("Hermes ACP가 세션 ID를 반환하지 않았습니다.")
         case .outputLimitExceeded:
-            "Hermes ACP 출력이 안전 제한을 초과했습니다."
+            AppText.localized("Hermes ACP 출력이 안전 제한을 초과했습니다.")
         }
     }
 }
@@ -255,7 +255,7 @@ public actor HermesACPProtocolClient {
             return
         }
         throw HermesACPProtocolError.requestFailed(
-            error["message"] as? String ?? "알 수 없는 오류"
+            error["message"] as? String ?? AppText.localized("알 수 없는 오류")
         )
     }
 
@@ -316,7 +316,7 @@ public actor HermesACPProtocolClient {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         var blocks: [[String: Any]] = [[
             "type": "text",
-            "text": trimmed.isEmpty ? "선택한 첨부 파일을 분석해 주세요." : trimmed,
+            "text": trimmed.isEmpty ? "Analyze the selected attachments." : trimmed,
         ]]
         blocks.append(
             contentsOf: request.attachments.map { attachment in

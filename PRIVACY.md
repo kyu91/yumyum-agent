@@ -1,19 +1,19 @@
 # Privacy
 
-## 처리하는 데이터
+## Data processed
 
-YumYum은 사용자가 명시적으로 입력하거나 선택한 대화 텍스트, 로컬 파일, Finder 드롭 파일, 화면 캡처와 대화 transcript를 선택한 로컬 CLI에 전달합니다. 빈 입력, 무효 첨부, 취소, 권한 거부 또는 에이전트 미선택 상태에서는 요청을 만들거나 보내지 않습니다.
+YumYum passes explicitly entered or selected chat text, local files, Finder drops, screen captures, and transcript context to the selected local CLI. Empty input, invalid attachments, cancellation, denied permission, or no selected agent never creates or sends a request.
 
-선택한 CLI 실행 파일의 정의 ID와 정확한 경로, 테마·단축키 설정은 macOS `UserDefaults`에 저장됩니다. Soul 설정은 평문 `~/Library/Application Support/YumYum/SOUL.md`에 원자적으로 저장됩니다. 비밀, 자격증명 또는 민감한 개인정보를 Soul에 입력하지 마세요.
+The selected CLI definition ID and exact executable path, language, theme, and shortcut preferences are stored in macOS `UserDefaults`. Soul settings are stored atomically in plaintext at `~/Library/Application Support/YumYum/SOUL.md`. Do not put secrets, credentials, or sensitive personal data in Soul.
 
-## 네트워크와 외부 CLI
+## Network and external CLIs
 
-YumYum 자체에는 telemetry나 분석 전송이 없습니다. 다만 선택한 Hermes, OpenCode, Codex 또는 Claude Code CLI는 기존 로그인과 설정을 사용해 네트워크 및 모델 제공자에 데이터를 보낼 수 있습니다. 해당 CLI와 제공자의 개인정보 정책을 별도로 확인하세요.
+YumYum sends no telemetry or analytics. The selected Hermes, OpenCode, Codex, or Claude Code CLI may use its existing sign-in and configuration to send data to a network or model provider. Review that CLI's and provider's privacy policies separately.
 
-YumYum은 Keychain, CLI 로그인 파일 또는 토큰 파일을 읽거나 복사하지 않습니다. 알려진 자격증명 파일명과 확장자는 첨부에서 차단하지만, 사용자는 전송 전 파일 내용을 확인할 책임이 있습니다.
+YumYum does not read or copy Keychain, CLI sign-in files, or token files. Known credential names and extensions are blocked from attachments, but users remain responsible for reviewing file contents before sending.
 
-## 임시 캡처와 삭제
+## Temporary captures and deletion
 
-화면 캡처는 시스템 임시 디렉터리에 `YumYum-Capture-*.png` 일반 파일로 저장됩니다. 코드상 완료, 실패, 취소 및 초안 제거 경로에서 임시 캡처 삭제를 시도하며, 앱 시작 시 남아 있는 동일 접두사의 일반 파일 삭제를 다시 시도합니다. 삭제는 최선 노력 방식이므로 충돌·권한·비정상 종료 상황에서 즉시 삭제된다고 보장하지 않습니다.
+Captures are regular `YumYum-Capture-*.png` files in the system temporary directory. YumYum attempts to remove them after completion, failure, cancellation, and draft removal, and retries cleanup for regular files with the same prefix at launch. Deletion is best effort and cannot be guaranteed immediately after crashes, conflicts, or permission failures.
 
-Soul 초기화는 확인 후 프로필을 빈 값으로 다시 저장합니다. 그 밖의 사용자 선택 파일이나 외부 CLI·모델 제공자가 보관한 데이터는 YumYum이 삭제하지 않습니다.
+Resetting Soul saves an empty profile after confirmation. YumYum does not delete other user-selected files or data retained by external CLIs or model providers.

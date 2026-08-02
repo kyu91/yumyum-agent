@@ -1,6 +1,6 @@
 # Contributor Covenant Code of Conduct
 
-> **Publication blocker:** 이 문서는 로컬에서 준비되었지만, 저장소 소유자가 행동 강령 신고 전용 비공개 채널을 구성하기 전에는 공개할 수 없습니다.
+> **Publication blocker:** This document is prepared locally but must not be published until the repository owner configures a private channel dedicated to Code of Conduct reports.
 
 ## Our Pledge
 

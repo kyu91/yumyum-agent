@@ -321,7 +321,11 @@ enum AppTheme: String, CaseIterable, Identifiable {
     case dark
 
     var id: String { rawValue }
-    var displayName: String { self == .light ? "Light" : "Dark" }
+    var displayName: String {
+        self == .light
+            ? AppText.localized(english: "Light", korean: "라이트")
+            : AppText.localized(english: "Dark", korean: "다크")
+    }
     var colorScheme: ColorScheme { self == .light ? .light : .dark }
     var appearance: NSAppearance? {
         NSAppearance(named: self == .light ? .aqua : .darkAqua)
@@ -459,6 +463,20 @@ private final class EventMonitorToken: @unchecked Sendable {
 
 @MainActor
 final class ChatPanelController: NSObject {
+    enum AgentNotice: Equatable {
+        case selectDefault
+        case reselectDefault
+
+        func text(language: AppLanguage) -> String {
+            switch self {
+            case .selectDefault:
+                AppText.localized("설정에서 기본 에이전트를 선택하세요.", language: language)
+            case .reselectDefault:
+                AppText.localized("설정에서 기본 에이전트를 다시 선택하세요.", language: language)
+            }
+        }
+    }
+
     static let panelSize = CGSize(width: 400, height: 520)
 
     private let petController: FloatingPetWindowController
@@ -473,7 +491,7 @@ final class ChatPanelController: NSObject {
     private var captureRestoration = (panel: false, pet: false)
     private var fileSelectionGate = CallbackGenerationGate()
     private var activeFilePanel: NSOpenPanel?
-    private var agentNotice: String?
+    private var agentNotice: AgentNotice?
     private(set) var hasPresented = false
 
     var onWillBeginCapture: (() -> Void)?
@@ -503,7 +521,7 @@ final class ChatPanelController: NSObject {
         )
         super.init()
 
-        panel.title = "YumYum 대화"
+        panel.title = AppText.localized("YumYum 대화")
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = true
@@ -585,6 +603,11 @@ final class ChatPanelController: NSObject {
         viewController.applyTheme(theme)
     }
 
+    func applyLanguage(_ language: AppLanguage = AppText.language) {
+        panel.title = AppText.localized(english: "YumYum Chat", korean: "YumYum 대화", language: language)
+        viewController.applyLanguage(language)
+    }
+
 #if DEBUG
     func renderForTesting(_ state: ChatBubbleState) {
         viewController.render(
@@ -658,9 +681,9 @@ final class ChatPanelController: NSObject {
         if snapshot.canSend {
             agentNotice = nil
         } else if snapshot.requiresExplicitReselection {
-            agentNotice = "설정에서 기본 에이전트를 다시 선택하세요."
+            agentNotice = .reselectDefault
         } else {
-            agentNotice = "설정에서 기본 에이전트를 선택하세요."
+            agentNotice = .selectDefault
         }
         viewController.render(
             state: session.state,
@@ -732,11 +755,11 @@ final class ChatPanelController: NSObject {
                     session.finishCapture(.permissionDenied)
                 default:
                     session.finishCapture(
-                        .failed(error.errorDescription ?? "화면을 캡처하지 못했습니다.")
+                        .failed(error.errorDescription ?? AppText.localized("화면을 캡처하지 못했습니다."))
                     )
                 }
             } catch {
-                session.finishCapture(.failed("화면을 캡처하지 못했습니다."))
+                session.finishCapture(.failed(AppText.localized("화면을 캡처하지 못했습니다.")))
             }
         }
     }
@@ -775,8 +798,8 @@ final class ChatPanelController: NSObject {
         guard fileSelectionGate.begin(generation) else { return }
         let openPanel = NSOpenPanel()
         activeFilePanel = openPanel
-        openPanel.title = "대화에 첨부할 파일 선택"
-        openPanel.prompt = "첨부"
+        openPanel.title = AppText.localized("대화에 첨부할 파일 선택")
+        openPanel.prompt = AppText.localized("첨부")
         openPanel.allowsMultipleSelection = true
         openPanel.canChooseDirectories = false
         openPanel.canChooseFiles = true
@@ -869,16 +892,17 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
     private let header = NSStackView()
     private let attachmentStack = NSStackView()
     private let attachmentScroll = NSScrollView()
-    private let captureButton = ChatAuxiliaryButton(title: "캡처")
-    private let fileButton = ChatAuxiliaryButton(title: "파일")
+    private let captureButton = ChatAuxiliaryButton(title: AppText.localized("캡처"))
+    private let fileButton = ChatAuxiliaryButton(title: AppText.localized("파일"))
     private let composer = NSTextField()
-    private let sendButton = NSButton(title: "보내기", target: nil, action: nil)
+    private let sendButton = NSButton(title: AppText.localized("보내기"), target: nil, action: nil)
     private let statusLabel = ThinkingStatusField(
-        wrappingLabelWithString: "대화를 입력하거나 자료를 첨부하세요."
+        wrappingLabelWithString: AppText.localized("대화를 입력하거나 자료를 첨부하세요.")
     )
     private weak var emptyTranscriptLabel: NSTextField?
-    private let retryButton = NSButton(title: "재시도", target: nil, action: nil)
-    private let cancelButton = NSButton(title: "취소", target: nil, action: nil)
+    private let retryButton = NSButton(title: AppText.localized("재시도"), target: nil, action: nil)
+    private let cancelButton = NSButton(title: AppText.localized("취소"), target: nil, action: nil)
+    private var closeButton: NSButton?
     private var lastAnnouncedStatus = ""
     private var statusIsError = false
     private var renderedMessages: [ChatMessage] = []
@@ -888,8 +912,9 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
     private var loadingElapsed = 0
     private var renderedState = ChatBubbleState()
     private var renderedCanRetry = false
-    private var renderedAgentNotice: String?
+    private var renderedAgentNotice: ChatPanelController.AgentNotice?
     private var isPresented = false
+    private var language = AppText.language
 
     deinit {
         loadingTask?.cancel()
@@ -916,14 +941,15 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
         let closeButton = NSButton(
             image: NSImage(
                 systemSymbolName: "xmark.circle.fill",
-                accessibilityDescription: "닫기"
+                accessibilityDescription: AppText.localized("닫기")
             )!,
             target: self,
             action: #selector(closePressed)
         )
         closeButton.isBordered = false
         closeButton.contentTintColor = .secondaryLabelColor
-        closeButton.setAccessibilityLabel("대화 말풍선 닫기")
+        closeButton.setAccessibilityLabel(AppText.localized("대화 말풍선 닫기"))
+        self.closeButton = closeButton
         header.addArrangedSubview(title)
         header.addArrangedSubview(NSView())
         header.addArrangedSubview(closeButton)
@@ -939,7 +965,7 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
         transcriptStack.wantsLayer = true
         transcriptStack.setAccessibilityElement(true)
         transcriptStack.setAccessibilityRole(.list)
-        transcriptStack.setAccessibilityLabel("대화 내용")
+        transcriptStack.setAccessibilityLabel(AppText.localized("대화 내용"))
 
         let document = transcriptDocument
         document.translatesAutoresizingMaskIntoConstraints = false
@@ -969,7 +995,7 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
         attachmentStack.translatesAutoresizingMaskIntoConstraints = false
         attachmentStack.setAccessibilityElement(true)
         attachmentStack.setAccessibilityRole(.list)
-        attachmentStack.setAccessibilityLabel("초안 첨부 파일")
+        attachmentStack.setAccessibilityLabel(AppText.localized("초안 첨부 파일"))
         let attachmentDocument = NSView()
         attachmentDocument.translatesAutoresizingMaskIntoConstraints = false
         attachmentDocument.addSubview(attachmentStack)
@@ -996,8 +1022,8 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
             accessibilityDescription: nil
         )
         captureButton.imagePosition = .imageLeading
-        captureButton.setAccessibilityLabel("화면 영역 캡처 첨부")
-        captureButton.setAccessibilityHelp("드래그한 화면 영역을 전송하지 않고 초안에 첨부합니다")
+        captureButton.setAccessibilityLabel(AppText.localized("화면 영역 캡처 첨부"))
+        captureButton.setAccessibilityHelp(AppText.localized("드래그한 화면 영역을 전송하지 않고 초안에 첨부합니다"))
 
         fileButton.target = self
         fileButton.action = #selector(filePressed)
@@ -1006,25 +1032,25 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
             accessibilityDescription: nil
         )
         fileButton.imagePosition = .imageLeading
-        fileButton.setAccessibilityLabel("파일 첨부")
-        fileButton.setAccessibilityHelp("선택한 파일을 전송하지 않고 초안에 첨부합니다")
+        fileButton.setAccessibilityLabel(AppText.localized("파일 첨부"))
+        fileButton.setAccessibilityHelp(AppText.localized("선택한 파일을 전송하지 않고 초안에 첨부합니다"))
 
         let inputButtons = NSStackView(views: [captureButton, fileButton, NSView()])
         inputButtons.orientation = .horizontal
         inputButtons.spacing = 8
 
-        composer.placeholderString = "메시지 입력"
+        composer.placeholderString = AppText.localized("메시지 입력")
         composer.delegate = self
         composer.target = self
         composer.action = #selector(sendPressed)
-        composer.setAccessibilityLabel("대화 메시지")
-        composer.setAccessibilityHelp("Return을 눌러 전송합니다")
+        composer.setAccessibilityLabel(AppText.localized("대화 메시지"))
+        composer.setAccessibilityHelp(AppText.localized("Return을 눌러 전송합니다"))
 
         sendButton.target = self
         sendButton.action = #selector(sendPressed)
         sendButton.keyEquivalent = "\r"
         sendButton.bezelStyle = .rounded
-        sendButton.setAccessibilityLabel("메시지 보내기")
+        sendButton.setAccessibilityLabel(AppText.localized("메시지 보내기"))
         sendButton.setContentHuggingPriority(.required, for: .horizontal)
 
         let composerRow = NSStackView(views: [composer, sendButton])
@@ -1036,16 +1062,16 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
         statusLabel.textColor = .secondaryLabelColor
         statusLabel.maximumNumberOfLines = 2
         statusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        statusLabel.setAccessibilityLabel("YumYum 상태")
+        statusLabel.setAccessibilityLabel(AppText.localized("YumYum 상태"))
 
         retryButton.target = self
         retryButton.action = #selector(retryPressed)
-        retryButton.setAccessibilityLabel("마지막 메시지 재시도")
+        retryButton.setAccessibilityLabel(AppText.localized("마지막 메시지 재시도"))
         retryButton.isHidden = true
 
         cancelButton.target = self
         cancelButton.action = #selector(cancelPressed)
-        cancelButton.setAccessibilityLabel("응답 생성 취소")
+        cancelButton.setAccessibilityLabel(AppText.localized("응답 생성 취소"))
         cancelButton.isHidden = true
 
         let statusRow = NSStackView(views: [statusLabel, retryButton, cancelButton])
@@ -1124,7 +1150,7 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
     func render(
         state: ChatBubbleState,
         canRetry: Bool,
-        agentNotice: String?
+        agentNotice: ChatPanelController.AgentNotice?
     ) {
         guard isViewLoaded else { return }
         renderedState = state
@@ -1149,11 +1175,12 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
         switch state.phase {
         case .idle:
             isBusy = false
-            status = agentNotice ?? "대화를 입력하거나 자료를 첨부하세요."
+            status = agentNotice?.text(language: language)
+                ?? AppText.localized("대화를 입력하거나 자료를 첨부하세요.", language: language)
             isError = agentNotice != nil
         case .capturing:
             isBusy = true
-            status = "드래그하여 캡처할 영역을 선택하세요."
+            status = AppText.localized("드래그하여 캡처할 영역을 선택하세요.", language: language)
             isError = false
         case .sending:
             isBusy = true
@@ -1161,7 +1188,7 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
             isError = false
         case .cancelled:
             isBusy = false
-            status = "전송을 취소했습니다."
+            status = AppText.localized("전송을 취소했습니다.", language: language)
             isError = false
         case let .failed(message):
             isBusy = false
@@ -1214,6 +1241,81 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
         )
     }
 
+    func applyLanguage(_ language: AppLanguage = AppText.language) {
+        self.language = language
+        closeButton?.image = NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: AppText.localized("닫기", language: language))
+        closeButton?.setAccessibilityLabel(AppText.localized("대화 말풍선 닫기", language: language))
+        transcriptStack.setAccessibilityLabel(AppText.localized("대화 내용", language: language))
+        attachmentStack.setAccessibilityLabel(AppText.localized("초안 첨부 파일", language: language))
+        captureButton.title = AppText.localized(english: "Capture", korean: "캡처", language: language)
+        captureButton.setAccessibilityLabel(AppText.localized("화면 영역 캡처 첨부", language: language))
+        captureButton.setAccessibilityHelp(AppText.localized("드래그한 화면 영역을 전송하지 않고 초안에 첨부합니다", language: language))
+        fileButton.title = AppText.localized(english: "Files", korean: "파일", language: language)
+        fileButton.setAccessibilityLabel(AppText.localized("파일 첨부", language: language))
+        fileButton.setAccessibilityHelp(AppText.localized("선택한 파일을 전송하지 않고 초안에 첨부합니다", language: language))
+        sendButton.title = AppText.localized(english: "Send", korean: "보내기", language: language)
+        sendButton.setAccessibilityLabel(AppText.localized("메시지 보내기", language: language))
+        retryButton.title = AppText.localized(english: "Retry", korean: "재시도", language: language)
+        retryButton.setAccessibilityLabel(AppText.localized("마지막 메시지 재시도", language: language))
+        cancelButton.title = AppText.localized(english: "Cancel", korean: "취소", language: language)
+        cancelButton.setAccessibilityLabel(AppText.localized("응답 생성 취소", language: language))
+        composer.placeholderString = AppText.localized(
+            english: "Type a message or attach something",
+            korean: "대화를 입력하거나 자료를 첨부하세요.",
+            language: language
+        )
+        composer.setAccessibilityLabel(AppText.localized("대화 메시지", language: language))
+        composer.setAccessibilityHelp(AppText.localized("Return을 눌러 전송합니다", language: language))
+        statusLabel.language = language
+        statusLabel.setAccessibilityLabel(AppText.localized("YumYum 상태", language: language))
+        emptyTranscriptLabel?.stringValue = AppText.localized("캡처나 파일을 첨부하고 메시지를 보내면 대화가 여기에 쌓입니다.", language: language)
+        emptyTranscriptLabel?.setAccessibilityLabel(AppText.localized("아직 대화가 없습니다", language: language))
+        transcriptStack.arrangedSubviews.compactMap { $0 as? ChatMessageRowView }.forEach {
+            $0.applyLanguage(language)
+        }
+        localizeAttachmentRows(language)
+        let status: String
+        let isError: Bool
+        switch renderedState.phase {
+        case .idle:
+            status = renderedAgentNotice?.text(language: language)
+                ?? AppText.localized("대화를 입력하거나 자료를 첨부하세요.", language: language)
+            isError = renderedAgentNotice != nil
+        case .capturing:
+            status = AppText.localized("드래그하여 캡처할 영역을 선택하세요.", language: language)
+            isError = false
+        case .sending:
+            status = loadingText
+            isError = false
+        case .cancelled:
+            status = AppText.localized("전송을 취소했습니다.", language: language)
+            isError = false
+        case let .failed(message):
+            status = UserFacingErrorRedactor.sanitize(message)
+            isError = true
+        }
+        setStatus(status, isError: isError)
+    }
+
+    private func localizeAttachmentRows(_ language: AppLanguage) {
+        for row in attachmentStack.arrangedSubviews.compactMap({ $0 as? NSStackView }) {
+            guard row.arrangedSubviews.count >= 4,
+                  let label = row.arrangedSubviews[1] as? NSTextField,
+                  let remove = row.arrangedSubviews[3] as? NSButton else { continue }
+            row.setAccessibilityLabel(AppText.localized(
+                english: "Attached file \(label.stringValue)",
+                korean: "첨부 파일 \(label.stringValue)",
+                language: language
+            ))
+            remove.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: AppText.localized("첨부 제거", language: language))
+            remove.setAccessibilityLabel(AppText.localized(
+                english: "Remove \(label.stringValue)",
+                korean: "\(label.stringValue) 첨부 제거",
+                language: language
+            ))
+        }
+    }
+
     private func updateLoadingAnimation() {
         guard renderedState.isSending, isPresented else {
             loadingTask?.cancel()
@@ -1254,8 +1356,8 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
             reduceMotion: reduceMotion
         )
         statusLabel.stringValue = text
-        statusLabel.setAccessibilityLabel("응답 생성 중")
-        statusLabel.setAccessibilityValue("응답 생성 중")
+        statusLabel.setAccessibilityLabel(AppText.localized("응답 생성 중", language: language))
+        statusLabel.setAccessibilityValue(AppText.localized("응답 생성 중", language: language))
         transcriptStack.arrangedSubviews
             .compactMap { $0 as? ChatMessageRowView }
             .forEach { $0.setLoadingText(text) }
@@ -1369,13 +1471,13 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
         emptyTranscriptLabel = nil
         if messages.isEmpty {
             let empty = NSTextField(
-                wrappingLabelWithString: "캡처나 파일을 첨부하고 메시지를 보내면 대화가 여기에 쌓입니다."
+                wrappingLabelWithString: AppText.localized("캡처나 파일을 첨부하고 메시지를 보내면 대화가 여기에 쌓입니다.")
             )
             empty.font = .systemFont(ofSize: 13)
             empty.textColor = theme.palette.chatSecondaryText
             empty.alignment = .center
             empty.maximumNumberOfLines = 3
-            empty.setAccessibilityLabel("아직 대화가 없습니다")
+            empty.setAccessibilityLabel(AppText.localized("아직 대화가 없습니다"))
             emptyTranscriptLabel = empty
             transcriptStack.addArrangedSubview(empty)
             empty.widthAnchor.constraint(equalTo: transcriptStack.widthAnchor, constant: -8).isActive = true
@@ -1416,14 +1518,17 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
             let remove = NSButton(
                 image: NSImage(
                     systemSymbolName: "xmark",
-                    accessibilityDescription: "첨부 제거"
+                    accessibilityDescription: AppText.localized("첨부 제거")
                 )!,
                 target: self,
                 action: #selector(removeAttachmentPressed(_:))
             )
             remove.isBordered = false
             remove.identifier = NSUserInterfaceItemIdentifier(attachment.id.uuidString)
-            remove.setAccessibilityLabel("\(attachment.displayName) 첨부 제거")
+            remove.setAccessibilityLabel(AppText.localized(
+                english: "Remove \(attachment.displayName)",
+                korean: "\(attachment.displayName) 첨부 제거"
+            ))
             let row = NSStackView(views: [icon, label, NSView(), remove])
             row.orientation = .horizontal
             row.alignment = .centerY
@@ -1434,7 +1539,10 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
             row.edgeInsets = NSEdgeInsets(top: 4, left: 7, bottom: 4, right: 5)
             row.setAccessibilityElement(true)
             row.setAccessibilityRole(.group)
-            row.setAccessibilityLabel("첨부 파일 \(attachment.displayName)")
+            row.setAccessibilityLabel(AppText.localized(
+                english: "Attached file \(attachment.displayName)",
+                korean: "첨부 파일 \(attachment.displayName)"
+            ))
             attachmentStack.addArrangedSubview(row)
             label.widthAnchor.constraint(lessThanOrEqualToConstant: 220).isActive = true
         }
@@ -1444,12 +1552,16 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
         statusIsError = isError
         statusLabel.stringValue = text
         statusLabel.setAccessibilityLabel(
-            renderedState.isSending ? "응답 생성 중" : "YumYum 상태"
+            renderedState.isSending
+                ? AppText.localized("응답 생성 중", language: language)
+                : AppText.localized("YumYum 상태", language: language)
         )
         statusLabel.textColor = isError
             ? theme.palette.error
             : theme.palette.chatSecondaryText
-        let accessibilityStatus = renderedState.isSending ? "응답 생성 중" : text
+        let accessibilityStatus = renderedState.isSending
+            ? AppText.localized("응답 생성 중", language: language)
+            : text
         statusLabel.setAccessibilityValue(accessibilityStatus)
         guard lastAnnouncedStatus != accessibilityStatus else { return }
         lastAnnouncedStatus = accessibilityStatus
@@ -1559,8 +1671,8 @@ private final class ChatMessageRowView: NSStackView {
             let label = ThinkingStatusField(labelWithString: loadingText ?? "Yum.")
             label.identifier = NSUserInterfaceItemIdentifier("chat-loading-message")
             label.font = .systemFont(ofSize: 13)
-            label.setAccessibilityLabel("응답 생성 중")
-            label.setAccessibilityValue("응답 생성 중")
+            label.setAccessibilityLabel(AppText.localized("응답 생성 중"))
+            label.setAccessibilityValue(AppText.localized("응답 생성 중"))
             loadingLabel = label
             let loading = NSStackView(views: [progress, label])
             loading.orientation = .horizontal
@@ -1595,15 +1707,30 @@ private final class ChatMessageRowView: NSStackView {
         ])
         messageContent = content
 
-        let role = message.role == .user ? "사용자" : "어시스턴트"
-        let value = message.isLoading ? "응답 생성 중" : message.visibleText
+        let role = message.role == .user ? AppText.localized("사용자") : AppText.localized("어시스턴트")
+        let value = message.isLoading ? AppText.localized("응답 생성 중") : message.visibleText
         setAccessibilityLabel("\(role): \(value)")
+    }
+
+    func applyLanguage(_ language: AppLanguage) {
+        let role = message.role == .user
+            ? AppText.localized("사용자", language: language)
+            : AppText.localized("어시스턴트", language: language)
+        let value = message.isLoading
+            ? AppText.localized("응답 생성 중", language: language)
+            : message.visibleText
+        setAccessibilityLabel("\(role): \(value)")
+        if message.isLoading {
+            (loadingLabel as? ThinkingStatusField)?.language = language
+            loadingLabel?.setAccessibilityLabel(AppText.localized("응답 생성 중", language: language))
+            loadingLabel?.setAccessibilityValue(AppText.localized("응답 생성 중", language: language))
+        }
     }
 
     func setLoadingText(_ text: String) {
         loadingLabel?.stringValue = text
-        loadingLabel?.setAccessibilityLabel("응답 생성 중")
-        loadingLabel?.setAccessibilityValue("응답 생성 중")
+        loadingLabel?.setAccessibilityLabel(AppText.localized("응답 생성 중"))
+        loadingLabel?.setAccessibilityValue(AppText.localized("응답 생성 중"))
     }
 
     func applyTheme(_ theme: AppTheme) {
@@ -1666,8 +1793,12 @@ private final class ChatAuxiliaryButton: NSButton {
 }
 
 private final class ThinkingStatusField: NSTextField {
+    var language = AppText.language
+
     override func accessibilityValue() -> String? {
-        stringValue.hasPrefix("Yum") ? "응답 생성 중" : super.accessibilityValue()
+        stringValue.hasPrefix("Yum")
+            ? AppText.localized("응답 생성 중", language: language)
+            : super.accessibilityValue()
     }
 }
 

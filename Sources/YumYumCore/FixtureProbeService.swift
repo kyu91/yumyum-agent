@@ -17,21 +17,21 @@ public enum FixtureProbeError: Error, Equatable, LocalizedError, Sendable {
     public var errorDescription: String? {
         switch self {
         case let .unsafeFixturePath(path):
-            return "허용되지 않은 fixture 경로입니다: \(path)"
+            return AppText.localized(english: "Fixture path is not allowed: \(path)", korean: "허용되지 않은 fixture 경로입니다: \(path)")
         case let .fixtureUnavailable(path):
-            return "안전한 fixture 실행 파일을 찾을 수 없습니다: \(path)"
+            return AppText.localized(english: "Safe fixture executable not found: \(path)", korean: "안전한 fixture 실행 파일을 찾을 수 없습니다: \(path)")
         case .timedOut:
-            return "안전한 fixture가 제한 시간 안에 응답하지 않았습니다."
+            return AppText.localized("안전한 fixture가 제한 시간 안에 응답하지 않았습니다.")
         case let .failed(exitStatus, standardError):
-            let status = exitStatus.map(String.init) ?? "알 수 없음"
+            let status = exitStatus.map(String.init) ?? AppText.localized("알 수 없음")
             if standardError.isEmpty {
-                return "안전한 fixture 실행이 실패했습니다. 종료 코드: \(status)"
+                return AppText.localized(english: "Safe fixture execution failed. Exit code: \(status)", korean: "안전한 fixture 실행이 실패했습니다. 종료 코드: \(status)")
             }
-            return "안전한 fixture 실행이 실패했습니다. 종료 코드: \(status), 오류: \(standardError)"
+            return AppText.localized(english: "Safe fixture execution failed. Exit code: \(status), error: \(standardError)", korean: "안전한 fixture 실행이 실패했습니다. 종료 코드: \(status), 오류: \(standardError)")
         case .emptyVersionOutput:
-            return "안전한 fixture가 버전 문자열을 반환하지 않았습니다."
+            return AppText.localized("안전한 fixture가 버전 문자열을 반환하지 않았습니다.")
         case let .launchFailed(reason):
-            return "안전한 fixture를 시작하지 못했습니다: \(reason)"
+            return AppText.localized(english: "Could not start the safe fixture: \(reason)", korean: "안전한 fixture를 시작하지 못했습니다: \(reason)")
         }
     }
 }

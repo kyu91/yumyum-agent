@@ -15,31 +15,35 @@ public enum UserFacingErrorCategory: CaseIterable, Equatable, Sendable {
     case processingFailure
 
     public var message: String {
+        message(language: AppText.language)
+    }
+
+    public func message(language: AppLanguage) -> String {
         switch self {
         case .blankInput:
-            "대화 내용을 입력하거나 파일을 선택하세요."
+            AppText.localized(english: "Type a message or choose a file.", korean: "대화 내용을 입력하거나 파일을 선택하세요.", language: language)
         case .invalidFile:
-            "선택한 파일을 사용할 수 없습니다. 파일 형식과 크기를 확인해 주세요."
+            AppText.localized(english: "The selected file cannot be used. Check its type and size.", korean: "선택한 파일을 사용할 수 없습니다. 파일 형식과 크기를 확인해 주세요.", language: language)
         case .blockedCredential:
-            "보안 또는 자격증명 파일은 첨부할 수 없습니다."
+            AppText.localized(english: "Security or credential files cannot be attached.", korean: "보안 또는 자격증명 파일은 첨부할 수 없습니다.", language: language)
         case .agentNotSelected:
-            "기본 에이전트를 먼저 선택하세요."
+            AppText.localized(english: "Select a default agent first.", korean: "기본 에이전트를 먼저 선택하세요.", language: language)
         case .agentUnavailable:
-            "선택한 에이전트를 사용할 수 없어 명시적으로 다시 선택해야 합니다."
+            AppText.localized(english: "The selected agent is unavailable and must be explicitly reselected.", korean: "선택한 에이전트를 사용할 수 없어 명시적으로 다시 선택해야 합니다.", language: language)
         case .agentTimedOut:
-            "에이전트 응답 시간이 초과되었습니다. 다시 시도해 주세요."
+            AppText.localized(english: "The agent response timed out. Try again.", korean: "에이전트 응답 시간이 초과되었습니다. 다시 시도해 주세요.", language: language)
         case .agentFailure:
-            "에이전트가 요청을 처리하지 못했습니다. 다시 시도해 주세요."
+            AppText.localized(english: "The agent could not process the request. Try again.", korean: "에이전트가 요청을 처리하지 못했습니다. 다시 시도해 주세요.", language: language)
         case .busy:
-            "이미 다른 입력을 처리하고 있습니다."
+            AppText.localized(english: "Another input is already being processed.", korean: "이미 다른 입력을 처리하고 있습니다.", language: language)
         case .capturePermission:
-            "화면 캡처 권한이 필요합니다."
+            AppText.localized(english: "Screen recording permission is required.", korean: "화면 캡처 권한이 필요합니다.", language: language)
         case .captureFailure:
-            "화면을 캡처하지 못했습니다. 다시 시도해 주세요."
+            AppText.localized(english: "Could not capture the screen. Try again.", korean: "화면을 캡처하지 못했습니다. 다시 시도해 주세요.", language: language)
         case .cancelled:
-            "입력 처리를 취소했습니다."
+            AppText.localized(english: "Input processing was cancelled.", korean: "입력 처리를 취소했습니다.", language: language)
         case .processingFailure:
-            "입력을 처리하지 못했습니다. 다시 시도해 주세요."
+            AppText.localized(english: "Could not process the input. Try again.", korean: "입력을 처리하지 못했습니다. 다시 시도해 주세요.", language: language)
         }
     }
 }
@@ -84,8 +88,16 @@ public enum UserFacingErrorRedactor {
         _ text: String,
         fallback: UserFacingErrorCategory = .processingFailure
     ) -> String {
-        let safeMessages = Set(UserFacingErrorCategory.allCases.map(\.message))
-        return safeMessages.contains(text) ? text : fallback.message
+        category(forSafeMessage: text, fallback: fallback).message
+    }
+
+    public static func category(
+        forSafeMessage text: String,
+        fallback: UserFacingErrorCategory = .processingFailure
+    ) -> UserFacingErrorCategory {
+        UserFacingErrorCategory.allCases.first { category in
+            AppLanguage.allCases.contains { category.message(language: $0) == text }
+        } ?? fallback
     }
 
     private static func validationCategory(

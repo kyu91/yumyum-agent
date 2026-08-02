@@ -15,22 +15,22 @@ public enum HermesConnectionError: Error, Equatable, LocalizedError, Sendable {
     public var errorDescription: String? {
         switch self {
         case let .pathMustBeAbsolute(path):
-            return "Hermes 경로는 `/`로 시작하는 절대 경로여야 합니다: \(path)"
+            return AppText.localized(english: "The Hermes path must be absolute and begin with `/`: \(path)", korean: "Hermes 경로는 `/`로 시작하는 절대 경로여야 합니다: \(path)")
         case let .executableUnavailable(path):
-            return "실행 가능한 Hermes 파일을 찾을 수 없습니다: \(path)"
+            return AppText.localized(english: "No executable Hermes file was found: \(path)", korean: "실행 가능한 Hermes 파일을 찾을 수 없습니다: \(path)")
         case .timedOut:
-            return "Hermes가 제한 시간 안에 응답하지 않았습니다."
+            return AppText.localized("Hermes가 제한 시간 안에 응답하지 않았습니다.")
         case let .executionFailed(exitStatus, standardError):
-            let status = exitStatus.map(String.init) ?? "알 수 없음"
+            let status = exitStatus.map(String.init) ?? AppText.localized("알 수 없음")
             let detail = standardError.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !detail.isEmpty else {
-                return "Hermes --version 실행이 실패했습니다. 종료 코드: \(status)"
+                return AppText.localized(english: "Hermes --version failed. Exit code: \(status)", korean: "Hermes --version 실행이 실패했습니다. 종료 코드: \(status)")
             }
-            return "Hermes --version 실행이 실패했습니다. 종료 코드: \(status), 오류: \(detail)"
+            return AppText.localized(english: "Hermes --version failed. Exit code: \(status), error: \(detail)", korean: "Hermes --version 실행이 실패했습니다. 종료 코드: \(status), 오류: \(detail)")
         case .emptyVersionOutput:
-            return "Hermes --version이 버전 문자열을 반환하지 않았습니다."
+            return AppText.localized("Hermes --version이 버전 문자열을 반환하지 않았습니다.")
         case let .launchFailed(reason):
-            return "Hermes --version을 시작하지 못했습니다: \(reason)"
+            return AppText.localized(english: "Could not start Hermes --version: \(reason)", korean: "Hermes --version을 시작하지 못했습니다: \(reason)")
         }
     }
 }

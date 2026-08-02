@@ -61,17 +61,17 @@ public enum FeedValidationError: Error, Equatable, LocalizedError, Sendable {
     public var errorDescription: String? {
         switch self {
         case .blankInput:
-            "대화 내용을 입력하거나 파일을 선택하세요."
+            AppText.localized("대화 내용을 입력하거나 파일을 선택하세요.")
         case let .pathMustBeAbsolute(path):
-            "첨부 파일 경로는 절대 경로여야 합니다: \(path)"
+            AppText.localized(english: "Attachment paths must be absolute: \(path)", korean: "첨부 파일 경로는 절대 경로여야 합니다: \(path)")
         case let .unavailableFile(path):
-            "선택한 파일을 사용할 수 없습니다: \(path)"
+            AppText.localized(english: "The selected file cannot be used: \(path)", korean: "선택한 파일을 사용할 수 없습니다: \(path)")
         case let .unsupportedFile(path):
-            "지원하지 않는 파일 형식입니다: \(path)"
+            AppText.localized(english: "Unsupported file type: \(path)", korean: "지원하지 않는 파일 형식입니다: \(path)")
         case let .oversizedFile(path, maximumBytes):
-            "파일당 \(maximumBytes / 1_048_576)MB를 초과할 수 없습니다: \(path)"
+            AppText.localized(english: "Files cannot exceed \(maximumBytes / 1_048_576) MB each: \(path)", korean: "파일당 \(maximumBytes / 1_048_576)MB를 초과할 수 없습니다: \(path)")
         case let .credentialFileBlocked(path):
-            "자격증명 또는 보안 파일은 첨부할 수 없습니다: \(path)"
+            AppText.localized(english: "Credential or security files cannot be attached: \(path)", korean: "자격증명 또는 보안 파일은 첨부할 수 없습니다: \(path)")
         }
     }
 }
@@ -320,7 +320,7 @@ public enum FeedWorkflowError: Error, Equatable, LocalizedError, Sendable {
     case busy
 
     public var errorDescription: String? {
-        "이미 다른 입력을 처리하고 있습니다."
+        AppText.localized("이미 다른 입력을 처리하고 있습니다.")
     }
 }
 
@@ -422,9 +422,9 @@ public actor FeedWorkflow: FeedSubmitting {
         if validated.attachments.count == 1 {
             previewLabel = validated.attachments[0].url.lastPathComponent
         } else if validated.attachments.count > 1 {
-            previewLabel = "파일 \(validated.attachments.count)개"
+            previewLabel = AppText.files(validated.attachments.count)
         } else {
-            previewLabel = "대화"
+            previewLabel = AppText.localized("대화")
         }
         do {
             try Task.checkCancellation()

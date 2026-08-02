@@ -161,7 +161,7 @@ public struct AgentDiscovery: AgentDiscovering, Sendable {
                         path: nil,
                         version: nil,
                         runtimeContract: definitionID.runtimeContract,
-                        availability: .unavailable(reason: "안전한 설치 경로에서 실행 파일을 찾지 못했습니다.")
+                        availability: .unavailable(reason: AppText.localized("안전한 설치 경로에서 실행 파일을 찾지 못했습니다."))
                     )
                 )
             }
@@ -183,7 +183,7 @@ public struct AgentDiscovery: AgentDiscovering, Sendable {
             return unavailable(
                 definitionID,
                 path: executableURL.path,
-                reason: "선택한 절대 경로가 실행 가능한 파일이 아닙니다."
+                reason: AppText.localized("선택한 절대 경로가 실행 가능한 파일이 아닙니다.")
             )
         }
 
@@ -206,7 +206,7 @@ public struct AgentDiscovery: AgentDiscovering, Sendable {
             return unavailable(
                 definitionID,
                 path: executableURL.path,
-                reason: "버전 확인 프로세스를 시작하지 못했습니다."
+                reason: AppText.localized("버전 확인 프로세스를 시작하지 못했습니다.")
             )
         }
 
@@ -216,8 +216,8 @@ public struct AgentDiscovery: AgentDiscovering, Sendable {
                 definitionID,
                 path: executableURL.path,
                 reason: versionResult.timedOut
-                    ? "버전 확인 시간이 초과되었습니다."
-                    : "버전 정보를 확인하지 못했습니다."
+                    ? AppText.localized("버전 확인 시간이 초과되었습니다.")
+                    : AppText.localized("버전 정보를 확인하지 못했습니다.")
             )
         }
 
@@ -238,7 +238,7 @@ public struct AgentDiscovery: AgentDiscovering, Sendable {
                     definitionID,
                     path: executableURL.path,
                     version: version,
-                    reason: "로컬 CLI 도움말 계약을 확인하지 못했습니다."
+                    reason: AppText.localized("로컬 CLI 도움말 계약을 확인하지 못했습니다.")
                 )
             }
 
@@ -249,7 +249,7 @@ public struct AgentDiscovery: AgentDiscovering, Sendable {
                     definitionID,
                     path: executableURL.path,
                     version: version,
-                    reason: "설치된 CLI의 공식 로컬 실행 계약이 지원 범위와 다릅니다."
+                    reason: AppText.localized("설치된 CLI의 공식 로컬 실행 계약이 지원 범위와 다릅니다.")
                 )
             }
         }

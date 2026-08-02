@@ -87,32 +87,32 @@ private struct YumYumMenu: View {
     @ObservedObject var appDelegate: YumYumAppDelegate
 
     var body: some View {
-        Button("YumYum 열기") {
+        Button(AppText.localized("YumYum 열기")) {
             NSApplication.shared.activate(ignoringOtherApps: true)
             openWindow(id: "main")
         }
 
         Toggle(
-            "플로팅 펫 보이기",
+            AppText.localized("플로팅 펫 보이기"),
             isOn: Binding(
                 get: { appDelegate.petVisibility.isVisible },
                 set: { appDelegate.setPetVisible($0) }
             )
         )
-        .accessibilityHint("화면 우하단의 YumYum 펫 표시 여부를 전환합니다")
+        .accessibilityHint(AppText.localized("화면 우하단의 YumYum 펫 표시 여부를 전환합니다"))
 
-        Button("빠른 메뉴 열기") {
+        Button(AppText.localized("빠른 메뉴 열기")) {
             appDelegate.showQuickMenu()
         }
 
         Divider()
 
         Text(menuStatus)
-        Text("외부 변경: 비활성화")
+        Text(AppText.localized("외부 변경: 비활성화"))
 
         Divider()
 
-        Button("YumYum 종료") {
+        Button(AppText.localized("YumYum 종료")) {
             NSApplication.shared.terminate(nil)
         }
         .keyboardShortcut("q")
@@ -120,24 +120,27 @@ private struct YumYumMenu: View {
 
     private var menuStatus: String {
         if let selected = viewModel.agentSnapshot.selectedInstallation {
-            return "기본 에이전트: \(selected.definitionID.displayName)"
+            return AppText.localized(
+                english: "Default agent: \(selected.definitionID.displayName)",
+                korean: "기본 에이전트: \(selected.definitionID.displayName)"
+            )
         }
         if viewModel.agentSnapshot.requiresExplicitReselection {
-            return "기본 에이전트: 다시 선택 필요"
+            return AppText.localized("기본 에이전트: 다시 선택 필요")
         }
         switch viewModel.connectionState {
         case .idle:
-            return "Hermes 연결: 확인 전"
+            return AppText.localized("Hermes 연결: 확인 전")
         case .loading:
-            return "Hermes 연결: 확인 중"
+            return AppText.localized("Hermes 연결: 확인 중")
         case .success:
-            return "Hermes 연결: 성공"
+            return AppText.localized("Hermes 연결: 성공")
         case .pathError:
-            return "Hermes 연결: 경로 오류"
+            return AppText.localized("Hermes 연결: 경로 오류")
         case .executionError:
-            return "Hermes 연결: 실행 오류"
+            return AppText.localized("Hermes 연결: 실행 오류")
         case .timedOut:
-            return "Hermes 연결: 시간 초과"
+            return AppText.localized("Hermes 연결: 시간 초과")
         }
     }
 }
@@ -157,15 +160,16 @@ private struct YumYumContentView: View {
             header.padding(.horizontal, 24).padding(.top, 18)
             TabView {
                 settingsScroll {
+                    languageSection
                     themeSection
                     shortcutSection
                     safetySection
                 }
-                .tabItem { Label("General", systemImage: "gearshape") }
+                .tabItem { Label(AppText.localized(english: "General", korean: "일반"), systemImage: "gearshape") }
                 .accessibilityIdentifier("settings-tab-general")
 
                 settingsScroll { agentSection }
-                    .tabItem { Label("Agent", systemImage: "cpu") }
+                    .tabItem { Label(AppText.localized(english: "Agent", korean: "에이전트"), systemImage: "cpu") }
                     .accessibilityIdentifier("settings-tab-agent")
 
                 settingsScroll { soulSection }
@@ -176,7 +180,7 @@ private struct YumYumContentView: View {
                     hermesPathSection
                     fixtureSection
                 }
-                .tabItem { Label("Diagnostics", systemImage: "stethoscope") }
+                .tabItem { Label(AppText.localized(english: "Diagnostics", korean: "진단"), systemImage: "stethoscope") }
                 .accessibilityIdentifier("settings-tab-diagnostics")
             }
         }
@@ -195,17 +199,17 @@ private struct YumYumContentView: View {
             Task { await viewModel.flushSoul() }
         }
         .confirmationDialog(
-            "Soul 설정을 초기화할까요?",
+            AppText.localized("Soul 설정을 초기화할까요?"),
             isPresented: $confirmsSoulReset,
             titleVisibility: .visible
         ) {
-            Button("초기화", role: .destructive) {
+            Button(AppText.localized("초기화"), role: .destructive) {
                 soulProfile = .empty
                 viewModel.updateSoulDraft(.empty)
                 soulSaveTask?.cancel()
                 Task { await viewModel.resetSoul() }
             }
-            Button("취소", role: .cancel) {}
+            Button(AppText.localized("취소"), role: .cancel) {}
         }
     }
 
@@ -222,25 +226,25 @@ private struct YumYumContentView: View {
     private var soulSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             Label(
-                "비밀, 자격증명 또는 민감한 개인정보를 입력하지 마세요.",
+                AppText.localized("비밀, 자격증명 또는 민감한 개인정보를 입력하지 마세요."),
                 systemImage: "exclamationmark.shield"
             )
             .foregroundStyle(.orange)
             .accessibilityIdentifier("soul-sensitive-data-warning")
 
-            soulField("이름", keyPath: \.name, identifier: "soul-name")
-            soulField("역할 / 정체성", keyPath: \.role, identifier: "soul-role")
-            soulField("성격", keyPath: \.personality, identifier: "soul-personality")
-            soulField("말투", keyPath: \.speakingStyle, identifier: "soul-speaking-style")
-            soulField("핵심 가치", keyPath: \.coreValues, identifier: "soul-core-values")
-            soulField("좋아하는 것", keyPath: \.likes, identifier: "soul-likes")
-            soulField("싫어하거나 피할 것", keyPath: \.dislikes, identifier: "soul-dislikes")
-            soulField("사용자를 부르는 호칭", keyPath: \.userAddress, identifier: "soul-user-address")
-            soulField("행동 원칙", keyPath: \.behaviorPrinciples, identifier: "soul-behavior-principles")
-            soulField("추가 지침", keyPath: \.additionalInstructions, identifier: "soul-additional-instructions")
+            soulField(AppText.localized("이름"), keyPath: \.name, identifier: "soul-name")
+            soulField(AppText.localized("역할 / 정체성"), keyPath: \.role, identifier: "soul-role")
+            soulField(AppText.localized("성격"), keyPath: \.personality, identifier: "soul-personality")
+            soulField(AppText.localized("말투"), keyPath: \.speakingStyle, identifier: "soul-speaking-style")
+            soulField(AppText.localized("핵심 가치"), keyPath: \.coreValues, identifier: "soul-core-values")
+            soulField(AppText.localized("좋아하는 것"), keyPath: \.likes, identifier: "soul-likes")
+            soulField(AppText.localized("싫어하거나 피할 것"), keyPath: \.dislikes, identifier: "soul-dislikes")
+            soulField(AppText.localized("사용자를 부르는 호칭"), keyPath: \.userAddress, identifier: "soul-user-address")
+            soulField(AppText.localized("행동 원칙"), keyPath: \.behaviorPrinciples, identifier: "soul-behavior-principles")
+            soulField(AppText.localized("추가 지침"), keyPath: \.additionalInstructions, identifier: "soul-additional-instructions")
 
             if soulProfile != soulProfile.normalized {
-                Text("저장 시 공백을 정리하고 필드당 2,000자, 전체 12,000자로 제한합니다.")
+                Text(AppText.localized("저장 시 공백을 정리하고 필드당 2,000자, 전체 12,000자로 제한합니다."))
                     .font(.callout)
                     .foregroundStyle(.orange)
                     .accessibilityIdentifier("soul-normalization-warning")
@@ -252,7 +256,7 @@ private struct YumYumContentView: View {
                     .foregroundStyle(viewModel.soulSaveState == .failed ? .red : .secondary)
                     .accessibilityIdentifier("soul-save-status")
                 Spacer()
-                Button("기본값으로 초기화", role: .destructive) {
+                Button(AppText.localized("기본값으로 초기화"), role: .destructive) {
                     confirmsSoulReset = true
                 }
                 .accessibilityIdentifier("soul-reset-button")
@@ -277,7 +281,7 @@ private struct YumYumContentView: View {
                 }
             ))
             .font(.body)
-            .frame(minHeight: title == "이름" ? 38 : 64)
+            .frame(minHeight: title == AppText.localized("이름") ? 38 : 64)
             .overlay(RoundedRectangle(cornerRadius: 6).stroke(.separator))
             .accessibilityLabel(title)
             .accessibilityIdentifier(identifier)
@@ -315,11 +319,11 @@ private struct YumYumContentView: View {
 
     private var soulSaveText: String {
         switch viewModel.soulSaveState {
-        case .idle: "저장된 Soul을 불러왔습니다"
-        case .saving: "저장 중…"
-        case .saved: "저장됨"
-        case .savedWithNormalization: "정리 및 길이 제한 후 저장됨"
-        case .failed: "저장할 수 없습니다"
+        case .idle: AppText.localized("저장된 Soul을 불러왔습니다")
+        case .saving: AppText.localized("저장 중…")
+        case .saved: AppText.localized("저장됨")
+        case .savedWithNormalization: AppText.localized("정리 및 길이 제한 후 저장됨")
+        case .failed: AppText.localized("저장할 수 없습니다")
         }
     }
 
@@ -336,7 +340,7 @@ private struct YumYumContentView: View {
     private var themeSection: some View {
         GroupBox {
             Picker(
-                "테마",
+                AppText.localized("테마"),
                 selection: Binding(
                     get: { appDelegate.currentTheme },
                     set: { appDelegate.setTheme($0) }
@@ -347,11 +351,41 @@ private struct YumYumContentView: View {
                 }
             }
             .pickerStyle(.segmented)
-            .accessibilityHint("YumYum 화면의 밝은 테마와 어두운 테마를 전환합니다")
+            .id(appDelegate.currentLanguage)
+            .accessibilityHint(AppText.localized("YumYum 화면의 밝은 테마와 어두운 테마를 전환합니다"))
             .padding(.top, 4)
         } label: {
-            Label("화면 테마", systemImage: "circle.lefthalf.filled")
+            Label(AppText.localized("화면 테마"), systemImage: "circle.lefthalf.filled")
                 .font(.headline)
+        }
+    }
+
+    private var languageSection: some View {
+        GroupBox {
+            Picker(
+                AppText.localized(english: "Language", korean: "언어"),
+                selection: Binding(
+                    get: { appDelegate.currentLanguage },
+                    set: { appDelegate.setLanguage($0) }
+                )
+            ) {
+                ForEach(AppLanguage.allCases) { language in
+                    Text(language.displayName).tag(language)
+                }
+            }
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier("settings-language-picker")
+            .accessibilityHint(AppText.localized(
+                english: "Changes the YumYum interface language immediately.",
+                korean: "YumYum 화면 언어를 즉시 변경합니다."
+            ))
+            .padding(.top, 4)
+        } label: {
+            Label(
+                AppText.localized(english: "Language", korean: "언어"),
+                systemImage: "globe"
+            )
+            .font(.headline)
         }
     }
 
@@ -365,7 +399,7 @@ private struct YumYumContentView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("YumYum")
                     .font(.title.bold())
-                Text("검증된 로컬 에이전트와 빠른 메뉴")
+                Text(AppText.localized("검증된 로컬 에이전트와 빠른 메뉴"))
                     .foregroundStyle(.secondary)
             }
 
@@ -385,7 +419,7 @@ private struct YumYumContentView: View {
         GroupBox {
             VStack(alignment: .leading, spacing: 10) {
                 if viewModel.isDiscoveringAgents {
-                    ProgressView("안전한 설치 경로 확인 중…")
+                    ProgressView(AppText.localized("안전한 설치 경로 확인 중…"))
                         .controlSize(.small)
                 }
 
@@ -400,7 +434,7 @@ private struct YumYumContentView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(installation.definitionID.displayName)
                                 .font(.callout.weight(.semibold))
-                            Text(installation.path ?? "안전한 설치 경로에서 찾지 못함")
+                            Text(installation.path ?? AppText.localized("안전한 설치 경로에서 찾지 못함"))
                                 .font(.system(.caption, design: .monospaced))
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
@@ -414,8 +448,8 @@ private struct YumYumContentView: View {
 
                         Button(
                             viewModel.agentSnapshot.selectedInstallation?.id == installation.id
-                                ? "선택됨"
-                                : "기본으로 선택"
+                                ? AppText.localized("선택됨")
+                                : AppText.localized("기본으로 선택")
                         ) {
                             guard let path = installation.path else { return }
                             Task {
@@ -434,7 +468,7 @@ private struct YumYumContentView: View {
                 }
 
                 HStack {
-                    Picker("에이전트", selection: $explicitAgentID) {
+                    Picker(AppText.localized("에이전트"), selection: $explicitAgentID) {
                         ForEach(AgentDefinitionID.allCases, id: \.self) { definitionID in
                             Text(definitionID.displayName).tag(definitionID)
                         }
@@ -445,7 +479,7 @@ private struct YumYumContentView: View {
                     TextField("/absolute/path/to/executable", text: $explicitAgentPath)
                         .textFieldStyle(.roundedBorder)
 
-                    Button("경로 확인") {
+                    Button(AppText.localized("경로 확인")) {
                         let path = explicitAgentPath.trimmingCharacters(in: .whitespacesAndNewlines)
                         guard NSString(string: path).isAbsolutePath else { return }
                         Task {
@@ -459,14 +493,14 @@ private struct YumYumContentView: View {
                     )
                 }
 
-                Button("다시 검색") {
+                Button(AppText.localized("다시 검색")) {
                     Task { await viewModel.refreshAgents(trigger: .manualRescan) }
                 }
                 .disabled(viewModel.isDiscoveringAgents)
             }
             .padding(.top, 4)
         } label: {
-            Label("로컬 에이전트", systemImage: "cpu")
+            Label(AppText.localized("로컬 에이전트"), systemImage: "cpu")
                 .font(.headline)
         }
     }
@@ -475,7 +509,7 @@ private struct YumYumContentView: View {
         GroupBox {
             VStack(alignment: .leading, spacing: 10) {
                 Picker(
-                    "빠른 메뉴 전역 단축키",
+                    AppText.localized("빠른 메뉴 전역 단축키"),
                     selection: Binding(
                         get: { appDelegate.shortcutChoice },
                         set: { appDelegate.setShortcutChoice($0) }
@@ -486,15 +520,15 @@ private struct YumYumContentView: View {
                     }
                 }
                 .pickerStyle(.segmented)
-                .accessibilityHint("포커스를 강제로 가져오지 않고 펫 옆 빠른 메뉴를 엽니다")
+                .accessibilityHint(AppText.localized("포커스를 강제로 가져오지 않고 펫 옆 빠른 메뉴를 엽니다"))
 
-                Button("빠른 메뉴 지금 열기") {
+                Button(AppText.localized("빠른 메뉴 지금 열기")) {
                     appDelegate.showQuickMenu()
                 }
             }
             .padding(.top, 4)
         } label: {
-            Label("빠른 메뉴", systemImage: "keyboard")
+            Label(AppText.localized("빠른 메뉴"), systemImage: "keyboard")
                 .font(.headline)
         }
     }
@@ -502,7 +536,7 @@ private struct YumYumContentView: View {
     private func agentDetail(_ installation: AgentInstallation) -> String {
         switch installation.availability {
         case .available:
-            return installation.version ?? "버전 확인 완료"
+            return installation.version ?? AppText.localized("버전 확인 완료")
         case let .unavailable(reason):
             return reason
         }
@@ -514,7 +548,7 @@ private struct YumYumContentView: View {
                 TextField("/absolute/path/to/hermes", text: $viewModel.hermesPath)
                     .textFieldStyle(.roundedBorder)
                     .disabled(viewModel.connectionState == .loading)
-                    .accessibilityLabel("Hermes 실행 파일 절대 경로")
+                    .accessibilityLabel(AppText.localized("Hermes 실행 파일 절대 경로"))
                     .accessibilityIdentifier("hermes-path-field")
 
                 Label(pathStatusText, systemImage: pathStatusIcon)
@@ -531,29 +565,29 @@ private struct YumYumContentView: View {
                             connectionTask = nil
                         }
                     } label: {
-                        Label("연결 확인", systemImage: "bolt.horizontal.circle.fill")
+                        Label(AppText.localized("연결 확인"), systemImage: "bolt.horizontal.circle.fill")
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(!viewModel.canCheckHermesConnection)
                     .accessibilityIdentifier("check-hermes-connection-button")
-                    .accessibilityHint("선택한 실행 파일에 --version 인자만 전달합니다")
+                    .accessibilityHint(AppText.localized("선택한 실행 파일에 --version 인자만 전달합니다"))
 
                     if viewModel.connectionState == .loading {
-                        Button("취소") {
+                        Button(AppText.localized("취소")) {
                             connectionTask?.cancel()
                         }
                         .accessibilityIdentifier("cancel-hermes-connection-button")
                     }
                 }
 
-                Text("경로는 저장하지 않습니다. 연결 확인은 선택한 실행 파일에 `--version` 인자만 직접 전달합니다.")
+                Text(AppText.localized("경로는 저장하지 않습니다. 연결 확인은 선택한 실행 파일에 `--version` 인자만 직접 전달합니다."))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, 4)
         } label: {
-            Label("Hermes 수동 경로 진단", systemImage: "terminal")
+            Label(AppText.localized("Hermes 수동 경로 진단"), systemImage: "terminal")
                 .font(.headline)
         }
     }
@@ -561,7 +595,7 @@ private struct YumYumContentView: View {
     private var fixtureSection: some View {
         GroupBox {
             VStack(alignment: .leading, spacing: 12) {
-                Text("주 연결과 분리된 패키지 fixture에 `--version`을 전달해 개발 환경만 점검합니다.")
+                Text(AppText.localized("주 연결과 분리된 패키지 fixture에 `--version`을 전달해 개발 환경만 점검합니다."))
                     .font(.callout)
                     .foregroundStyle(.secondary)
 
@@ -579,16 +613,16 @@ private struct YumYumContentView: View {
                         await viewModel.runFixtureProbe()
                     }
                 } label: {
-                    Label("Fixture Probe 실행", systemImage: "play.fill")
+                    Label(AppText.localized("Fixture Probe 실행"), systemImage: "play.fill")
                 }
                 .buttonStyle(.bordered)
                 .disabled(viewModel.probeState == .loading)
-                .accessibilityHint("패키지에 포함된 테스트 fixture의 버전만 확인합니다")
+                .accessibilityHint(AppText.localized("패키지에 포함된 테스트 fixture의 버전만 확인합니다"))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, 4)
         } label: {
-            Label("개발 진단", systemImage: "wrench.and.screwdriver")
+            Label(AppText.localized("개발 진단"), systemImage: "wrench.and.screwdriver")
                 .font(.headline)
         }
     }
@@ -597,18 +631,18 @@ private struct YumYumContentView: View {
     private var connectionStatus: some View {
         switch viewModel.connectionState {
         case .idle:
-            Label("연결 확인 전", systemImage: "circle.dashed")
+            Label(AppText.localized("연결 확인 전"), systemImage: "circle.dashed")
                 .foregroundStyle(.secondary)
         case .loading:
             HStack(spacing: 8) {
                 ProgressView()
                     .controlSize(.small)
-                Text("Hermes --version 확인 중…")
+                Text(AppText.localized("Hermes --version 확인 중…"))
             }
             .accessibilityElement(children: .combine)
         case let .success(version):
             VStack(alignment: .leading, spacing: 4) {
-                Label("Hermes 연결 확인 성공", systemImage: "checkmark.circle.fill")
+                Label(AppText.localized("Hermes 연결 확인 성공"), systemImage: "checkmark.circle.fill")
                     .foregroundStyle(.green)
                 Text(verbatim: version)
                     .font(.system(.callout, design: .monospaced))
@@ -617,20 +651,20 @@ private struct YumYumContentView: View {
             }
         case let .pathError(message):
             connectionError(
-                title: "Hermes 경로 오류",
+                title: AppText.localized("Hermes 경로 오류"),
                 message: message,
                 systemImage: "folder.badge.questionmark"
             )
         case let .executionError(message):
             connectionError(
-                title: "Hermes 실행 오류",
+                title: AppText.localized("Hermes 실행 오류"),
                 message: message,
                 systemImage: "xmark.octagon.fill"
             )
         case .timedOut:
             connectionError(
-                title: "Hermes 연결 확인 시간 초과",
-                message: "Hermes가 제한 시간 안에 응답하지 않았습니다.",
+                title: AppText.localized("Hermes 연결 확인 시간 초과"),
+                message: AppText.localized("Hermes가 제한 시간 안에 응답하지 않았습니다."),
                 systemImage: "clock.badge.exclamationmark"
             )
         }
@@ -654,18 +688,18 @@ private struct YumYumContentView: View {
     private var probeStatus: some View {
         switch viewModel.probeState {
         case .idle:
-            Label("Probe 대기 중", systemImage: "circle.dashed")
+            Label(AppText.localized("Probe 대기 중"), systemImage: "circle.dashed")
                 .foregroundStyle(.secondary)
         case .loading:
             HStack(spacing: 8) {
                 ProgressView()
                     .controlSize(.small)
-                Text("Fixture 확인 중…")
+                Text(AppText.localized("Fixture 확인 중…"))
             }
             .accessibilityElement(children: .combine)
         case let .success(version):
             VStack(alignment: .leading, spacing: 4) {
-                Label("Fixture probe 성공", systemImage: "checkmark.circle.fill")
+                Label(AppText.localized("Fixture probe 성공"), systemImage: "checkmark.circle.fill")
                     .foregroundStyle(.green)
                 Text(version)
                     .font(.system(.callout, design: .monospaced))
@@ -673,7 +707,7 @@ private struct YumYumContentView: View {
             }
         case let .failure(message):
             VStack(alignment: .leading, spacing: 4) {
-                Label("Fixture probe 오류", systemImage: "xmark.octagon.fill")
+                Label(AppText.localized("Fixture probe 오류"), systemImage: "xmark.octagon.fill")
                     .foregroundStyle(.red)
                 Text(message)
                     .font(.callout)
@@ -689,13 +723,13 @@ private struct YumYumContentView: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
                 HStack {
-                    Text("외부 변경")
+                    Text(AppText.localized("외부 변경"))
                         .font(.callout.weight(.semibold))
                     Text("TASK-SCOPED APPROVAL · FAIL-CLOSED")
                         .font(.caption2.weight(.bold))
                         .foregroundStyle(.secondary)
                 }
-                Text("YumYum은 자격증명을 읽지 않으며 외부 변경은 Task 한정 일회성 승인 전까지 차단합니다.")
+                Text(AppText.localized("YumYum은 자격증명을 읽지 않으며 외부 변경은 Task 한정 일회성 승인 전까지 차단합니다."))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -706,11 +740,11 @@ private struct YumYumContentView: View {
     private var pathStatusText: String {
         switch viewModel.hermesPathStatus {
         case .empty:
-            return "자동 발견 결과와 별개로 진단할 Hermes 절대 경로를 입력할 수 있습니다."
+            return AppText.localized("자동 발견 결과와 별개로 진단할 Hermes 절대 경로를 입력할 수 있습니다.")
         case .invalidAbsolutePath:
-            return "상대 경로는 허용하지 않습니다. `/`로 시작하는 경로를 입력하세요."
+            return AppText.localized("상대 경로는 허용하지 않습니다. `/`로 시작하는 경로를 입력하세요.")
         case .absolutePathReady:
-            return "절대 경로 형식을 확인했습니다. 연결 확인을 실행할 수 있습니다."
+            return AppText.localized("절대 경로 형식을 확인했습니다. 연결 확인을 실행할 수 있습니다.")
         }
     }
 

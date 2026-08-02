@@ -1,8 +1,8 @@
 # Release readiness
 
-YumYum 0.1.0은 현재 소스 빌드용 developer preview입니다. Developer ID 서명, hardened runtime, 공증, 배포 체크섬과 릴리스 자동화는 **구현되지 않았습니다**.
+YumYum 0.1.0 is a source-build developer preview. Developer ID signing, hardened runtime, notarization, distribution checksums, and release automation are **not implemented**.
 
-## 현재 source gate
+## Current source gate
 
 ```sh
 swift build
@@ -11,20 +11,20 @@ swift test
 git diff --check
 ```
 
-`swift test`가 `Testing` 모듈을 찾지 못해서 실패한 경우에만 [README의 Command Line Tools 전체 회귀 명령](../README.md#소스-빌드와-실행)을 실행하며, 이 fallback도 성공해야 source gate를 통과합니다. 다른 실패에는 적용하지 않습니다.
+Only when `swift test` cannot find `Testing` under standalone Command Line Tools, run the [full fallback command](../README.md#build-and-run-from-source); it must also pass. The fallback does not apply to other failures.
 
-번들에는 `Contents/MacOS/YumYum`, `Contents/Resources/yumyum-process-fixture`, `Contents/Info.plist`가 있어야 하며 fixture는 프로세스 진단·회귀 경계용입니다.
+The bundle must contain `Contents/MacOS/YumYum`, `Contents/Resources/yumyum-process-fixture`, and `Contents/Info.plist`. The fixture exists for process diagnostics and regression boundaries.
 
-## 릴리스 전 결정 사항
+## Decisions required before release
 
-- 번들 ID `kr.yumyum.phase0` 유지 또는 공개용 ID 확정
-- Apple Silicon 전용 여부와 Intel/universal binary 지원·검증 범위
-- Developer ID Application 인증서 소유자와 보관·회전 절차
-- hardened runtime, 필요한 entitlements와 앱 샌드박스 전략
-- 화면 기록, 입력 모니터링, 손쉬운 사용 등 TCC 권한 설명과 clean-machine 검증
-- fixture 포함 필요성과 배포 번들 노출 위험
-- ZIP/DMG 형식, 공증·stapling, SHA-256 체크섬 및 검증 안내
-- 깨끗한 macOS 계정에서 설치, 최초 실행, CLI 발견, 캡처, VoiceOver, Reduce Motion 검증
-- 실패한 릴리스 철회·교체·사용자 공지와 이전 버전 rollback 정책
+- Keep bundle ID `kr.yumyum.phase0` or choose a public ID.
+- Define and verify Apple Silicon-only, Intel, or universal binary support.
+- Assign ownership, custody, and rotation for the Developer ID Application certificate.
+- Define hardened runtime, required entitlements, and app sandbox strategy.
+- Document TCC permissions such as Screen Recording, Input Monitoring, and Accessibility, and verify on a clean machine.
+- Decide whether the fixture is needed and assess exposure risk in a distribution bundle.
+- Choose ZIP/DMG format, notarization/stapling, SHA-256 checksums, and verification guidance.
+- Verify installation, first launch, CLI discovery, capture, VoiceOver, and Reduce Motion in a clean macOS account.
+- Define withdrawal, replacement, user notification, and rollback policy for failed releases.
 
-향후 흐름은 clean source gate → release archive → Developer ID 서명 → hardened runtime/entitlement 확인 → 공증·stapling → clean-machine 검증 → 체크섬 게시 순서로 설계해야 합니다. 자격증명은 저장소나 CI 로그에 두지 않습니다.
+A future flow should be: clean source gate → release archive → Developer ID signing → hardened runtime/entitlement verification → notarization/stapling → clean-machine verification → checksum publication. Never put credentials in the repository or CI logs.

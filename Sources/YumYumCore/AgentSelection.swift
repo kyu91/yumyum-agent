@@ -101,11 +101,11 @@ public enum AgentSelectionError: Error, Equatable, LocalizedError, Sendable {
     public var errorDescription: String? {
         switch self {
         case .noSelection:
-            "기본 에이전트를 먼저 선택하세요."
+            AppText.localized("기본 에이전트를 먼저 선택하세요.")
         case let .unavailable(definitionID, path):
-            "실행 가능한 \(definitionID.displayName)을 확인할 수 없습니다: \(path)"
+            AppText.localized(english: "Could not validate executable \(definitionID.displayName): \(path)", korean: "실행 가능한 \(definitionID.displayName)을 확인할 수 없습니다: \(path)")
         case .explicitReselectionRequired:
-            "선택한 에이전트를 사용할 수 없어 명시적으로 다시 선택해야 합니다."
+            AppText.localized("선택한 에이전트를 사용할 수 없어 명시적으로 다시 선택해야 합니다.")
         }
     }
 }
@@ -143,7 +143,7 @@ public actor AgentRegistry: AgentSelectionValidating {
             return snapshot(
                 selection: .unavailable(
                     reference: selectedReference,
-                    reason: "이전에 사용할 수 없었던 에이전트는 명시적으로 다시 선택해야 합니다."
+                    reason: AppText.localized("이전에 사용할 수 없었던 에이전트는 명시적으로 다시 선택해야 합니다.")
                 )
             )
         }
@@ -209,7 +209,7 @@ public actor AgentRegistry: AgentSelectionValidating {
             return snapshot(
                 selection: .unavailable(
                     reference: selectedReference,
-                    reason: "선택한 에이전트를 명시적으로 다시 선택해야 합니다."
+                    reason: AppText.localized("선택한 에이전트를 명시적으로 다시 선택해야 합니다.")
                 )
             )
         }
@@ -247,7 +247,7 @@ public actor AgentRegistry: AgentSelectionValidating {
     private func unavailableReason(for reference: SelectedAgentReference) -> String {
         guard let match = exactInstallation(for: reference),
               case let .unavailable(reason) = match.availability else {
-            return "저장된 정확한 실행 경로를 찾지 못했습니다."
+            return AppText.localized("저장된 정확한 실행 경로를 찾지 못했습니다.")
         }
         return reason
     }
