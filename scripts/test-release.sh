@@ -44,6 +44,15 @@ check_sources() {
     [ "$(grep -Fc "$CHECKOUT" "$WORKFLOW")" -eq 2 ]
     [ "$(grep -Fc 'ref: ${{ github.sha }}' "$WORKFLOW")" -eq 2 ] || return 1
     [ "$(grep -Fc 'git rev-parse "refs/tags/${GITHUB_REF_NAME}^{commit}"' "$WORKFLOW")" -eq 3 ] || return 1
+    XCODE_SELECT='sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer'
+    [ "$(grep -Fc "$XCODE_SELECT" "$WORKFLOW")" -eq 2 ] || return 1
+    [ "$(grep -Fc 'xcodebuild -version' "$WORKFLOW")" -eq 2 ] || return 1
+    [ "$(grep -Fc 'test "$SWIFT_MAJOR" -ge 6' "$WORKFLOW")" -eq 2 ] || return 1
+    FIRST_SELECT_LINE=$(grep -nF "$XCODE_SELECT" "$WORKFLOW" | sed -n '1s/:.*//p')
+    SECOND_SELECT_LINE=$(grep -nF "$XCODE_SELECT" "$WORKFLOW" | sed -n '2s/:.*//p')
+    BUILD_LINE=$(line_number "$WORKFLOW" 'swift build')
+    SIGN_LINE=$(line_number "$WORKFLOW" 'Import Developer ID certificate')
+    [ "$FIRST_SELECT_LINE" -lt "$BUILD_LINE" ] && [ "$SECOND_SELECT_LINE" -lt "$SIGN_LINE" ] || return 1
     ! grep -Fq 'actions/checkout@v4' "$WORKFLOW"
     TAG_LINE=$(line_number "$WORKFLOW" 'git rev-parse "refs/tags/${GITHUB_REF_NAME}^{commit}"')
     CREATE_LINE=$(line_number "$WORKFLOW" 'gh release create "$GITHUB_REF_NAME"')
@@ -84,6 +93,7 @@ mutate_and_reject() {
 
 mutate_and_reject "printf '%s\n' 'test bundle = kr.yumyum.phase0' >> '$TEST_DIR/mutated/scripts/verify-release.sh'"
 mutate_and_reject "sed -i '' '/ref: \${{ github.sha }}/d' '$TEST_DIR/mutated/.github/workflows/release.yml'"
+mutate_and_reject "sed -i '' '/sudo xcode-select/d' '$TEST_DIR/mutated/.github/workflows/release.yml'"
 mutate_and_reject "sed -i '' '/git rev-parse \"refs\/tags\//d' '$TEST_DIR/mutated/.github/workflows/release.yml'"
 mutate_and_reject "sed -i '' '/gh release edit .*--draft=false/{h;d;}; /gh release upload/{x;p;x;}' '$TEST_DIR/mutated/.github/workflows/release.yml'"
 mutate_and_reject "sed -i '' '/xcrun stapler staple/d' '$TEST_DIR/mutated/scripts/package-release.sh'; printf '%s\n' 'xcrun stapler staple \"\$DMG_PATH\"' >> '$TEST_DIR/mutated/scripts/package-release.sh'"
