@@ -423,6 +423,10 @@ private final class CaptureOverlayView: NSView {
 
     override var acceptsFirstResponder: Bool { true }
 
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .crosshair)
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         let dimPath = NSBezierPath(rect: bounds)
