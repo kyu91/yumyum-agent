@@ -2,7 +2,7 @@
 
 YumYum Agent is a Swift/AppKit macOS app that lets you “feed” a selected screen area or local file to a floating pet and read responses from an installed local CLI agent in native bubbles and chat.
 
-> **Developer preview (0.1.0):** YumYum Agent is currently built from source. Distribution signing, notarization, and sandboxed distribution have not been implemented or verified.
+> **Developer preview (0.1.0):** The release pipeline is implemented, but no public signed/notarized release has been verified or published yet.
 
 ## Features
 
@@ -19,7 +19,18 @@ YumYum Agent is a Swift/AppKit macOS app that lets you “feed” a selected scr
 - Xcode or Command Line Tools with Swift 6.0 or later
 - One supported CLI below, installed and signed in separately
 
-Manual verification currently targets Apple Silicon macOS. Intel Mac support is not verified.
+This Apple Silicon Command Line Tools host has built and mounted a local unsigned Universal DMG, verified its checksum, and proven `x86_64` and `arm64` slices in both the app executable and fixture. Signed/notarized distribution, Gatekeeper assessment, clean-machine verification, and Intel hardware execution remain unverified.
+
+## Download and install
+
+No official binary is published yet. After the first public release, download `YumYum-Agent-<version>-macOS.dmg` and its `.sha256` file from GitHub Releases, verify the checksum, open the DMG, and drag **YumYum Agent.app** to **Applications**. On first launch, open the app normally and follow macOS Gatekeeper prompts; security-bypass commands are not supported.
+
+Local developers can explicitly create and verify an unsigned DMG:
+
+```sh
+./scripts/package-release.sh --unsigned
+./scripts/test-release.sh .build/release/YumYum-Agent-0.1.0-macOS.dmg
+```
 
 ## Build and run from source
 
@@ -76,7 +87,7 @@ The default English product reference is the [product specification](docs/produc
 ## Safety boundaries and limitations
 
 - Current connectors are analysis-only. External-change UI and execution wiring are not implemented.
-- The local `.app` is not signed or notarized. No App Store build, automatic updates, or distribution binary is provided.
+- Local builds and `--unsigned` DMGs are not signed or notarized. No App Store build, automatic updates, or published distribution binary is currently provided.
 - Real model responses depend on the external CLI installation, sign-in, network, and provider state.
 - Screen capture supports rectangular selection only. The global shortcut may require macOS privacy permission.
 - Regular `YumYum-Capture-*` files left by abnormal termination are cleaned up at the next app launch on a best-effort basis.

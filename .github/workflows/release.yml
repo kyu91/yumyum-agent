@@ -1,0 +1,117 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Validate tag and source
+        run: |
+          set -eu
+          VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' AppBundle/Info.plist)
+          test "${GITHUB_REF_NAME}" = "v${VERSION}"
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test "$(git rev-parse "refs/tags/${GITHUB_REF_NAME}^{commit}")" = "${GITHUB_SHA}"
+          swift build
+          swift test
+
+  release:
+    needs: build-and-test
+    runs-on: macos-14
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Validate tag and bundle identifier
+        run: |
+          set -eu
+          VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' AppBundle/Info.plist)
+          test "${GITHUB_REF_NAME}" = "v${VERSION}"
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test "$(git rev-parse "refs/tags/${GITHUB_REF_NAME}^{commit}")" = "${GITHUB_SHA}"
+          BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' AppBundle/Info.plist)
+          if [ "$BUNDLE_ID" = kr.yumyum.phase0 ]; then
+            echo 'Choose and update a permanent reverse-DNS CFBundleIdentifier before the first release.' >&2
+            exit 1
+          fi
+      - name: Import Developer ID certificate
+        env:
+          APPLE_DEVELOPER_ID_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_P12_BASE64 }}
+          APPLE_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+        run: |
+          set -eu
+          umask 077
+          KEYCHAIN_PASSWORD=$(/usr/bin/openssl rand -hex 32)
+          printf '%s' "$APPLE_DEVELOPER_ID_P12_BASE64" | /usr/bin/base64 -D > "$RUNNER_TEMP/developer-id.p12"
+          chmod 600 "$RUNNER_TEMP/developer-id.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$RUNNER_TEMP/release.keychain-db"
+          security set-keychain-settings -lut 21600 "$RUNNER_TEMP/release.keychain-db"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$RUNNER_TEMP/release.keychain-db"
+          security import "$RUNNER_TEMP/developer-id.p12" -k "$RUNNER_TEMP/release.keychain-db" -P "$APPLE_DEVELOPER_ID_P12_PASSWORD" -T /usr/bin/codesign
+          security list-keychains -d user -s "$RUNNER_TEMP/release.keychain-db"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$RUNNER_TEMP/release.keychain-db"
+      - name: Create notarized universal release
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          APPLE_NOTARY_PRIVATE_KEY_BASE64: ${{ secrets.APPLE_NOTARY_PRIVATE_KEY_BASE64 }}
+        run: |
+          set -eu
+          umask 077
+          printf '%s' "$APPLE_NOTARY_PRIVATE_KEY_BASE64" | /usr/bin/base64 -D > "$RUNNER_TEMP/AuthKey.p8"
+          chmod 600 "$RUNNER_TEMP/AuthKey.p8"
+          VERSION=${GITHUB_REF_NAME#v}
+          ARCHITECTURES='arm64 x86_64' \
+          APPLE_NOTARY_PRIVATE_KEY_PATH="$RUNNER_TEMP/AuthKey.p8" \
+          ./scripts/package-release.sh --version "$VERSION"
+      - name: Verify release artifact
+        run: |
+          set -eu
+          VERSION=${GITHUB_REF_NAME#v}
+          EXPECTED_ARCHITECTURES='arm64 x86_64' SIGNED_RELEASE=true \
+          ./scripts/test-release.sh ".build/release/YumYum-Agent-${VERSION}-macOS.dmg"
+      - name: Upload and publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          VERSION=${GITHUB_REF_NAME#v}
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test "$(git rev-parse "refs/tags/${GITHUB_REF_NAME}^{commit}")" = "${GITHUB_SHA}"
+          if RELEASE_IS_DRAFT=$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft 2>/dev/null); then
+            [ "$RELEASE_IS_DRAFT" = true ] || {
+              echo "Release $GITHUB_REF_NAME already exists and is not a draft." >&2
+              exit 1
+            }
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --draft \
+              --generate-notes \
+              --title "YumYum Agent ${VERSION}" \
+              --verify-tag
+          fi
+          gh release upload "$GITHUB_REF_NAME" \
+            ".build/release/YumYum-Agent-${VERSION}-macOS.dmg" \
+            ".build/release/YumYum-Agent-${VERSION}-macOS.dmg.sha256" \
+            --clobber
+          gh release edit "$GITHUB_REF_NAME" --draft=false
+      - name: Remove signing material
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/release.keychain-db" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/developer-id.p12" "$RUNNER_TEMP/AuthKey.p8"

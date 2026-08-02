@@ -12,7 +12,9 @@
 - [ ] Configure a private Code of Conduct reporting channel before removing its publication blocker.
 - [ ] Verify issue/PR templates, disabled blank issues, and Code of Conduct enforcement.
 - [ ] Decide whether and with what permissions to enable Dependabot, CodeQL, or other GitHub features.
-- [ ] Complete signing, hardened runtime, entitlements, notarization, clean-machine, and checksum release gates.
-- [ ] Decide bundle ID, CPU support, fixture inclusion, TCC guidance, credential custody, and rollback policy.
+- [x] Implement explicit unsigned DMG packaging, checksum, tag-only signing/notarization automation, and architecture checks.
+- [ ] Run the signed/notarized workflow with real credentials and verify the published artifacts.
+- [ ] Decide the permanent bundle ID and certificate ownership/custody; configure GitHub signing secrets.
+- [ ] Verify clean-machine TCC, installation, Intel execution, VoiceOver, and Reduce Motion; define rollback policy.
 
 No `NOTICE` is currently included because no separate third-party attribution requirement has been identified. Vendor names are used only to describe CLI compatibility; vendor logos are not included.

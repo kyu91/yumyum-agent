@@ -20,6 +20,8 @@ git diff --check
 git status --short --untracked-files=all
 ```
 
+For release-script changes, also run `./scripts/package-release.sh --unsigned` and `./scripts/test-release.sh .build/release/YumYum-Agent-0.1.0-macOS.dmg`. Never use real signing credentials in local tests or submit a tag/release as verification.
+
 Only if `swift test` fails because standalone Command Line Tools cannot find `Testing`, use the complete fallback command in [README](README.md#build-and-run-from-source). It cannot excuse other failures. External CLI probes, sign-in, networking, and model responses are not automated verification.
 
 ## Manual UI checks
