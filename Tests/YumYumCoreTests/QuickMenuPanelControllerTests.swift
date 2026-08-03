@@ -3,7 +3,8 @@ import Testing
 import YumYumCore
 @testable import YumYumApp
 
-@Suite(.serialized)
+extension AppGlobalStateTests {
+@Suite
 struct QuickMenuPanelControllerTests {
     @Test(arguments: AppTheme.allCases)
     func actionRowColorsAreOpaqueDistinctAndReadable(theme: AppTheme) throws {
@@ -47,9 +48,13 @@ struct QuickMenuPanelControllerTests {
             viewModel: YumYumAppViewModel(fixtureProbe: UnusedFixtureProbe()),
             workflow: FeedWorkflow(sender: sender, feedback: SilentFeedFeedback())
         )
+        defer {
+            controller.panel.orderOut(nil)
+            controller.panel.contentViewController = nil
+        }
         controller.setDraftText("질문")
         #expect(controller.sendDraftFromResponse())
-        #expect(await sender.waitForRequestCount(1))
+        try #require(await sender.waitForRequestCount(1))
 
         await sender.completeRequest(at: 0)
         await controller.waitForSendForTesting()
@@ -98,7 +103,7 @@ struct QuickMenuPanelControllerTests {
         )
         controller.setDraftText("질문")
         #expect(controller.sendDraftFromResponse())
-        #expect(await sender.waitForRequestCount(1))
+        try #require(await sender.waitForRequestCount(1))
         await sender.completeRequest(at: 0)
         await controller.waitForSendForTesting()
         let messages = controller.state.messages
@@ -191,7 +196,7 @@ struct QuickMenuPanelControllerTests {
         )
         controller.setDraftText("기존 질문")
         #expect(controller.sendDraftFromResponse())
-        #expect(await sender.waitForRequestCount(1))
+        try #require(await sender.waitForRequestCount(1))
         await sender.completeRequest(at: 0)
         await controller.waitForSendForTesting()
         let messages = controller.state.messages
@@ -199,7 +204,7 @@ struct QuickMenuPanelControllerTests {
         let activeSubmission = Task {
             try await workflow.submit(FeedInput(text: "외부 요청"), reduceMotion: true)
         }
-        #expect(await sender.waitForRequestCount(2))
+        try #require(await sender.waitForRequestCount(2))
         let view = try #require(controller.panel.contentView)
         let restart = try #require(buttons(in: view).first { $0.title == "새 세션" })
         restart.performClick(nil)
@@ -710,8 +715,8 @@ struct QuickMenuPanelControllerTests {
         #expect(!controller.feedDroppedFiles([invalid]))
         #expect(controller.feedDroppedFiles([file, file]))
         #expect(!controller.feedDroppedFiles([file]))
-        #expect(await sender.waitForRequestCount(1))
-        let request = await sender.requests[0]
+        try #require(await sender.waitForRequestCount(1))
+        let request = try #require(await sender.requests.first)
         #expect(request.attachments.map(\.url) == [file])
         #expect(!request.text.contains(file.path))
 
@@ -743,6 +748,12 @@ struct QuickMenuPanelControllerTests {
             backing: .buffered,
             defer: false
         )
+        defer {
+            responsePanel.orderOut(nil)
+            responsePanel.contentViewController = nil
+            chatController.panel.orderOut(nil)
+            chatController.panel.contentViewController = nil
+        }
         responsePanel.contentViewController = responseController
         responseController.onRequestInput = { responsePanel.beginInput() }
         responseController.onDraftChanged = { [weak chatController] text in
@@ -779,10 +790,10 @@ struct QuickMenuPanelControllerTests {
         )
         composer.stringValue = "Return 경로"
         composer.sendAction(returnAction, to: composer.target)
-        #expect(await sender.waitForRequestCount(1))
+        try #require(await sender.waitForRequestCount(1))
         composer.sendAction(returnAction, to: composer.target)
         #expect(await sender.requestCount == 1)
-        let returnRequest = await sender.requests[0]
+        let returnRequest = try #require(await sender.requests.first)
         #expect(returnRequest.attachments.map(\.url) == [attachment])
         #expect(!returnRequest.text.contains(attachment.path))
         #expect(!textFields(in: view).contains { $0.stringValue.contains(attachment.path) })
@@ -794,7 +805,7 @@ struct QuickMenuPanelControllerTests {
             Notification(name: NSControl.textDidChangeNotification)
         )
         send.performClick(nil)
-        #expect(await sender.waitForRequestCount(2))
+        try #require(await sender.waitForRequestCount(2))
         send.performClick(nil)
         #expect(await sender.requestCount == 2)
         #expect(!send.isEnabled)
@@ -1355,6 +1366,7 @@ struct QuickMenuPanelControllerTests {
         [view] + view.subviews.flatMap(flattened)
     }
 }
+}
 
 private actor ResetRecordingConnector: AgentConnecting {
     let definitionID = AgentDefinitionID.hermes
@@ -1426,6 +1438,10 @@ private actor ControlledPromptSender: PromptSending {
     }
 
     func completeRequest(at index: Int) {
+        guard continuations.indices.contains(index) else {
+            Issue.record("No controlled request at index \(index)")
+            return
+        }
         continuations[index].yield(.completed(PromptResponse(text: "완료")))
         continuations[index].finish()
     }

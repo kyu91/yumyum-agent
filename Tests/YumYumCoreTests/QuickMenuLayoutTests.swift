@@ -5,6 +5,7 @@ import Testing
 @testable import YumYumApp
 @testable import YumYumCore
 
+extension AppGlobalStateTests {
 @Suite
 struct QuickMenuLayoutTests {
     @Test
@@ -232,6 +233,7 @@ struct QuickMenuLayoutTests {
         #expect(lowerBubble.size == bubbleSize)
         #expect(upperBubble.size == bubbleSize)
     }
+}
 }
 
 private func font(

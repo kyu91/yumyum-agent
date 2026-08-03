@@ -3,6 +3,10 @@ import Testing
 @testable import YumYumCore
 @testable import YumYumApp
 
+@Suite(.serialized)
+struct AppGlobalStateTests {}
+
+extension AppGlobalStateTests {
 @Suite
 struct AppShellViewModelTests {
     @Test
@@ -152,6 +156,8 @@ struct AppShellViewModelTests {
     @Test
     @MainActor
     func selectionChangesResetConnectorsAndShutdownClosesThem() async throws {
+        let previousLanguage = AppText.language
+        defer { AppText.setLanguage(previousLanguage) }
         let codex = AgentInstallation(
             definitionID: .codex,
             path: "/safe/codex",
@@ -279,44 +285,29 @@ struct AppShellViewModelTests {
     }
 
     @Test(arguments: [
-        (
-            HermesConnectionError.pathMustBeAbsolute("bin/hermes"),
-            HermesConnectionState.pathError(
-                message: HermesConnectionError.pathMustBeAbsolute("bin/hermes")
-                    .errorDescription!
-            )
+        HermesConnectionError.pathMustBeAbsolute("bin/hermes"),
+        HermesConnectionError.executableUnavailable("/missing/hermes"),
+        HermesConnectionError.executionFailed(
+            exitStatus: 23,
+            standardError: "permission denied\n"
         ),
-        (
-            HermesConnectionError.executableUnavailable("/missing/hermes"),
-            HermesConnectionState.pathError(
-                message: HermesConnectionError.executableUnavailable("/missing/hermes")
-                    .errorDescription!
-            )
-        ),
-        (
-            HermesConnectionError.executionFailed(
-                exitStatus: 23,
-                standardError: "permission denied\n"
-            ),
-            HermesConnectionState.executionError(
-                message: HermesConnectionError.executionFailed(
-                    exitStatus: 23,
-                    standardError: "permission denied\n"
-                ).errorDescription!
-            )
-        ),
-        (
-            HermesConnectionError.emptyVersionOutput,
-            HermesConnectionState.executionError(
-                message: HermesConnectionError.emptyVersionOutput.errorDescription!
-            )
-        ),
+        HermesConnectionError.emptyVersionOutput,
     ])
     @MainActor
-    func mapsPathAndExecutionErrorsToDistinctStates(
-        error: HermesConnectionError,
-        expectedState: HermesConnectionState
-    ) async {
+    func mapsPathAndExecutionErrorsToDistinctStates(error: HermesConnectionError) async {
+        let previousLanguage = AppText.language
+        AppText.setLanguage(.korean)
+        defer { AppText.setLanguage(previousLanguage) }
+        let expectedState: HermesConnectionState
+        switch error {
+        case .pathMustBeAbsolute, .executableUnavailable:
+            expectedState = .pathError(message: error.errorDescription!)
+        case .executionFailed, .emptyVersionOutput:
+            expectedState = .executionError(message: error.errorDescription!)
+        case .timedOut, .launchFailed:
+            Issue.record("Unexpected test argument: \(error)")
+            return
+        }
         let viewModel = YumYumAppViewModel(
             fixtureProbe: ImmediateFixtureProbe(result: .success("unused")),
             connectionChecker: ImmediateHermesConnectionChecker(result: .failure(error))
@@ -391,6 +382,9 @@ struct AppShellViewModelTests {
     @Test
     @MainActor
     func presentsAStableFixtureError() async {
+        let previousLanguage = AppText.language
+        AppText.setLanguage(.korean)
+        defer { AppText.setLanguage(previousLanguage) }
         let viewModel = YumYumAppViewModel(
             fixtureProbe: ImmediateFixtureProbe(result: .failure(.timedOut))
         )
@@ -402,6 +396,7 @@ struct AppShellViewModelTests {
                 == .failure(message: "안전한 fixture가 제한 시간 안에 응답하지 않았습니다.")
         )
     }
+}
 }
 
 private func signedInCodexService(for installation: AgentInstallation) -> CodexLoginService {

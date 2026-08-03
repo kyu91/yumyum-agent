@@ -5,13 +5,21 @@ import Testing
 import YumYumCore
 @testable import YumYumApp
 
+extension AppGlobalStateTests {
 @Suite
+@MainActor
 struct AppThemeTests {
     @Test
     @MainActor
     func registeredSettingsWindowUpdatesInBothDirections() {
+        let previousLanguage = AppText.language
+        defer { AppText.setLanguage(previousLanguage) }
         _ = NSApplication.shared
         let window = NSWindow()
+        defer {
+            window.contentViewController = nil
+            window.orderOut(nil)
+        }
         let appDelegate = YumYumAppDelegate()
         let hostingController = NSHostingController(
             rootView: MainWindowRegistrationViewRepresentable(appDelegate: appDelegate)
@@ -298,7 +306,10 @@ struct AppThemeTests {
             defer: false
         )
         panel.contentViewController = controller
-        defer { panel.orderOut(nil) }
+        defer {
+            panel.orderOut(nil)
+            panel.contentViewController = nil
+        }
         let fields = descendants(of: controller.view, as: NSTextField.self)
         let buttons = descendants(of: controller.view, as: NSButton.self)
         let composer = try #require(fields.first {
@@ -502,4 +513,5 @@ struct AppThemeTests {
             + 0.7152 * linear(rgb.greenComponent)
             + 0.0722 * linear(rgb.blueComponent)
     }
+}
 }

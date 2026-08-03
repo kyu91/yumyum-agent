@@ -5,6 +5,7 @@ import Testing
 @testable import YumYumCore
 @testable import YumYumApp
 
+extension AppGlobalStateTests {
 @Suite
 struct PetFileDropTests {
     @Test
@@ -285,6 +286,7 @@ struct PetFileDropTests {
         #expect(model.chewFrame == .reducedMotion)
         #expect(view.accessibilityLabel()?.contains("/private/tmp") != true)
     }
+}
 }
 
 private struct StubFileMetadataProvider: FileMetadataProviding {

@@ -2,6 +2,7 @@ import AppKit
 import Testing
 @testable import YumYumApp
 
+extension AppGlobalStateTests {
 @Suite
 struct ThinkingBubbleViewControllerTests {
     @Test
@@ -32,4 +33,5 @@ struct ThinkingBubbleViewControllerTests {
         }
         return view.subviews.lazy.compactMap(textField).first
     }
+}
 }
