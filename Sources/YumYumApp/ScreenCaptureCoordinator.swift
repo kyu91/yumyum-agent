@@ -34,9 +34,35 @@ struct ScreenCaptureResult: Equatable, Sendable {
     let selectedRegion: CGRect
 }
 
+struct ScreenCaptureAuthorizationPolicy {
+    let preflight: () -> Bool
+    let request: () -> Bool
+    private var hasRequested = false
+
+    init(preflight: @escaping () -> Bool, request: @escaping () -> Bool) {
+        self.preflight = preflight
+        self.request = request
+    }
+
+    mutating func authorize() throws {
+        guard !preflight() else { return }
+        guard !hasRequested else {
+            throw ScreenCaptureCoordinatorError.permissionDenied
+        }
+        hasRequested = true
+        guard request() else {
+            throw ScreenCaptureCoordinatorError.permissionDenied
+        }
+    }
+}
+
 @MainActor
 final class ScreenCaptureCoordinator {
     private let selector = CaptureRegionOverlayController()
+    private var authorization = ScreenCaptureAuthorizationPolicy(
+        preflight: CGPreflightScreenCaptureAccess,
+        request: CGRequestScreenCaptureAccess
+    )
     private var isCapturing = false
 
     func cancel() {
@@ -51,9 +77,7 @@ final class ScreenCaptureCoordinator {
         defer { isCapturing = false }
 
         try Task.checkCancellation()
-        guard CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess() else {
-            throw ScreenCaptureCoordinatorError.permissionDenied
-        }
+        try authorization.authorize()
 
         let region = try await selector.selectRegion()
         try Task.checkCancellation()

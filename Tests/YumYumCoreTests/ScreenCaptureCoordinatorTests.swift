@@ -7,6 +7,136 @@ import Testing
 @MainActor
 struct ScreenCaptureCoordinatorTests {
     @Test
+    func authorizationUsesPreflightWithoutRequesting() throws {
+        var requestCount = 0
+        var authorization = ScreenCaptureAuthorizationPolicy(
+            preflight: { true },
+            request: {
+                requestCount += 1
+                return false
+            }
+        )
+
+        try authorization.authorize()
+
+        #expect(requestCount == 0)
+    }
+
+    @Test
+    func authorizationRequestsOnlyOnceAfterRepeatedDenial() {
+        var requestCount = 0
+        var authorization = ScreenCaptureAuthorizationPolicy(
+            preflight: { false },
+            request: {
+                requestCount += 1
+                return false
+            }
+        )
+
+        for _ in 0..<2 {
+            #expect(throws: ScreenCaptureCoordinatorError.permissionDenied) {
+                try authorization.authorize()
+            }
+        }
+
+        #expect(requestCount == 1)
+    }
+
+    @Test
+    func authorizationContinuesWhenFirstRequestSucceeds() throws {
+        var requestCount = 0
+        var authorization = ScreenCaptureAuthorizationPolicy(
+            preflight: { false },
+            request: {
+                requestCount += 1
+                return true
+            }
+        )
+
+        try authorization.authorize()
+
+        #expect(requestCount == 1)
+    }
+
+    @Test
+    func authorizationDoesNotRequestAgainWhenPreflightRemainsFalseAfterSuccess() throws {
+        var requestCount = 0
+        var authorization = ScreenCaptureAuthorizationPolicy(
+            preflight: { false },
+            request: {
+                requestCount += 1
+                return true
+            }
+        )
+
+        try authorization.authorize()
+        #expect(throws: ScreenCaptureCoordinatorError.permissionDenied) {
+            try authorization.authorize()
+        }
+
+        #expect(requestCount == 1)
+    }
+
+    @Test
+    func authorizationUsesPreflightAfterDeniedRequest() throws {
+        var hasAccess = false
+        var requestCount = 0
+        var authorization = ScreenCaptureAuthorizationPolicy(
+            preflight: { hasAccess },
+            request: {
+                requestCount += 1
+                return false
+            }
+        )
+
+        #expect(throws: ScreenCaptureCoordinatorError.permissionDenied) {
+            try authorization.authorize()
+        }
+        hasAccess = true
+        try authorization.authorize()
+
+        #expect(requestCount == 1)
+    }
+
+    @Test
+    func authorizationUsesPreflightAfterSuccessfulRequest() throws {
+        var hasAccess = false
+        var requestCount = 0
+        var authorization = ScreenCaptureAuthorizationPolicy(
+            preflight: { hasAccess },
+            request: {
+                requestCount += 1
+                return true
+            }
+        )
+
+        try authorization.authorize()
+        hasAccess = true
+        try authorization.authorize()
+
+        #expect(requestCount == 1)
+    }
+
+    @Test
+    func freshAuthorizationPolicyMayRequestAgain() {
+        var requestCount = 0
+        for _ in 0..<2 {
+            var authorization = ScreenCaptureAuthorizationPolicy(
+                preflight: { false },
+                request: {
+                    requestCount += 1
+                    return false
+                }
+            )
+            #expect(throws: ScreenCaptureCoordinatorError.permissionDenied) {
+                try authorization.authorize()
+            }
+        }
+
+        #expect(requestCount == 2)
+    }
+
+    @Test
     func macOS15SingleRegionUsesScreenCaptureKitCoordinatesForEveryDragDirection() async throws {
         let fixture = makeSplitImage(
             width: 20,
