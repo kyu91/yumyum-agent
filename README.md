@@ -46,10 +46,10 @@ Local developers can explicitly create and verify an unsigned DMG:
 swift build
 swift test
 ./scripts/build-app.sh
-open ".build/YumYum Agent.app"
+open ".build/YumYum.app"
 ```
 
-The script creates a local release `.build/YumYum Agent.app` by default. Use `CONFIGURATION=debug ./scripts/build-app.sh` for a debug bundle.
+The script creates a local release `.build/YumYum.app` by default. Use `CONFIGURATION=debug ./scripts/build-app.sh` for a debug bundle.
 
 Only when standalone Command Line Tools cannot find the `Testing` module, run this full regression command:
 

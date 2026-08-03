@@ -9,6 +9,32 @@ import Testing
 struct PetFileDropTests {
     @Test
     @MainActor
+    func petSilhouetteIsOneClosedOuterContour() {
+        var moveCount = 0
+        var closeCount = 0
+        let strokeRoles = YumYumPetView.contourStrokeRoles
+
+        YumYumPetView.silhouettePath.cgPath.applyWithBlock { element in
+            if element.pointee.type == .moveToPoint { moveCount += 1 }
+            if element.pointee.type == .closeSubpath { closeCount += 1 }
+        }
+
+        #expect(moveCount == 1)
+        #expect(closeCount == 1)
+        #expect(strokeRoles.count(where: { $0 == .outer }) == 1)
+        #expect(strokeRoles.count(where: { $0 == .leftInnerEar || $0 == .rightInnerEar }) == 0)
+    }
+
+    @Test
+    @MainActor
+    func facialDetailsMatchEachMouthPose() {
+        #expect(YumYumPetView.mouthDetails(for: .closed) == .init(noseCount: 1, mouthStrokeCount: 2, toothCount: 0, tongueCount: 0))
+        #expect(YumYumPetView.mouthDetails(for: .halfClosed) == .init(noseCount: 0, mouthStrokeCount: 0, toothCount: 0, tongueCount: 0))
+        #expect(YumYumPetView.mouthDetails(for: .open) == .init(noseCount: 0, mouthStrokeCount: 0, toothCount: 1, tongueCount: 1))
+    }
+
+    @Test
+    @MainActor
     func languageRefreshChangesPetAccessibilityWithoutReplacingPresentationState() {
         _ = NSApplication.shared
         let controller = FloatingPetWindowController {}

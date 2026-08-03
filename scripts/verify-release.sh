@@ -30,15 +30,20 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 /usr/bin/hdiutil attach -readonly -nobrowse -mountpoint "$MOUNT_DIR" "$DMG_PATH" -quiet
 
-APP="$MOUNT_DIR/YumYum Agent.app"
+APP="$MOUNT_DIR/YumYum.app"
 PLIST="$APP/Contents/Info.plist"
 test -L "$MOUNT_DIR/Applications"
 test "$(readlink "$MOUNT_DIR/Applications")" = /Applications
 test -x "$APP/Contents/MacOS/YumYum"
 test -x "$APP/Contents/Resources/yumyum-process-fixture"
-test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$PLIST")" = 'YumYum Agent'
+test -f "$APP/Contents/Resources/AppIcon.icns"
+test -f "$APP/Contents/Resources/MenuBarMascot.png"
+test -f "$APP/Contents/Resources/MenuBarMascot@2x.png"
+test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$PLIST")" = 'YumYum'
+test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleName' "$PLIST")" = 'YumYum'
 test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$PLIST")" = YumYum
 test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$PLIST")" = "$EXPECTED_BUNDLE_ID"
+test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$PLIST")" = AppIcon
 test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST")" = "$VERSION"
 
 APP_ARCHS=$(/usr/bin/lipo -archs "$APP/Contents/MacOS/YumYum")

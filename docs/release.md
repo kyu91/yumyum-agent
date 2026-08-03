@@ -13,7 +13,7 @@ EXPECTED_ARCHITECTURES='arm64 x86_64' ./scripts/test-release.sh .build/release/Y
 git diff --check
 ```
 
-The DMG contains `YumYum Agent.app` and an `/Applications` symlink. Its `.sha256` file uses `shasum -a 256` format. Packaging remains signed by default and refuses unsigned output unless `--unsigned` is explicit. The permanent identity is `io.github.kyu91.yumyumagent`.
+The DMG contains `YumYum.app` and an `/Applications` symlink. Its `.sha256` file uses `shasum -a 256` format. Packaging remains signed by default and refuses unsigned output unless `--unsigned` is explicit. The permanent identity is `io.github.kyu91.yumyumagent`.
 
 ## Release paths
 

@@ -222,6 +222,7 @@ struct ThinkingAnimationPolicyTests {
     func chewUsesTheApprovedNineHundredMillisecondFramesAndHasAnExactReset() {
         let policy = ThinkingAnimationPolicy()
 
+        #expect(PetChewFrame.resting.mouth == .closed)
         for millisecond in [0, 300, 600, 900] {
             #expect(policy.frame(at: millisecond, reduceMotion: false) == .mouthOpen)
         }
@@ -237,6 +238,7 @@ struct ThinkingAnimationPolicyTests {
         #expect(PetChewFrame.mouthClosedChew.bodyOffsetY == 2)
         #expect(PetChewFrame.mouthClosedChew.cheekOffset == 3)
         #expect(policy.resetFrame == .resting)
+        #expect(policy.resetFrame.mouth == .closed)
     }
 
     @Test

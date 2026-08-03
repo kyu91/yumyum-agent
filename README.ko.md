@@ -46,10 +46,10 @@ DMG를 열어 앱을 **Applications**로 드래그한 뒤 Control-클릭/우클�
 swift build
 swift test
 ./scripts/build-app.sh
-open ".build/YumYum Agent.app"
+open ".build/YumYum.app"
 ```
 
-스크립트는 기본적으로 로컬 release `.build/YumYum Agent.app`을 생성합니다. debug bundle에는 `CONFIGURATION=debug ./scripts/build-app.sh`를 사용하세요.
+스크립트는 기본적으로 로컬 release `.build/YumYum.app`을 생성합니다. debug bundle에는 `CONFIGURATION=debug ./scripts/build-app.sh`를 사용하세요.
 
 독립 실행형 Command Line Tools가 `Testing` 모듈을 찾지 못할 때만 다음 전체 회귀 명령을 실행하세요.
 

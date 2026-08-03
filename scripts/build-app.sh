@@ -6,7 +6,7 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 ROOT_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 CONFIGURATION=${CONFIGURATION:-release}
 ARCHITECTURES=${ARCHITECTURES:-}
-APP_DIR=${YUMYUM_APP_OUTPUT:-"$ROOT_DIR/.build/YumYum Agent.app"}
+APP_DIR=${YUMYUM_APP_OUTPUT:-"$ROOT_DIR/.build/YumYum.app"}
 CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
@@ -63,6 +63,9 @@ else
     done
 fi
 /usr/bin/install -m 644 "$ROOT_DIR/AppBundle/Info.plist" "$CONTENTS_DIR/Info.plist"
+/usr/bin/install -m 644 "$ROOT_DIR/AppBundle/AppIcon.icns" "$RESOURCES_DIR/AppIcon.icns"
+/usr/bin/install -m 644 "$ROOT_DIR/AppBundle/MenuBarMascot.png" "$RESOURCES_DIR/MenuBarMascot.png"
+/usr/bin/install -m 644 "$ROOT_DIR/AppBundle/MenuBarMascot@2x.png" "$RESOURCES_DIR/MenuBarMascot@2x.png"
 
 /usr/bin/touch "$APP_DIR"
 printf 'Built %s\n' "$APP_DIR"

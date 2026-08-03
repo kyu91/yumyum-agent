@@ -75,10 +75,10 @@ Run from the storage root.
 swift build
 swift test
 ./scripts/build-app.sh
-open ".build/YumYum Agent.app"
+open ".build/YumYum.app"
 ```
 
-`scripts/build-app.sh` creates the default release bundle as `.build/YumYum Agent.app`. The debug bundle is as follows.
+`scripts/build-app.sh` creates the default release bundle as `.build/YumYum.app`. The debug bundle is as follows.
 
 ```sh
 CONFIGURATION=debug ./scripts/build-app.sh

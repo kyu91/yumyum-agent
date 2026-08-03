@@ -5,15 +5,17 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>ko</string>
     <key>CFBundleDisplayName</key>
-    <string>YumYum Agent</string>
+    <string>YumYum</string>
     <key>CFBundleExecutable</key>
     <string>YumYum</string>
     <key>CFBundleIdentifier</key>
     <string>io.github.kyu91.yumyumagent</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>YumYum Agent</string>
+    <string>YumYum</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

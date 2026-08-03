@@ -338,10 +338,10 @@ final class FloatingPetWindowController: NSObject {
 
     var mouthTargetFrame: CGRect {
         CGRect(
-            x: panel.frame.midX - 11,
-            y: panel.frame.midY - 16,
-            width: 22,
-            height: 14
+            x: panel.frame.midX - 15,
+            y: panel.frame.midY - 18,
+            width: 30,
+            height: 20
         )
     }
 
@@ -598,11 +598,51 @@ final class FloatingPetHostingView<Content: View>: NSHostingView<Content> {
 }
 
 struct YumYumPetView: View {
+    struct MouthDetails: Equatable {
+        let noseCount: Int
+        let mouthStrokeCount: Int
+        let toothCount: Int
+        let tongueCount: Int
+    }
+
+    enum ContourStrokeRole {
+        case outer
+        case leftInnerEar
+        case rightInnerEar
+    }
+
+    static let contourStrokeRoles: [ContourStrokeRole] = [.outer]
+
+    static func mouthDetails(for mouth: PetMouthPose) -> MouthDetails {
+        switch mouth {
+        case .closed:
+            MouthDetails(noseCount: 1, mouthStrokeCount: 2, toothCount: 0, tongueCount: 0)
+        case .halfClosed:
+            MouthDetails(noseCount: 0, mouthStrokeCount: 0, toothCount: 0, tongueCount: 0)
+        case .open:
+            MouthDetails(noseCount: 0, mouthStrokeCount: 0, toothCount: 1, tongueCount: 1)
+        }
+    }
+
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovered = false
 
     @ObservedObject var presentationModel: PetPresentationModel
     let onClick: @MainActor () -> Void
+
+    static let silhouettePath: Path = {
+        var path = Path()
+        path.move(to: CGPoint(x: 14, y: 31))
+        path.addLine(to: CGPoint(x: 20, y: 28))
+        path.addCurve(to: CGPoint(x: 39, y: 29), control1: CGPoint(x: 14, y: 10), control2: CGPoint(x: 23, y: 9))
+        path.addLine(to: CGPoint(x: 61, y: 29))
+        path.addCurve(to: CGPoint(x: 79, y: 31), control1: CGPoint(x: 75, y: 15), control2: CGPoint(x: 80, y: 10))
+        path.addCurve(to: CGPoint(x: 84, y: 78), control1: CGPoint(x: 86, y: 50), control2: CGPoint(x: 87, y: 66))
+        path.addCurve(to: CGPoint(x: 15, y: 79), control1: CGPoint(x: 63, y: 85), control2: CGPoint(x: 35, y: 84))
+        path.addCurve(to: CGPoint(x: 14, y: 31), control1: CGPoint(x: 10, y: 61), control2: CGPoint(x: 10, y: 45))
+        path.closeSubpath()
+        return path
+    }()
 
     var body: some View {
         Canvas { context, size in
@@ -658,150 +698,111 @@ struct YumYumPetView: View {
             )
         }
 
-        let outline = Color(red: 0.42, green: 0.16, blue: 0.08)
-        let bodyColor = Color(red: 1, green: 0.55, blue: 0.16)
-        let innerEar = Color(red: 1, green: 0.75, blue: 0.48)
+        let outline = Color(red: 0.25, green: 0.12, blue: 0.08)
+        let bodyColor = Color(red: 0.91, green: 0.45, blue: 0.16)
+        let innerEar = Color(red: 0.98, green: 0.64, blue: 0.38)
 
-        var leftEar = Path()
-        leftEar.move(to: point(25, 31))
-        leftEar.addCurve(
-            to: point(39, 24),
-            control1: point(20, 13),
-            control2: point(24, 8)
+        let silhouette = Self.silhouettePath.applying(
+            CGAffineTransform(a: scale, b: 0, c: 0, d: scale, tx: offset.x, ty: offset.y)
         )
-        leftEar.addCurve(
-            to: point(25, 31),
-            control1: point(34, 26),
-            control2: point(29, 29)
-        )
-
-        var rightEar = Path()
-        rightEar.move(to: point(57, 24))
-        rightEar.addCurve(
-            to: point(71, 31),
-            control1: point(72, 8),
-            control2: point(76, 13)
-        )
-        rightEar.addCurve(
-            to: point(57, 24),
-            control1: point(67, 29),
-            control2: point(62, 26)
-        )
-
-        for ear in [leftEar, rightEar] {
-            context.fill(ear, with: .color(innerEar))
+        context.fill(silhouette, with: .color(bodyColor))
+        for role in Self.contourStrokeRoles where role == .outer {
             context.stroke(
-                ear,
+                silhouette,
                 with: .color(outline),
-                style: StrokeStyle(lineWidth: 2.2 * scale, lineJoin: .round)
+                style: StrokeStyle(lineWidth: 2 * scale, lineJoin: .round)
             )
         }
 
-        var body = Path()
-        body.move(to: point(48, 20))
-        body.addCurve(
-            to: point(80, 49),
-            control1: point(68, 19),
-            control2: point(80, 30)
-        )
-        body.addCurve(
-            to: point(68, 82),
-            control1: point(80, 68),
-            control2: point(76, 79)
-        )
-        body.addCurve(
-            to: point(28, 82),
-            control1: point(58, 89),
-            control2: point(38, 89)
-        )
-        body.addCurve(
-            to: point(16, 49),
-            control1: point(20, 79),
-            control2: point(16, 68)
-        )
-        body.addCurve(
-            to: point(48, 20),
-            control1: point(16, 30),
-            control2: point(28, 19)
-        )
-        context.fill(body, with: .color(bodyColor))
-        context.stroke(
-            body,
-            with: .color(outline),
-            style: StrokeStyle(lineWidth: 2.4 * scale, lineJoin: .round)
-        )
+        var leftInnerEar = Path()
+        leftInnerEar.move(to: point(21, 27))
+        leftInnerEar.addCurve(to: point(34, 27), control1: point(17, 14), control2: point(22, 13))
+        leftInnerEar.addLine(to: point(21, 27))
+        context.fill(leftInnerEar, with: .color(innerEar))
+        for role in Self.contourStrokeRoles where role == .leftInnerEar {
+            context.stroke(leftInnerEar, with: .color(outline))
+        }
 
-        context.fill(
-            Path(ellipseIn: rect(27, 51, 42, 31)),
-            with: .color(Color(red: 1, green: 0.89, blue: 0.67))
-        )
+        var rightInnerEar = Path()
+        rightInnerEar.move(to: point(66, 28))
+        rightInnerEar.addCurve(to: point(77, 29), control1: point(76, 16), control2: point(78, 14))
+        rightInnerEar.addLine(to: point(66, 28))
+        context.fill(rightInnerEar, with: .color(innerEar))
+        for role in Self.contourStrokeRoles where role == .rightInnerEar {
+            context.stroke(rightInnerEar, with: .color(outline))
+        }
+
+        for (start, end) in [(CGPoint(x: 23, y: 37), CGPoint(x: 72, y: 40)), (CGPoint(x: 20, y: 45), CGPoint(x: 75, y: 48)), (CGPoint(x: 24, y: 72), CGPoint(x: 73, y: 69))] {
+            var accent = Path()
+            accent.move(to: point(start.x, start.y))
+            accent.addLine(to: point(end.x, end.y))
+            context.stroke(accent, with: .color(Color(red: 0.98, green: 0.56, blue: 0.20)), style: StrokeStyle(lineWidth: 2 * scale, lineCap: .round))
+        }
         context.fill(
             Path(
                 ellipseIn: rect(
-                    28 - presentationModel.chewFrame.cheekOffset,
-                    45,
+                    27 - presentationModel.chewFrame.cheekOffset,
+                    50,
                     10,
                     6
                 )
             ),
-            with: .color(Color(red: 1, green: 0.43, blue: 0.37).opacity(0.7))
+            with: .color(Color(red: 0.91, green: 0.36, blue: 0.29).opacity(0.72))
         )
         context.fill(
             Path(
                 ellipseIn: rect(
-                    58 + presentationModel.chewFrame.cheekOffset,
-                    45,
-                    10,
-                    6
+                    59 + presentationModel.chewFrame.cheekOffset,
+                    49,
+                    12,
+                    7
                 )
             ),
-            with: .color(Color(red: 1, green: 0.43, blue: 0.37).opacity(0.7))
+            with: .color(Color(red: 0.91, green: 0.36, blue: 0.29).opacity(0.72))
         )
 
-        for eyeX in [34.0, 56.0] {
-            context.fill(
-                Path(ellipseIn: rect(eyeX, 36, 7, 10)),
-                with: .color(outline)
-            )
-            context.fill(
-                Path(ellipseIn: rect(eyeX + 1.5, 37, 2.2, 2.8)),
-                with: .color(.white)
-            )
-        }
+        context.fill(Path(ellipseIn: rect(31, 43, 6, 8)), with: .color(outline))
+        context.fill(Path(ellipseIn: rect(61, 45, 7, 9)), with: .color(outline))
 
         switch presentationModel.chewFrame.mouth {
         case .open:
             context.fill(
-                Path(ellipseIn: rect(37, 47, 22, 19)),
+                Path(ellipseIn: rect(33, 50, 32, 25)),
                 with: .color(outline)
             )
             context.fill(
-                Path(ellipseIn: rect(42, 58.5, 12, 6)),
-                with: .color(Color(red: 1, green: 0.43, blue: 0.37))
+                Path(ellipseIn: rect(39, 66, 20, 7)),
+                with: .color(Color(red: 0.96, green: 0.43, blue: 0.39))
             )
+            var tooth = Path()
+            tooth.move(to: point(43, 51))
+            tooth.addLine(to: point(50, 51))
+            tooth.addLine(to: point(47, 58))
+            tooth.closeSubpath()
+            context.fill(tooth, with: .color(.white))
+            context.stroke(tooth, with: .color(outline), style: StrokeStyle(lineWidth: scale))
         case .halfClosed:
             context.fill(
-                Path(ellipseIn: rect(39.5, 50.5, 17, 7)),
+                Path(ellipseIn: rect(38, 57, 22, 6)),
                 with: .color(outline)
             )
         case .closed:
-            var smile = Path()
-            smile.move(to: point(42, 49))
-            smile.addQuadCurve(to: point(54, 49), control: point(48, 57))
-            context.stroke(
-                smile,
-                with: .color(outline),
-                style: StrokeStyle(lineWidth: 2 * scale, lineCap: .round)
-            )
-        }
+            var nose = Path()
+            nose.move(to: point(46, 55.5))
+            nose.addLine(to: point(52.5, 56.2))
+            nose.addLine(to: point(49, 59.5))
+            nose.closeSubpath()
+            context.fill(nose, with: .color(outline))
 
-        for footX in [24.0, 60.0] {
-            let foot = Path(ellipseIn: rect(footX, 78, 13, 8))
-            context.fill(foot, with: .color(bodyColor))
+            var mouth = Path()
+            mouth.move(to: point(49, 62.5))
+            mouth.addLine(to: point(43, 67))
+            mouth.move(to: point(49, 62.5))
+            mouth.addLine(to: point(56, 68))
             context.stroke(
-                foot,
+                mouth,
                 with: .color(outline),
-                style: StrokeStyle(lineWidth: 2 * scale)
+                style: StrokeStyle(lineWidth: 2.5 * scale, lineCap: .round, lineJoin: .round)
             )
         }
     }

@@ -33,11 +33,20 @@ struct YumYumApplication: App {
             CommandGroup(replacing: .newItem) {}
         }
 
-        MenuBarExtra("YumYum Agent", systemImage: "takeoutbag.and.cup.and.straw.fill") {
+        MenuBarExtra {
             YumYumMenu(viewModel: viewModel, appDelegate: appDelegate)
                 .preferredColorScheme(appDelegate.currentTheme.colorScheme)
+        } label: {
+            Image(nsImage: Self.menuBarMascotImage)
+                .accessibilityLabel("YumYum Agent")
         }
     }
+
+    fileprivate static let menuBarMascotImage: NSImage = {
+        let image = NSImage(named: "MenuBarMascot") ?? NSImage()
+        image.isTemplate = true
+        return image
+    }()
 
     private static var fixtureURL: URL {
         if Bundle.main.bundleURL.pathExtension == "app",
@@ -165,22 +174,28 @@ private struct YumYumContentView: View {
                     shortcutSection
                     safetySection
                 }
-                .tabItem { Label(AppText.localized(english: "General", korean: "일반"), systemImage: "gearshape") }
+                .tabItem {
+                    Label {
+                        Text(AppText.localized(english: "General", korean: "일반"))
+                    } icon: {
+                        Image(nsImage: YumYumApplication.menuBarMascotImage)
+                    }
+                }
                 .accessibilityIdentifier("settings-tab-general")
 
                 settingsScroll { agentSection }
-                    .tabItem { Label(AppText.localized(english: "Agent", korean: "에이전트"), systemImage: "cpu") }
+                    .tabItem { Label(AppText.localized(english: "Agent", korean: "에이전트"), systemImage: "pawprint") }
                     .accessibilityIdentifier("settings-tab-agent")
 
                 settingsScroll { soulSection }
-                    .tabItem { Label("Soul", systemImage: "heart.text.square") }
+                    .tabItem { Label("Soul", systemImage: "heart.fill") }
                     .accessibilityIdentifier("settings-tab-soul")
 
                 settingsScroll {
                     hermesPathSection
                     fixtureSection
                 }
-                .tabItem { Label(AppText.localized(english: "Diagnostics", korean: "진단"), systemImage: "stethoscope") }
+                .tabItem { Label(AppText.localized(english: "Diagnostics", korean: "진단"), systemImage: "wrench.adjustable") }
                 .accessibilityIdentifier("settings-tab-diagnostics")
             }
         }
@@ -221,6 +236,16 @@ private struct YumYumContentView: View {
                 .padding(24)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
         }
+    }
+
+    private func mascotSectionLabel(_ title: String, symbol: String) -> some View {
+        HStack(spacing: 7) {
+            MascotMark()
+                .frame(width: 22, height: 22)
+                .accessibilityHidden(true)
+            Label(title, systemImage: symbol)
+        }
+        .font(.headline)
     }
 
     private var soulSection: some View {
@@ -355,8 +380,7 @@ private struct YumYumContentView: View {
             .accessibilityHint(AppText.localized("YumYum Agent 화면의 밝은 테마와 어두운 테마를 전환합니다"))
             .padding(.top, 4)
         } label: {
-            Label(AppText.localized("화면 테마"), systemImage: "circle.lefthalf.filled")
-                .font(.headline)
+            mascotSectionLabel(AppText.localized("화면 테마"), symbol: "circle.lefthalf.filled")
         }
     }
 
@@ -381,19 +405,17 @@ private struct YumYumContentView: View {
             ))
             .padding(.top, 4)
         } label: {
-            Label(
+            mascotSectionLabel(
                 AppText.localized(english: "Language", korean: "언어"),
-                systemImage: "globe"
+                symbol: "globe"
             )
-            .font(.headline)
         }
     }
 
     private var header: some View {
         HStack(spacing: 14) {
-            Image(systemName: "takeoutbag.and.cup.and.straw.fill")
-                .font(.system(size: 30))
-                .foregroundStyle(.orange)
+            MascotMark()
+                .frame(width: 42, height: 42)
                 .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 3) {
@@ -500,8 +522,7 @@ private struct YumYumContentView: View {
             }
             .padding(.top, 4)
         } label: {
-            Label(AppText.localized("로컬 에이전트"), systemImage: "cpu")
-                .font(.headline)
+            mascotSectionLabel(AppText.localized("로컬 에이전트"), symbol: "cpu")
         }
     }
 
@@ -528,8 +549,7 @@ private struct YumYumContentView: View {
             }
             .padding(.top, 4)
         } label: {
-            Label(AppText.localized("빠른 메뉴"), systemImage: "keyboard")
-                .font(.headline)
+            mascotSectionLabel(AppText.localized("빠른 메뉴"), symbol: "keyboard")
         }
     }
 
@@ -587,8 +607,7 @@ private struct YumYumContentView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, 4)
         } label: {
-            Label(AppText.localized("Hermes 수동 경로 진단"), systemImage: "terminal")
-                .font(.headline)
+            mascotSectionLabel(AppText.localized("Hermes 수동 경로 진단"), symbol: "terminal")
         }
     }
 
@@ -622,8 +641,7 @@ private struct YumYumContentView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, 4)
         } label: {
-            Label(AppText.localized("개발 진단"), systemImage: "wrench.and.screwdriver")
-                .font(.headline)
+            mascotSectionLabel(AppText.localized("개발 진단"), symbol: "wrench.and.screwdriver")
         }
     }
 
@@ -765,6 +783,40 @@ private struct YumYumContentView: View {
             return .secondary
         case .invalidAbsolutePath:
             return .orange
+        }
+    }
+}
+
+private struct MascotMark: View {
+    var body: some View {
+        Canvas { context, size in
+            let scale = min(size.width, size.height) / 42
+            func rect(_ x: CGFloat, _ y: CGFloat, _ width: CGFloat, _ height: CGFloat) -> CGRect {
+                CGRect(x: x * scale, y: y * scale, width: width * scale, height: height * scale)
+            }
+
+            var body = Path()
+            body.move(to: CGPoint(x: 7 * scale, y: 11 * scale))
+            body.addLine(to: CGPoint(x: 14 * scale, y: 5 * scale))
+            body.addLine(to: CGPoint(x: 18 * scale, y: 11 * scale))
+            body.addLine(to: CGPoint(x: 30 * scale, y: 7 * scale))
+            body.addLine(to: CGPoint(x: 35 * scale, y: 13 * scale))
+            body.addLine(to: CGPoint(x: 34 * scale, y: 35 * scale))
+            body.addLine(to: CGPoint(x: 8 * scale, y: 34 * scale))
+            body.closeSubpath()
+            context.fill(body, with: .color(.orange))
+            context.stroke(body, with: .color(.brown), style: StrokeStyle(lineWidth: 2 * scale, lineJoin: .round))
+            context.fill(Path(ellipseIn: rect(13, 15, 3, 4)), with: .color(.brown))
+            context.fill(Path(ellipseIn: rect(27, 17, 3.5, 4.5)), with: .color(.brown))
+            context.fill(Path(ellipseIn: rect(13, 21, 17, 12)), with: .color(.brown))
+            context.fill(Path(ellipseIn: rect(17, 28, 10, 4)), with: .color(.pink))
+
+            var tooth = Path()
+            tooth.move(to: CGPoint(x: 19 * scale, y: 22 * scale))
+            tooth.addLine(to: CGPoint(x: 23 * scale, y: 22 * scale))
+            tooth.addLine(to: CGPoint(x: 21 * scale, y: 26 * scale))
+            tooth.closeSubpath()
+            context.fill(tooth, with: .color(.white))
         }
     }
 }

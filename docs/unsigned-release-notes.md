@@ -11,11 +11,11 @@ macOS 14 이상이 필요합니다. DMG에는 `arm64`와 `x86_64` slice가 모�
 ## Install / 설치
 
 1. Verify the checksum: `shasum -a 256 -c YumYum-Agent-<version>-macOS.dmg.sha256`
-2. Open the DMG and drag **YumYum Agent.app** to **Applications**.
+2. Open the DMG and drag **YumYum.app** to **Applications**.
 3. Control-click or right-click the app and choose **Open**. If macOS still blocks it, use **System Settings → Privacy & Security → Open Anyway**. Warning text varies by macOS version.
 4. Never disable Gatekeeper globally. macOS may still request Screen Recording, Input Monitoring, or Accessibility permission for app features.
 
 1. 체크섬을 검증합니다: `shasum -a 256 -c YumYum-Agent-<version>-macOS.dmg.sha256`
-2. DMG를 열고 **YumYum Agent.app**을 **Applications**로 드래그합니다.
+2. DMG를 열고 **YumYum.app**을 **Applications**로 드래그합니다.
 3. 앱을 Control-클릭 또는 우클릭하고 **Open(열기)**을 선택합니다. 계속 차단되면 **System Settings → Privacy & Security → Open Anyway**를 사용하세요. 경고 문구는 macOS 버전에 따라 다릅니다.
 4. Gatekeeper를 전역으로 비활성화하지 마세요. 앱 기능 사용 시 macOS가 Screen Recording, Input Monitoring 또는 Accessibility 권한을 요청할 수 있습니다.

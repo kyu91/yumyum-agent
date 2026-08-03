@@ -43,7 +43,7 @@ if [ "$UNSIGNED" = false ]; then
 fi
 
 OUTPUT_DIR=${YUMYUM_RELEASE_OUTPUT:-"$ROOT_DIR/.build/release"}
-APP_DIR="$ROOT_DIR/.build/YumYum Agent.app"
+APP_DIR="$ROOT_DIR/.build/YumYum.app"
 DMG_NAME="YumYum-Agent-$VERSION-macOS.dmg"
 DMG_PATH="$OUTPUT_DIR/$DMG_NAME"
 CHECKSUM_PATH="$DMG_PATH.sha256"
@@ -69,7 +69,7 @@ if [ "$UNSIGNED" = false ]; then
 fi
 
 mkdir -p "$OUTPUT_DIR" "$STAGING_DIR/dmg"
-/usr/bin/ditto "$APP_DIR" "$STAGING_DIR/dmg/YumYum Agent.app"
+/usr/bin/ditto "$APP_DIR" "$STAGING_DIR/dmg/YumYum.app"
 /bin/ln -s /Applications "$STAGING_DIR/dmg/Applications"
 rm -f "$DMG_PATH" "$CHECKSUM_PATH"
 /usr/bin/hdiutil create -fs HFS+ -format UDZO -volname "YumYum Agent $VERSION" -srcfolder "$STAGING_DIR/dmg" "$DMG_PATH"

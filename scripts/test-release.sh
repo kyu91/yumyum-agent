@@ -118,6 +118,12 @@ check_sources() {
     grep -Fq '/usr/bin/lipo -create "$UNIVERSAL_DIR/app-arm64" "$UNIVERSAL_DIR/app-x86_64"' "$BUILD"
     grep -Fq '/usr/bin/lipo -create "$UNIVERSAL_DIR/fixture-arm64" "$UNIVERSAL_DIR/fixture-x86_64"' "$BUILD"
     grep -Fq "*\" \$ARCH \"*) printf 'Duplicate architecture:" "$BUILD"
+    grep -Fq 'APP_DIR=${YUMYUM_APP_OUTPUT:-"$ROOT_DIR/.build/YumYum.app"}' "$BUILD"
+    grep -Fq 'APP_DIR="$ROOT_DIR/.build/YumYum.app"' "$PACKAGE"
+    grep -Fq '"$STAGING_DIR/dmg/YumYum.app"' "$PACKAGE"
+    grep -Fq 'APP="$MOUNT_DIR/YumYum.app"' "$VERIFY"
+    grep -Fq "Print :CFBundleDisplayName' \"\$PLIST\")\" = 'YumYum'" "$VERIFY"
+    grep -Fq "Print :CFBundleName' \"\$PLIST\")\" = 'YumYum'" "$VERIFY"
     ! grep -Fq 'lipo -create $APP_INPUTS' "$BUILD" || return 1
 }
 
@@ -125,7 +131,7 @@ expect_failure "$SCRIPT_DIR/package-release.sh" --version invalid --unsigned
 expect_failure "$SCRIPT_DIR/package-release.sh" --version 9.9.9 --unsigned
 expect_failure env -u APPLE_SIGNING_IDENTITY -u APPLE_NOTARY_KEY_ID -u APPLE_NOTARY_ISSUER_ID -u APPLE_NOTARY_PRIVATE_KEY_PATH "$SCRIPT_DIR/package-release.sh"
 expect_failure env EXPECTED_BUNDLE_ID= "$SCRIPT_DIR/verify-release.sh" "$TEST_DIR/missing.dmg"
-expect_failure env ARCHITECTURES='arm64 arm64' YUMYUM_APP_OUTPUT="$TEST_DIR/output path/YumYum Agent.app" "$SCRIPT_DIR/build-app.sh"
+expect_failure env ARCHITECTURES='arm64 arm64' YUMYUM_APP_OUTPUT="$TEST_DIR/output path/YumYum.app" "$SCRIPT_DIR/build-app.sh"
 
 check_sources "$ROOT_DIR"
 mkdir -p "$TEST_DIR/source/scripts" "$TEST_DIR/source/.github/workflows"
