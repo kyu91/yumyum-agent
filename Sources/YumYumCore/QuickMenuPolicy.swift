@@ -1,5 +1,20 @@
 import CoreGraphics
 
+public enum QuickMenuHorizontalAlignment: Equatable, Sendable {
+    case leading
+    case trailing
+}
+
+public struct QuickMenuPlacement: Equatable, Sendable {
+    public let frame: CGRect
+    public let horizontalAlignment: QuickMenuHorizontalAlignment
+
+    public init(frame: CGRect, horizontalAlignment: QuickMenuHorizontalAlignment) {
+        self.frame = frame
+        self.horizontalAlignment = horizontalAlignment
+    }
+}
+
 public struct QuickMenuLayout: Equatable, Sendable {
     public static let petGap: CGFloat = 8
 
@@ -10,16 +25,36 @@ public struct QuickMenuLayout: Equatable, Sendable {
         panelSize: CGSize,
         visibleFrames: [CGRect]
     ) -> CGRect {
+        placement(
+            petFrame: petFrame,
+            panelSize: panelSize,
+            visibleFrames: visibleFrames
+        ).frame
+    }
+
+    public func placement(
+        petFrame: CGRect,
+        panelSize: CGSize,
+        visibleFrames: [CGRect]
+    ) -> QuickMenuPlacement {
         guard let visibleFrame = bestVisibleFrame(
             for: petFrame,
             visibleFrames: visibleFrames
         ) else {
-            return CGRect(origin: petFrame.origin, size: panelSize)
+            return QuickMenuPlacement(
+                frame: CGRect(origin: petFrame.origin, size: panelSize),
+                horizontalAlignment: .trailing
+            )
         }
 
         let width = min(max(0, panelSize.width), max(0, visibleFrame.width))
         let height = min(max(0, panelSize.height), max(0, visibleFrame.height))
-        let preferredX = petFrame.maxX - width
+        let horizontalAlignment: QuickMenuHorizontalAlignment = petFrame.midX <= visibleFrame.midX
+            ? .leading
+            : .trailing
+        let preferredX = horizontalAlignment == .leading
+            ? petFrame.minX
+            : petFrame.maxX - width
         let preferredAboveY = petFrame.maxY + Self.petGap
         let preferredY: CGFloat
         if preferredAboveY + height <= visibleFrame.maxY {
@@ -28,11 +63,14 @@ public struct QuickMenuLayout: Equatable, Sendable {
             preferredY = petFrame.minY - height - Self.petGap
         }
 
-        return CGRect(
-            x: min(max(preferredX, visibleFrame.minX), visibleFrame.maxX - width),
-            y: min(max(preferredY, visibleFrame.minY), visibleFrame.maxY - height),
-            width: width,
-            height: height
+        return QuickMenuPlacement(
+            frame: CGRect(
+                x: min(max(preferredX, visibleFrame.minX), visibleFrame.maxX - width),
+                y: min(max(preferredY, visibleFrame.minY), visibleFrame.maxY - height),
+                width: width,
+                height: height
+            ),
+            horizontalAlignment: horizontalAlignment
         )
     }
 

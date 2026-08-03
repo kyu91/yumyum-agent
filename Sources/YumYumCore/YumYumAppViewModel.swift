@@ -31,6 +31,18 @@ public enum SoulSaveState: Equatable, Sendable {
     case failed
 }
 
+public struct CodexLoginApprovalRequest: Equatable, Sendable {
+    public enum Operation: Equatable, Sendable {
+        case login
+        case logout
+        case changeAccount
+    }
+
+    fileprivate let id: UUID
+    fileprivate let installationID: String
+    public let operation: Operation
+}
+
 @MainActor
 public final class YumYumAppViewModel: ObservableObject {
     @Published public private(set) var connectionState: HermesConnectionState = .idle
@@ -47,6 +59,7 @@ public final class YumYumAppViewModel: ObservableObject {
         selection: .unselected
     )
     @Published public private(set) var isDiscoveringAgents = false
+    @Published public private(set) var codexLoginState = CodexLoginState.unavailable
     @Published public var soulProfile = SoulProfile.empty
     @Published public private(set) var soulSaveState = SoulSaveState.idle
     @Published public private(set) var isSoulLoaded = false
@@ -58,6 +71,10 @@ public final class YumYumAppViewModel: ObservableObject {
 
     private let fixtureProbe: any FixtureProbing
     private let connectionChecker: any HermesConnectionChecking
+    private let codexLoginService: CodexLoginService
+    private var codexLoginTask: Task<Void, Never>?
+    private var codexStatusTask: Task<Bool, Error>?
+    private var pendingCodexLoginApproval: CodexLoginApprovalRequest?
     private var soulRevision = 0
     private var savedSoulRevision = 0
     private var soulPersistenceTask: Task<Void, Never>?
@@ -67,12 +84,14 @@ public final class YumYumAppViewModel: ObservableObject {
         connectionChecker: any HermesConnectionChecking = HermesConnectionService(),
         agentRegistry: AgentRegistry = AgentRegistry(),
         connectors: [any AgentConnecting]? = nil,
-        soulStore: any SoulProfileStoring = SoulProfileStore()
+        soulStore: any SoulProfileStoring = SoulProfileStore(),
+        codexLoginService: CodexLoginService = CodexLoginService()
     ) {
         self.fixtureProbe = fixtureProbe
         self.connectionChecker = connectionChecker
         self.agentRegistry = agentRegistry
         self.soulStore = soulStore
+        self.codexLoginService = codexLoginService
         let runtimeConnectors = connectors ?? [
             HermesACPConnector(transport: ACPProcessTransport()),
             OpenCodeConnector(),
@@ -82,7 +101,8 @@ public final class YumYumAppViewModel: ObservableObject {
         agentRuntime = AgentRuntime(
             selection: agentRegistry,
             connectors: runtimeConnectors,
-            soulStore: soulStore
+            soulStore: soulStore,
+            codexLoginService: codexLoginService
         )
         fixturePath = fixtureProbe.fixturePath
     }
@@ -115,7 +135,7 @@ public final class YumYumAppViewModel: ObservableObject {
         soulSaveState = .saving
         let previousTask = soulPersistenceTask
         let store = soulStore
-        let task = Task { @MainActor [weak self] in
+        let task: Task<Void, Never> = Task { @MainActor [weak self] in
             await previousTask?.value
             do {
                 try await store.save(normalized)
@@ -143,20 +163,41 @@ public final class YumYumAppViewModel: ObservableObject {
         await saveSoul()
     }
 
+    public func saveSoulAndResetSession() async -> Bool {
+        while savedSoulRevision != soulRevision {
+            await saveSoul()
+            guard soulSaveState != .failed else { return false }
+        }
+        await agentRuntime.reset()
+        return true
+    }
+
     public var canSendPrompt: Bool {
-        agentSnapshot.canSend
+        guard agentSnapshot.selectedInstallation?.definitionID == .codex else {
+            return agentSnapshot.canSend
+        }
+        return agentSnapshot.canSend && codexLoginState == .signedIn
     }
 
     public func refreshAgents(trigger: AgentRefreshTrigger) async {
         isDiscoveringAgents = true
         agentSnapshot = await agentRegistry.refresh(trigger: trigger)
         isDiscoveringAgents = false
+        await refreshCodexLoginStatus()
     }
 
     public func selectAgent(
         _ definitionID: AgentDefinitionID,
         path: String
     ) async throws {
+        if definitionID == .codex {
+            guard let installation = availableCodexInstallations.first(where: { $0.path == path }),
+                  try await codexLoginService.status(for: installation) else {
+                codexLoginState = .loginRequired
+                throw AgentRuntimeError.codexAuthenticationRequired
+            }
+            codexLoginState = .signedIn
+        }
         let snapshot = try await agentRegistry.select(definitionID, path: path)
         if snapshot.selection != agentSnapshot.selection {
             await agentRuntime.reset()
@@ -165,8 +206,134 @@ public final class YumYumAppViewModel: ObservableObject {
     }
 
     public func shutdown() async {
+        codexStatusTask?.cancel()
+        _ = try? await codexStatusTask?.value
+        codexLoginTask?.cancel()
+        await codexLoginTask?.value
+        pendingCodexLoginApproval = nil
         await flushSoul()
         await agentRuntime.close()
+    }
+
+    public func refreshCodexLoginStatus(for clickedInstallation: AgentInstallation? = nil) async {
+        guard codexLoginTask == nil,
+              codexStatusTask == nil,
+              let installation = clickedInstallation ?? availableCodexInstallation,
+              availableCodexInstallations.contains(where: { $0.id == installation.id }) else {
+            if codexLoginTask == nil, codexStatusTask == nil {
+                codexLoginState = .unavailable
+            }
+            return
+        }
+        codexLoginState = .checking
+        let service = codexLoginService
+        let task = Task { try await service.status(for: installation) }
+        codexStatusTask = task
+        do {
+            codexLoginState = try await withTaskCancellationHandler {
+                try await task.value ? .signedIn : .loginRequired
+            } onCancel: {
+                task.cancel()
+            }
+        } catch is CancellationError {
+            codexLoginState = .cancelled
+        } catch CodexLoginError.timedOut {
+            codexLoginState = .timedOut
+        } catch CodexLoginError.unavailable {
+            codexLoginState = .unavailable
+        } catch {
+            codexLoginState = .failed
+        }
+        codexStatusTask = nil
+    }
+
+    public func requestCodexLoginApproval(
+        for installation: AgentInstallation,
+        operation: CodexLoginApprovalRequest.Operation = .login
+    ) -> CodexLoginApprovalRequest? {
+        guard codexLoginTask == nil,
+              codexStatusTask == nil,
+              availableCodexInstallations.contains(where: { $0.id == installation.id }) else { return nil }
+        let request = CodexLoginApprovalRequest(
+            id: UUID(),
+            installationID: installation.id,
+            operation: operation
+        )
+        pendingCodexLoginApproval = request
+        return request
+    }
+
+    public func cancelCodexLoginApproval(_ request: CodexLoginApprovalRequest) {
+        if pendingCodexLoginApproval == request {
+            pendingCodexLoginApproval = nil
+        }
+    }
+
+    public func confirmCodexLogin(_ request: CodexLoginApprovalRequest) async {
+        guard pendingCodexLoginApproval == request else { return }
+        pendingCodexLoginApproval = nil
+        guard let installation = availableCodexInstallations.first(where: {
+            $0.id == request.installationID
+        }) else { return }
+        await performCodexOperation(request.operation, using: installation)
+    }
+
+    private func performCodexOperation(
+        _ operation: CodexLoginApprovalRequest.Operation,
+        using installation: AgentInstallation
+    ) async {
+        guard codexLoginTask == nil,
+              codexStatusTask == nil else { return }
+        switch operation {
+        case .login: codexLoginState = .awaitingBrowserSignIn
+        case .logout: codexLoginState = .loggingOut
+        case .changeAccount: codexLoginState = .changingAccount
+        }
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                switch operation {
+                case .login:
+                    try await codexLoginService.login(using: installation)
+                    codexLoginState = .signedIn
+                case .logout:
+                    try await codexLoginService.logout(using: installation)
+                    codexLoginState = .loggedOut
+                case .changeAccount:
+                    try await codexLoginService.changeAccount(using: installation)
+                    codexLoginState = .signedIn
+                }
+            } catch is CancellationError {
+                codexLoginState = .cancelled
+            } catch CodexLoginError.timedOut {
+                codexLoginState = .timedOut
+            } catch CodexLoginError.unavailable {
+                codexLoginState = .unavailable
+            } catch {
+                codexLoginState = operation == .changeAccount ? .changeFailedNeedsLogin : .failed
+            }
+        }
+        codexLoginTask = task
+        await withTaskCancellationHandler {
+            await task.value
+        } onCancel: {
+            task.cancel()
+        }
+        codexLoginTask = nil
+    }
+
+    public func cancelCodexLogin() {
+        codexLoginTask?.cancel()
+    }
+
+    public var availableCodexInstallation: AgentInstallation? {
+        availableCodexInstallations.first
+    }
+
+    private var availableCodexInstallations: [AgentInstallation] {
+        agentSnapshot.installations.filter {
+            $0.definitionID == .codex && $0.availability == .available
+        }
     }
 
     public func addExplicitAgentPath(

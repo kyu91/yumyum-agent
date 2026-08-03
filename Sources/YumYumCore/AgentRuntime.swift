@@ -185,6 +185,7 @@ public extension HermesACPTransporting {
 public enum AgentRuntimeError: Error, Equatable, LocalizedError, Sendable {
     case connectorUnavailable(AgentDefinitionID)
     case invalidSelectedPath(String?)
+    case codexAuthenticationRequired
 
     public var errorDescription: String? {
         switch self {
@@ -192,6 +193,11 @@ public enum AgentRuntimeError: Error, Equatable, LocalizedError, Sendable {
             AppText.localized(english: "No connector is available for \(definitionID.displayName).", korean: "\(definitionID.displayName) 전용 Connector를 사용할 수 없습니다.")
         case let .invalidSelectedPath(path):
             AppText.localized(english: "The selected agent's exact absolute path is invalid: \(path ?? "none")", korean: "선택한 에이전트의 정확한 절대 경로가 유효하지 않습니다: \(path ?? "없음")")
+        case .codexAuthenticationRequired:
+            AppText.localized(
+                english: "ChatGPT sign-in expired. Sign in again, then retry when ready.",
+                korean: "ChatGPT 로그인이 만료되었습니다. 다시 로그인한 뒤 준비되면 재시도하세요."
+            )
         }
     }
 }
@@ -200,14 +206,17 @@ public struct AgentRuntime: Sendable {
     private let selection: any AgentSelectionValidating
     private let connectors: [AgentDefinitionID: any AgentConnecting]
     private let soulStore: (any SoulProfileStoring)?
+    private let codexLoginService: CodexLoginService
 
     public init(
         selection: any AgentSelectionValidating,
         connectors: [any AgentConnecting],
-        soulStore: (any SoulProfileStoring)? = nil
+        soulStore: (any SoulProfileStoring)? = nil,
+        codexLoginService: CodexLoginService = CodexLoginService()
     ) {
         self.selection = selection
         self.soulStore = soulStore
+        self.codexLoginService = codexLoginService
         var connectorMap: [AgentDefinitionID: any AgentConnecting] = [:]
         for connector in connectors {
             connectorMap[connector.definitionID] = connector
@@ -224,10 +233,15 @@ public struct AgentRuntime: Sendable {
               NSString(string: path).isAbsolutePath else {
             throw AgentRuntimeError.invalidSelectedPath(installation.path)
         }
-        return try await connector.send(
-            await requestWithSoul(request),
-            executableURL: URL(fileURLWithPath: path).standardizedFileURL
-        )
+        try await requireCodexAuthentication(ifNeeded: installation)
+        do {
+            return try await connector.send(
+                await requestWithSoul(request),
+                executableURL: URL(fileURLWithPath: path).standardizedFileURL
+            )
+        } catch {
+            try await classifyCodexFailure(error, installation: installation)
+        }
     }
 
     public func sendEvents(_ request: PromptRequest) -> PromptResponseEventStream {
@@ -244,12 +258,17 @@ public struct AgentRuntime: Sendable {
                           NSString(string: path).isAbsolutePath else {
                         throw AgentRuntimeError.invalidSelectedPath(installation.path)
                     }
+                    try await requireCodexAuthentication(ifNeeded: installation)
                     let events = connector.sendEvents(
                         await requestWithSoul(request),
                         executableURL: URL(fileURLWithPath: path).standardizedFileURL
                     )
-                    for try await event in events {
-                        continuation.yield(event)
+                    do {
+                        for try await event in events {
+                            continuation.yield(event)
+                        }
+                    } catch {
+                        try await classifyCodexFailure(error, installation: installation)
                     }
                     continuation.finish()
                 } catch {
@@ -273,14 +292,32 @@ public struct AgentRuntime: Sendable {
     }
 
     private func requestWithSoul(_ request: PromptRequest) async -> PromptRequest {
-        guard let profile = await soulStore?.load(), !profile.isEmpty else { return request }
+        guard let profile = await soulStore?.load() else { return request }
         return PromptRequest(
             id: request.id,
             text: request.text,
             currentTurnText: request.currentTurnText,
             attachments: request.attachments,
-            soulMarkdown: profile.markdown
+            soulMarkdown: profile.promptMarkdown
         )
+    }
+
+    private func requireCodexAuthentication(ifNeeded installation: AgentInstallation) async throws {
+        guard installation.definitionID == .codex else { return }
+        guard try await codexLoginService.status(for: installation) else {
+            throw AgentRuntimeError.codexAuthenticationRequired
+        }
+    }
+
+    private func classifyCodexFailure(
+        _ error: Error,
+        installation: AgentInstallation
+    ) async throws -> Never {
+        guard installation.definitionID == .codex else { throw error }
+        if let signedIn = try? await codexLoginService.status(for: installation), !signedIn {
+            throw AgentRuntimeError.codexAuthenticationRequired
+        }
+        throw error
     }
 }
 

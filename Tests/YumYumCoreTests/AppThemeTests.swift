@@ -1,11 +1,33 @@
 import AppKit
 import Foundation
+import SwiftUI
 import Testing
 import YumYumCore
 @testable import YumYumApp
 
 @Suite
 struct AppThemeTests {
+    @Test
+    @MainActor
+    func registeredSettingsWindowUpdatesInBothDirections() {
+        _ = NSApplication.shared
+        let window = NSWindow()
+        let appDelegate = YumYumAppDelegate()
+        let hostingController = NSHostingController(
+            rootView: MainWindowRegistrationViewRepresentable(appDelegate: appDelegate)
+        )
+        window.contentViewController = hostingController
+        hostingController.view.layoutSubtreeIfNeeded()
+
+        #expect(window.appearance?.name == AppTheme.dark.appearance?.name)
+
+        appDelegate.setTheme(.light)
+        #expect(window.appearance?.name == AppTheme.light.appearance?.name)
+
+        appDelegate.setTheme(.dark)
+        #expect(window.appearance?.name == AppTheme.dark.appearance?.name)
+    }
+
     @Test
     func savesLoadsAndDefaultsToDark() throws {
         let suite = try #require(UserDefaults(suiteName: #function))

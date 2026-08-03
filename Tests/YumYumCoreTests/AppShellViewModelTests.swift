@@ -54,6 +54,71 @@ struct AppShellViewModelTests {
 
     @Test
     @MainActor
+    func newSessionSavesLatestSoulBeforeResettingRuntime() async {
+        let store = ControlledSoulStore(loadedProfile: .empty)
+        let connector = LifecycleConnector(definitionID: .codex)
+        let viewModel = YumYumAppViewModel(
+            fixtureProbe: ImmediateFixtureProbe(result: .success("unused")),
+            connectors: [connector],
+            soulStore: store
+        )
+        let loadTask = Task { @MainActor in await viewModel.loadSoul() }
+        await store.waitForLoad()
+        await store.resumeLoad()
+        await loadTask.value
+        viewModel.updateSoulDraft(SoulProfile(name: "Latest"))
+
+        #expect(await viewModel.saveSoulAndResetSession())
+        #expect(await store.savedProfiles.map(\.name) == ["Latest"])
+        #expect(await connector.resetCount == 1)
+    }
+
+    @Test
+    @MainActor
+    func newSessionWaitsForDraftEditedDuringSaveBeforeResettingRuntime() async {
+        let store = ControlledSoulStore(loadedProfile: .empty, suspendsFirstSave: true)
+        let connector = LifecycleConnector(definitionID: .codex)
+        let viewModel = YumYumAppViewModel(
+            fixtureProbe: ImmediateFixtureProbe(result: .success("unused")),
+            connectors: [connector],
+            soulStore: store
+        )
+        await viewModel.loadSoul()
+        viewModel.updateSoulDraft(SoulProfile(name: "Earlier"))
+        let resetTask = Task { @MainActor in await viewModel.saveSoulAndResetSession() }
+        await store.waitForSave()
+        viewModel.updateSoulDraft(SoulProfile(name: "Latest"))
+        await store.resumeSave()
+
+        #expect(await resetTask.value)
+        #expect(await store.savedProfiles.map(\.name) == ["Earlier", "Latest"])
+        #expect(await connector.resetCount == 1)
+        #expect(viewModel.soulSaveState == .saved)
+    }
+
+    @Test
+    @MainActor
+    func newSessionPreservesRuntimeWhenSoulSaveFails() async {
+        let store = ControlledSoulStore(loadedProfile: .empty, failsSave: true)
+        let connector = LifecycleConnector(definitionID: .codex)
+        let viewModel = YumYumAppViewModel(
+            fixtureProbe: ImmediateFixtureProbe(result: .success("unused")),
+            connectors: [connector],
+            soulStore: store
+        )
+        let loadTask = Task { @MainActor in await viewModel.loadSoul() }
+        await store.waitForLoad()
+        await store.resumeLoad()
+        await loadTask.value
+        viewModel.updateSoulDraft(SoulProfile(name: "Unsaved"))
+
+        #expect(!(await viewModel.saveSoulAndResetSession()))
+        #expect(await connector.resetCount == 0)
+        #expect(viewModel.soulSaveState == .failed)
+    }
+
+    @Test
+    @MainActor
     func refreshesDiscoveredAgentsAndSharesTheExplicitDefaultSelection() async throws {
         let codex = AgentInstallation(
             definitionID: .codex,
@@ -68,7 +133,8 @@ struct AppShellViewModelTests {
         )
         let viewModel = YumYumAppViewModel(
             fixtureProbe: ImmediateFixtureProbe(result: .success("unused")),
-            agentRegistry: registry
+            agentRegistry: registry,
+            codexLoginService: signedInCodexService(for: codex)
         )
 
         await viewModel.refreshAgents(trigger: .appStart)
@@ -109,7 +175,8 @@ struct AppShellViewModelTests {
         let viewModel = YumYumAppViewModel(
             fixtureProbe: ImmediateFixtureProbe(result: .success("unused")),
             agentRegistry: registry,
-            connectors: [codexConnector, claudeConnector]
+            connectors: [codexConnector, claudeConnector],
+            codexLoginService: signedInCodexService(for: codex)
         )
         await viewModel.refreshAgents(trigger: .appStart)
 
@@ -337,18 +404,51 @@ struct AppShellViewModelTests {
     }
 }
 
+private func signedInCodexService(for installation: AgentInstallation) -> CodexLoginService {
+    CodexLoginService(
+        verifier: AppShellCodexVerifier(installation: installation),
+        processRunner: AppShellSignedInCodexRunner()
+    )
+}
+
+private actor AppShellCodexVerifier: AgentInstallationVerifying {
+    let installation: AgentInstallation
+
+    init(installation: AgentInstallation) { self.installation = installation }
+
+    func verify(_ definitionID: AgentDefinitionID, at executableURL: URL) -> AgentInstallation {
+        installation
+    }
+}
+
+private actor AppShellSignedInCodexRunner: ProcessRunning {
+    func run(_ command: ProcessCommand, timeout: Duration?) -> ProcessRunResult {
+        ProcessRunResult(
+            standardOutput: Data(),
+            standardError: Data(),
+            termination: .exited(status: 0)
+        )
+    }
+}
+
 private actor ControlledSoulStore: SoulProfileStoring {
     let loadedProfile: SoulProfile
     let suspendsFirstSave: Bool
+    let failsSave: Bool
     private(set) var savedProfiles: [SoulProfile] = []
     private var loadContinuation: CheckedContinuation<Void, Never>?
     private var saveContinuation: CheckedContinuation<Void, Never>?
     private var loadStarted = false
     private var saveStarted = false
 
-    init(loadedProfile: SoulProfile, suspendsFirstSave: Bool = false) {
+    init(
+        loadedProfile: SoulProfile,
+        suspendsFirstSave: Bool = false,
+        failsSave: Bool = false
+    ) {
         self.loadedProfile = loadedProfile
         self.suspendsFirstSave = suspendsFirstSave
+        self.failsSave = failsSave
     }
 
     func load() async -> SoulProfile {
@@ -359,6 +459,7 @@ private actor ControlledSoulStore: SoulProfileStoring {
     }
 
     func save(_ profile: SoulProfile) async throws {
+        if failsSave { throw ControlledSoulStoreError.saveFailed }
         if suspendsFirstSave && savedProfiles.isEmpty {
             saveStarted = true
             await withCheckedContinuation { saveContinuation = $0 }
@@ -383,6 +484,10 @@ private actor ControlledSoulStore: SoulProfileStoring {
         saveContinuation?.resume()
         saveContinuation = nil
     }
+}
+
+private enum ControlledSoulStoreError: Error {
+    case saveFailed
 }
 
 private actor StaticAgentDiscovery: AgentDiscovering {

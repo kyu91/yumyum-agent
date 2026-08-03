@@ -117,6 +117,7 @@ The default English product reference is the [product specification](docs/produc
 
 - In **General**, confirm `settings-language-picker` exposes `English` and `한국어`.
 - Switch languages while settings, Soul drafts, agent state, chat, attachments, and panels are populated; labels must update without relaunch and state or scroll position must not reset.
+- In **Soul**, confirm `soul-response-style` exposes Urgent/Normal/Relaxed in English and 급함/보통/느긋함 in Korean, defaults to Normal, and VoiceOver explains that it changes response directness, context, and detail rather than processing speed.
 - Quit and relaunch to confirm the explicit language choice persists.
 - With no stored choice, verify Korean is selected only when the first resolved macOS preferred language is Korean; all other cases use English.
 

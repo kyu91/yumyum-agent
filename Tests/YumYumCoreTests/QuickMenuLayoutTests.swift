@@ -152,6 +152,64 @@ struct QuickMenuLayoutTests {
     }
 
     @Test
+    func alignsTheMenuFromThePetsSideOfItsSelectedDisplay() {
+        let layout = QuickMenuLayout()
+        let display = CGRect(x: 100, y: 25, width: 1_200, height: 800)
+        let panelSize = CGSize(width: 248, height: 216)
+
+        let left = layout.placement(
+            petFrame: CGRect(x: 120, y: 100, width: 96, height: 96),
+            panelSize: panelSize,
+            visibleFrames: [display]
+        )
+        let right = layout.placement(
+            petFrame: CGRect(x: 1_180, y: 100, width: 96, height: 96),
+            panelSize: panelSize,
+            visibleFrames: [display]
+        )
+        let midpoint = layout.placement(
+            petFrame: CGRect(x: display.midX - 48, y: 100, width: 96, height: 96),
+            panelSize: panelSize,
+            visibleFrames: [display]
+        )
+
+        #expect(left.horizontalAlignment == .leading)
+        #expect(left.frame.minX == 120)
+        #expect(right.horizontalAlignment == .trailing)
+        #expect(right.frame.maxX == 1_276)
+        #expect(midpoint.horizontalAlignment == .leading)
+        #expect(display.contains(left.frame))
+        #expect(display.contains(right.frame))
+        #expect(display.contains(midpoint.frame))
+    }
+
+    @Test
+    func usesTheSelectedNegativeCoordinateDisplayForAlignmentAndClamping() {
+        let layout = QuickMenuLayout()
+        let primary = CGRect(x: 0, y: 25, width: 1_440, height: 875)
+        let secondary = CGRect(x: -1_728, y: -80, width: 1_728, height: 1_080)
+        let panelSize = CGSize(width: 248, height: 216)
+
+        let left = layout.placement(
+            petFrame: CGRect(x: -1_710, y: 200, width: 96, height: 96),
+            panelSize: panelSize,
+            visibleFrames: [primary, secondary]
+        )
+        let right = layout.placement(
+            petFrame: CGRect(x: -116, y: 200, width: 96, height: 96),
+            panelSize: panelSize,
+            visibleFrames: [primary, secondary]
+        )
+
+        #expect(left.horizontalAlignment == .leading)
+        #expect(left.frame.minX == -1_710)
+        #expect(right.horizontalAlignment == .trailing)
+        #expect(right.frame.maxX == -20)
+        #expect(secondary.contains(left.frame))
+        #expect(secondary.contains(right.frame))
+    }
+
+    @Test
     func clampsTheTallChatBubbleOnNegativeAndVerticallyArrangedDisplays() {
         let lower = CGRect(x: -1_440, y: -900, width: 1_440, height: 900)
         let upper = CGRect(x: -1_440, y: 0, width: 1_440, height: 900)

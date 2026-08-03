@@ -185,13 +185,19 @@ struct FeedWorkflowTests {
         }
         await sender.waitUntilStarted()
 
-        let rejectedReset = await workflow.resetSession { await reset.perform() }
+        let rejectedReset = await workflow.resetSession {
+            await reset.perform()
+            return true
+        }
         #expect(!rejectedReset)
         #expect(await reset.count == 0)
 
         await sender.finish()
         _ = try await activeSubmission.value
-        let acceptedReset = await workflow.resetSession { await reset.perform() }
+        let acceptedReset = await workflow.resetSession {
+            await reset.perform()
+            return true
+        }
         #expect(acceptedReset)
         #expect(await reset.count == 1)
     }
@@ -202,7 +208,10 @@ struct FeedWorkflowTests {
         let workflow = FeedWorkflow(sender: sender, feedback: RecordingFeedFeedback())
         let reset = BlockingSessionReset()
         let resetTask = Task {
-            await workflow.resetSession { await reset.perform() }
+            await workflow.resetSession {
+                await reset.perform()
+                return true
+            }
         }
         await reset.waitUntilStarted()
 

@@ -29,6 +29,8 @@ struct AgentConnectorTests {
         let request = try #require(await connector.requests.first)
         #expect(request.text == "hello")
         #expect(request.soulMarkdown?.contains("## Name\n\nMomo") == true)
+        #expect(request.soulMarkdown?.contains("## Response Style") == true)
+        #expect(request.soulMarkdown?.contains("context needed to act") == true)
         #expect(request.attachments.isEmpty)
     }
 

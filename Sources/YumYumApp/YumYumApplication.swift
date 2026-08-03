@@ -19,7 +19,6 @@ struct YumYumApplication: App {
     var body: some Scene {
         Window("YumYum Agent", id: "main") {
             YumYumContentView(viewModel: viewModel, appDelegate: appDelegate)
-                .preferredColorScheme(appDelegate.currentTheme.colorScheme)
                 .background {
                     MainWindowActionInstaller(
                         appDelegate: appDelegate,
@@ -78,7 +77,7 @@ private struct MainWindowActionInstaller: View {
     let viewModel: YumYumAppViewModel
 
     var body: some View {
-        Color.clear
+        MainWindowRegistrationViewRepresentable(appDelegate: appDelegate)
             .frame(width: 0, height: 0)
             .onAppear {
                 appDelegate.configure(viewModel: viewModel)
@@ -87,6 +86,40 @@ private struct MainWindowActionInstaller: View {
                 }
             }
             .accessibilityHidden(true)
+    }
+}
+
+struct MainWindowRegistrationViewRepresentable: NSViewRepresentable {
+    let appDelegate: YumYumAppDelegate
+
+    func makeNSView(context: Context) -> MainWindowRegistrationView {
+        MainWindowRegistrationView { [weak appDelegate] window in
+            appDelegate?.registerMainWindow(window)
+        }
+    }
+
+    func updateNSView(_ nsView: MainWindowRegistrationView, context: Context) {}
+}
+
+@MainActor
+final class MainWindowRegistrationView: NSView {
+    private let register: @MainActor (NSWindow) -> Void
+
+    init(register: @escaping @MainActor (NSWindow) -> Void) {
+        self.register = register
+        super.init(frame: .zero)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let window {
+            register(window)
+        }
     }
 }
 
@@ -163,6 +196,8 @@ private struct YumYumContentView: View {
     @State private var soulProfile = SoulProfile.empty
     @State private var soulSaveTask: Task<Void, Never>?
     @State private var confirmsSoulReset = false
+    @State private var confirmsCodexLogin = false
+    @State private var codexLoginApproval: CodexLoginApprovalRequest?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -199,6 +234,7 @@ private struct YumYumContentView: View {
                 .accessibilityIdentifier("settings-tab-diagnostics")
             }
         }
+        .preferredColorScheme(appDelegate.currentTheme.colorScheme)
         .frame(minWidth: 560, minHeight: 620, alignment: .topLeading)
         .onAppear {
             appDelegate.configure(viewModel: viewModel)
@@ -211,6 +247,10 @@ private struct YumYumContentView: View {
         .onDisappear {
             connectionTask?.cancel()
             soulSaveTask?.cancel()
+            if let codexLoginApproval {
+                viewModel.cancelCodexLoginApproval(codexLoginApproval)
+                self.codexLoginApproval = nil
+            }
             Task { await viewModel.flushSoul() }
         }
         .confirmationDialog(
@@ -225,6 +265,24 @@ private struct YumYumContentView: View {
                 Task { await viewModel.resetSoul() }
             }
             Button(AppText.localized("취소"), role: .cancel) {}
+        }
+        .confirmationDialog(
+            codexConfirmationTitle,
+            isPresented: $confirmsCodexLogin,
+            titleVisibility: .visible
+        ) {
+            Button(codexConfirmationButton, role: codexLoginApproval?.operation == .logout ? .destructive : nil) {
+                guard let codexLoginApproval else { return }
+                self.codexLoginApproval = nil
+                Task { await viewModel.confirmCodexLogin(codexLoginApproval) }
+            }
+            Button(AppText.localized("취소"), role: .cancel) {
+                guard let codexLoginApproval else { return }
+                viewModel.cancelCodexLoginApproval(codexLoginApproval)
+                self.codexLoginApproval = nil
+            }
+        } message: {
+            Text(codexConfirmationMessage)
         }
     }
 
@@ -256,6 +314,35 @@ private struct YumYumContentView: View {
             )
             .foregroundStyle(.orange)
             .accessibilityIdentifier("soul-sensitive-data-warning")
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(AppText.localized(english: "Response Style", korean: "응답 스타일"))
+                    .font(.callout.weight(.semibold))
+                Picker(
+                    AppText.localized(english: "Response Style", korean: "응답 스타일"),
+                    selection: Binding(
+                        get: { soulProfile.responseStyle },
+                        set: { style in
+                            soulProfile = replacingSoulResponseStyle(with: style)
+                            viewModel.updateSoulDraft(soulProfile)
+                            scheduleSoulSave()
+                        }
+                    )
+                ) {
+                    Text(AppText.localized(english: "Urgent", korean: "급함"))
+                        .tag(SoulResponseStyle.urgent)
+                    Text(AppText.localized(english: "Normal", korean: "보통"))
+                        .tag(SoulResponseStyle.normal)
+                    Text(AppText.localized(english: "Relaxed", korean: "느긋함"))
+                        .tag(SoulResponseStyle.relaxed)
+                }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("soul-response-style")
+                .accessibilityHint(AppText.localized(
+                    english: "Controls response directness, context, and detail, not processing speed.",
+                    korean: "처리 속도가 아니라 응답의 직접성, 맥락, 분량을 조절합니다."
+                ))
+            }
 
             soulField(AppText.localized("이름"), keyPath: \.name, identifier: "soul-name")
             soulField(AppText.localized("역할 / 정체성"), keyPath: \.role, identifier: "soul-role")
@@ -329,7 +416,24 @@ private struct YumYumContentView: View {
             behaviorPrinciples: keyPath == \.behaviorPrinciples ? value : soulProfile.behaviorPrinciples,
             additionalInstructions: keyPath == \.additionalInstructions
                 ? value
-                : soulProfile.additionalInstructions
+                : soulProfile.additionalInstructions,
+            responseStyle: soulProfile.responseStyle
+        )
+    }
+
+    private func replacingSoulResponseStyle(with style: SoulResponseStyle) -> SoulProfile {
+        SoulProfile(
+            name: soulProfile.name,
+            role: soulProfile.role,
+            personality: soulProfile.personality,
+            speakingStyle: soulProfile.speakingStyle,
+            coreValues: soulProfile.coreValues,
+            likes: soulProfile.likes,
+            dislikes: soulProfile.dislikes,
+            userAddress: soulProfile.userAddress,
+            behaviorPrinciples: soulProfile.behaviorPrinciples,
+            additionalInstructions: soulProfile.additionalInstructions,
+            responseStyle: style
         )
     }
 
@@ -427,13 +531,13 @@ private struct YumYumContentView: View {
 
             Spacer()
 
-            Text("LOCAL ONLY")
+            Text(AppText.localized(english: "LOCAL CLI", korean: "로컬 CLI"))
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.orange)
                 .padding(.horizontal, 9)
                 .padding(.vertical, 5)
                 .background(.orange.opacity(0.12), in: Capsule())
-                .accessibilityLabel("Local only")
+                .accessibilityLabel(AppText.localized(english: "Local CLI", korean: "로컬 CLI"))
         }
     }
 
@@ -458,33 +562,94 @@ private struct YumYumContentView: View {
                                 .font(.callout.weight(.semibold))
                             Text(installation.path ?? AppText.localized("안전한 설치 경로에서 찾지 못함"))
                                 .font(.system(.caption, design: .monospaced))
-                                .foregroundStyle(.secondary)
+                            .foregroundStyle(.secondary)
+                            Text(AppText.localized(
+                                english: "Agents run on this Mac but may send selected content according to the chosen agent's network and authentication policy.",
+                                korean: "에이전트는 이 Mac에서 실행되지만 선택한 에이전트의 네트워크 및 인증 정책에 따라 선택한 콘텐츠를 전송할 수 있습니다."
+                            ))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                                 .lineLimit(1)
                                 .truncationMode(.middle)
                             Text(agentDetail(installation))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                            if installation.definitionID == .codex,
+                               installation.availability == .available {
+                                Text(viewModel.codexLoginState.localizedDescription)
+                                    .font(.caption)
+                                    .foregroundStyle(codexLoginStatusColor)
+                                    .accessibilityIdentifier("codex-login-status")
+                                Text(AppText.localized(
+                                    english: "Codex usage counts against your ChatGPT plan limits. Available models and limits may vary by plan. YumYum never receives your password or token.",
+                                    korean: "Codex 사용량은 ChatGPT 플랜 한도에 포함됩니다. 사용 가능한 모델과 한도는 플랜에 따라 다를 수 있습니다. YumYum은 비밀번호나 토큰을 받지 않습니다."
+                                ))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            }
                         }
 
                         Spacer()
 
-                        Button(
-                            viewModel.agentSnapshot.selectedInstallation?.id == installation.id
-                                ? AppText.localized("선택됨")
-                                : AppText.localized("기본으로 선택")
-                        ) {
-                            guard let path = installation.path else { return }
-                            Task {
-                                try? await viewModel.selectAgent(
-                                    installation.definitionID,
-                                    path: path
-                                )
+                        VStack(alignment: .trailing, spacing: 6) {
+                            if installation.definitionID == .codex,
+                               installation.availability == .available {
+                                if [.awaitingBrowserSignIn, .loggingOut, .changingAccount].contains(viewModel.codexLoginState) {
+                                    Button(AppText.localized("취소")) {
+                                        viewModel.cancelCodexLogin()
+                                    }
+                                    .accessibilityIdentifier("cancel-codex-login-button")
+                                } else if viewModel.codexLoginState == .signedIn {
+                                    Button(AppText.localized(english: "Change account", korean: "계정 변경")) {
+                                        requestCodexApproval(for: installation, operation: .changeAccount)
+                                    }
+                                    Button(AppText.localized(english: "Logout", korean: "로그아웃"), role: .destructive) {
+                                        requestCodexApproval(for: installation, operation: .logout)
+                                    }
+                                } else {
+                                    Button(AppText.localized(
+                                        english: "Sign in with ChatGPT",
+                                        korean: "ChatGPT로 로그인"
+                                    )) {
+                                        requestCodexApproval(for: installation, operation: .login)
+                                    }
+                                    .disabled(viewModel.codexLoginState == .checking)
+                                    .accessibilityIdentifier("sign-in-codex-button")
+                                }
+                                Button(AppText.localized(
+                                    english: "Check connection again",
+                                    korean: "연결 다시 확인"
+                                )) {
+                                    Task { await viewModel.refreshCodexLoginStatus(for: installation) }
+                                }
+                                .disabled([.checking, .awaitingBrowserSignIn, .loggingOut, .changingAccount].contains(viewModel.codexLoginState))
+                                .accessibilityIdentifier("check-codex-connection-button")
                             }
+
+                            Button(
+                                viewModel.agentSnapshot.selectedInstallation?.id == installation.id
+                                    ? AppText.localized("선택됨")
+                                    : AppText.localized("기본으로 선택")
+                            ) {
+                                guard let path = installation.path else { return }
+                                Task {
+                                    try? await viewModel.selectAgent(
+                                        installation.definitionID,
+                                        path: path
+                                    )
+                                }
+                            }
+                            .disabled(
+                                installation.availability != .available
+                                    || (installation.definitionID == .codex && viewModel.codexLoginState != .signedIn)
+                                    || viewModel.agentSnapshot.selectedInstallation?.id == installation.id
+                            )
+                            .accessibilityHint(
+                                installation.definitionID == .codex && viewModel.codexLoginState != .signedIn
+                                    ? viewModel.codexLoginState.localizedDescription
+                                    : ""
+                            )
                         }
-                        .disabled(
-                            installation.availability != .available
-                                || viewModel.agentSnapshot.selectedInstallation?.id == installation.id
-                        )
                     }
                     Divider()
                 }
@@ -559,6 +724,61 @@ private struct YumYumContentView: View {
             return installation.version ?? AppText.localized("버전 확인 완료")
         case let .unavailable(reason):
             return reason
+        }
+    }
+
+    private var codexLoginStatusColor: Color {
+        switch viewModel.codexLoginState {
+        case .signedIn: .green
+        case .failed, .timedOut, .changeFailedNeedsLogin: .red
+        default: .secondary
+        }
+    }
+
+    private func requestCodexApproval(
+        for installation: AgentInstallation,
+        operation: CodexLoginApprovalRequest.Operation
+    ) {
+        codexLoginApproval = viewModel.requestCodexLoginApproval(
+            for: installation,
+            operation: operation
+        )
+        confirmsCodexLogin = codexLoginApproval != nil
+    }
+
+    private var codexConfirmationTitle: String {
+        switch codexLoginApproval?.operation {
+        case .logout: AppText.localized(english: "Log out of ChatGPT?", korean: "ChatGPT에서 로그아웃할까요?")
+        case .changeAccount: AppText.localized(english: "Change ChatGPT account?", korean: "ChatGPT 계정을 변경할까요?")
+        default: AppText.localized(english: "Sign in to Codex with ChatGPT?", korean: "ChatGPT로 Codex에 로그인할까요?")
+        }
+    }
+
+    private var codexConfirmationButton: String {
+        switch codexLoginApproval?.operation {
+        case .logout: AppText.localized(english: "Logout", korean: "로그아웃")
+        case .changeAccount: AppText.localized(english: "Logout and Change Account", korean: "로그아웃 후 계정 변경")
+        default: AppText.localized(english: "Open Browser and Sign In", korean: "브라우저를 열고 로그인")
+        }
+    }
+
+    private var codexConfirmationMessage: String {
+        switch codexLoginApproval?.operation {
+        case .logout:
+            AppText.localized(
+                english: "The official Codex CLI will remove its stored authentication state.",
+                korean: "공식 Codex CLI가 저장된 인증 상태를 제거합니다."
+            )
+        case .changeAccount:
+            AppText.localized(
+                english: "Current authentication is removed first. If browser sign-in is cancelled or fails, you will remain logged out.",
+                korean: "현재 인증을 먼저 제거합니다. 브라우저 로그인을 취소하거나 실패하면 로그아웃 상태로 남습니다."
+            )
+        default:
+            AppText.localized(
+                english: "Codex will open your browser, use the network, and save its authentication under your user account. YumYum never receives your password or token.",
+                korean: "Codex가 브라우저와 네트워크를 사용하고 사용자 계정 아래에 인증 상태를 저장합니다. YumYum은 비밀번호나 토큰을 받지 않습니다."
+            )
         }
     }
 

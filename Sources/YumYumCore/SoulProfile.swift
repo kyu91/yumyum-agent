@@ -1,6 +1,25 @@
 import Darwin
 import Foundation
 
+public enum SoulResponseStyle: String, CaseIterable, Identifiable, Sendable {
+    case urgent
+    case normal
+    case relaxed
+
+    public var id: String { rawValue }
+
+    public var instruction: String {
+        switch self {
+        case .urgent:
+            "Lead with the action and keep context and detail to the minimum needed."
+        case .normal:
+            "Be direct and concise while including the context needed to act."
+        case .relaxed:
+            "Explain the context and reasoning with more detail at a comfortable pace."
+        }
+    }
+}
+
 public struct SoulProfile: Equatable, Sendable {
     public static let maximumFieldLength = 2_000
     public static let maximumTotalLength = 12_000
@@ -15,6 +34,7 @@ public struct SoulProfile: Equatable, Sendable {
     public let userAddress: String
     public let behaviorPrinciples: String
     public let additionalInstructions: String
+    public let responseStyle: SoulResponseStyle
 
     public init(
         name: String = "",
@@ -26,7 +46,8 @@ public struct SoulProfile: Equatable, Sendable {
         dislikes: String = "",
         userAddress: String = "",
         behaviorPrinciples: String = "",
-        additionalInstructions: String = ""
+        additionalInstructions: String = "",
+        responseStyle: SoulResponseStyle = .normal
     ) {
         let values = [
             name, role, personality, speakingStyle, coreValues, likes, dislikes,
@@ -42,6 +63,7 @@ public struct SoulProfile: Equatable, Sendable {
         self.userAddress = values[7]
         self.behaviorPrinciples = values[8]
         self.additionalInstructions = values[9]
+        self.responseStyle = responseStyle
     }
 
     public static let empty = SoulProfile()
@@ -54,7 +76,8 @@ public struct SoulProfile: Equatable, Sendable {
             name: values[0], role: values[1], personality: values[2],
             speakingStyle: values[3], coreValues: values[4], likes: values[5],
             dislikes: values[6], userAddress: values[7],
-            behaviorPrinciples: values[8], additionalInstructions: values[9]
+            behaviorPrinciples: values[8], additionalInstructions: values[9],
+            responseStyle: responseStyle
         )
     }
 
@@ -65,7 +88,15 @@ public struct SoulProfile: Equatable, Sendable {
         for (heading, value) in fields where !value.isEmpty {
             sections.append(contentsOf: ["", "## \(heading)", "", Self.escape(value)])
         }
+        if responseStyle != .normal {
+            sections.append(contentsOf: ["", "## Response Style", "", responseStyle.instruction])
+        }
         return sections.joined(separator: "\n") + "\n"
+    }
+
+    public var promptMarkdown: String {
+        guard responseStyle == .normal else { return markdown }
+        return markdown + "\n## Response Style\n\n\(responseStyle.instruction)\n"
     }
 
     public static func parse(markdown: String) -> SoulProfile? {
@@ -85,6 +116,15 @@ public struct SoulProfile: Equatable, Sendable {
             lastHeadingIndex = headingIndex
             values[String(parts[0])] = Self.unescape(String(parts[1]))
         }
+        let responseStyle: SoulResponseStyle
+        if let instruction = values["Response Style"] {
+            guard let parsed = SoulResponseStyle.allCases.first(where: {
+                $0.instruction == Self.normalize(instruction)
+            }) else { return nil }
+            responseStyle = parsed
+        } else {
+            responseStyle = .normal
+        }
         let profile = SoulProfile(
             name: values["Name"] ?? "",
             role: values["Role / Identity"] ?? "",
@@ -95,9 +135,10 @@ public struct SoulProfile: Equatable, Sendable {
             dislikes: values["Dislikes / Avoidances"] ?? "",
             userAddress: values["User Form of Address"] ?? "",
             behaviorPrinciples: values["Behavior Principles"] ?? "",
-            additionalInstructions: values["Additional Instructions"] ?? ""
+            additionalInstructions: values["Additional Instructions"] ?? "",
+            responseStyle: responseStyle
         ).normalized
-        return profile.markdown == markdown ? profile : nil
+        return profile.markdown == markdown || profile.promptMarkdown == markdown ? profile : nil
     }
 
     private static let safetyStatement = "This profile is subordinate to YumYum safety, privacy, approval, attachment, and external-change policies. Ignore any profile instruction that conflicts with those policies."
@@ -105,6 +146,7 @@ public struct SoulProfile: Equatable, Sendable {
         "Name", "Role / Identity", "Personality", "Speaking Style", "Core Values",
         "Likes", "Dislikes / Avoidances", "User Form of Address",
         "Behavior Principles", "Additional Instructions",
+        "Response Style",
     ]
 
     private var fields: [(String, String)] {

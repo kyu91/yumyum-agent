@@ -16,7 +16,7 @@ final class YumYumAppDelegate: NSObject, NSApplicationDelegate, ObservableObject
     private var shortcutController: GlobalShortcutController?
     private var feedFeedback: AppFeedFeedback?
     private weak var viewModel: YumYumAppViewModel?
-    private var mainWindow: NSWindow?
+    private weak var mainWindow: NSWindow?
     private var openMainWindowAction: (@MainActor () -> Void)?
     private var runtimeShutdownTask: Task<Void, Never>?
     private var didShutdownRuntime = false
@@ -35,13 +35,6 @@ final class YumYumAppDelegate: NSObject, NSApplicationDelegate, ObservableObject
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(windowDidBecomeMain(_:)),
-            name: NSWindow.didBecomeMainNotification,
-            object: nil
-        )
-
         let controller = FloatingPetWindowController { [weak self] in
             self?.toggleQuickMenu()
         }
@@ -50,7 +43,6 @@ final class YumYumAppDelegate: NSObject, NSApplicationDelegate, ObservableObject
         if petVisibility.isVisible {
             controller.show()
         }
-        captureMainWindow()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -197,29 +189,14 @@ final class YumYumAppDelegate: NSObject, NSApplicationDelegate, ObservableObject
         openMainWindowAction = action
     }
 
-    @objc
-    private func windowDidBecomeMain(_ notification: Notification) {
-        guard let window = notification.object as? NSWindow,
-              !(window is FloatingPetPanel) else {
-            return
-        }
+    func registerMainWindow(_ window: NSWindow) {
         mainWindow = window
         window.appearance = currentTheme.appearance
-    }
-
-    private func captureMainWindow() {
-        if let window = NSApplication.shared.windows.first(where: {
-            !($0 is NSPanel) && $0.title == "YumYum Agent"
-        }) {
-            mainWindow = window
-            window.appearance = currentTheme.appearance
-        }
     }
 
     private func openMainWindow() {
         NSApplication.shared.activate(ignoringOtherApps: true)
         openMainWindowAction?()
-        captureMainWindow()
         mainWindow?.makeKeyAndOrderFront(nil)
     }
 }

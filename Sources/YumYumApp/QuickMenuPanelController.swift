@@ -486,6 +486,7 @@ final class ChatPanelController: NSObject {
     private let captureCoordinator = ScreenCaptureCoordinator()
     private let session: ChatBubbleSession
     private let resetAgentSession: @Sendable () async -> Bool
+    private let openSettings: @MainActor () -> Void
     private var stateObservation: AnyCancellable?
     private var restartObservation: AnyCancellable?
     private var captureTask: Task<Void, Never>?
@@ -512,13 +513,15 @@ final class ChatPanelController: NSObject {
         petController: FloatingPetWindowController,
         viewModel: YumYumAppViewModel,
         workflow: FeedWorkflow,
-        resetAgentSession: (@Sendable () async -> Bool)? = nil
+        resetAgentSession: (@Sendable () async -> Bool)? = nil,
+        openSettings: @escaping @MainActor () -> Void = {}
     ) {
         self.petController = petController
         self.viewModel = viewModel
+        self.openSettings = openSettings
         self.resetAgentSession = resetAgentSession ?? {
             await workflow.resetSession {
-                await viewModel.agentRuntime.reset()
+                await viewModel.saveSoulAndResetSession()
             }
         }
         session = ChatBubbleSession(submitter: workflow)
@@ -708,7 +711,7 @@ final class ChatPanelController: NSObject {
     }
 
     func update(snapshot: AgentRegistrySnapshot) {
-        if snapshot.canSend {
+        if viewModel?.canSendPrompt == true {
             agentNotice = nil
         } else if snapshot.requiresExplicitReselection {
             agentNotice = .reselectDefault
@@ -898,6 +901,11 @@ final class ChatPanelController: NSObject {
     }
 
     private func retrySend() {
+        if case let .failed(message) = session.state.phase,
+           UserFacingErrorRedactor.category(forSafeMessage: message) == .codexAuthenticationRequired {
+            openSettings()
+            return
+        }
         guard session.retry(
             reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         ) else { return }
@@ -1276,6 +1284,15 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
             || !state.draftAttachments.isEmpty
         sendButton.isEnabled = !isBusy && hasDraft
         retryButton.isHidden = !(canRetry && !isBusy)
+        if case let .failed(message) = state.phase,
+           UserFacingErrorRedactor.category(forSafeMessage: message) == .codexAuthenticationRequired {
+            retryButton.title = AppText.localized(
+                english: "Sign in again",
+                korean: "다시 로그인",
+                language: language
+            )
+            retryButton.setAccessibilityLabel(retryButton.title)
+        }
         cancelButton.isHidden = !state.isSending
         applyComposerTheme()
         setStatus(status, isError: isError)

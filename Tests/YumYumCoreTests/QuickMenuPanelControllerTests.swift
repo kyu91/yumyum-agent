@@ -5,6 +5,38 @@ import YumYumCore
 
 @Suite(.serialized)
 struct QuickMenuPanelControllerTests {
+    @Test(arguments: AppTheme.allCases)
+    func actionRowColorsAreOpaqueDistinctAndReadable(theme: AppTheme) throws {
+        let normal = ActionRowAppearance.resolve(theme: theme)
+        let hover = ActionRowAppearance.resolve(theme: theme, isHovered: true)
+        let pressed = ActionRowAppearance.resolve(theme: theme, isPressed: true)
+        let focused = ActionRowAppearance.resolve(theme: theme, isFocused: true)
+        let disabled = ActionRowAppearance.resolve(
+            theme: theme,
+            isEnabled: false,
+            isHovered: true,
+            isPressed: true,
+            isFocused: true
+        )
+
+        for appearance in [normal, hover, pressed, focused, disabled] {
+            #expect(try alpha(of: appearance.backgroundColor) == 1)
+            #expect(contrastRatio(appearance.textColor, appearance.backgroundColor) >= 4.5)
+        }
+        #expect(!colorsEqual(normal.backgroundColor, hover.backgroundColor))
+        #expect(!colorsEqual(hover.backgroundColor, pressed.backgroundColor))
+        #expect(colorsEqual(hover.backgroundColor, focused.backgroundColor))
+        #expect(colorsEqual(disabled.backgroundColor, normal.backgroundColor))
+        #expect(disabled.opacity == 0.42)
+
+        if theme == .light {
+            #expect(!colorsEqual(
+                hover.backgroundColor,
+                NSColor.controlAccentColor.withAlphaComponent(0.12)
+            ))
+        }
+    }
+
     @Test
     @MainActor
     func completedChatEnablesNewSession() async throws {
@@ -179,6 +211,32 @@ struct QuickMenuPanelControllerTests {
         _ = try await activeSubmission.value
     }
 
+    private func alpha(of color: NSColor) throws -> CGFloat {
+        try #require(color.usingColorSpace(.deviceRGB)).alphaComponent
+    }
+
+    private func colorsEqual(_ lhs: NSColor, _ rhs: NSColor) -> Bool {
+        lhs.usingColorSpace(.deviceRGB) == rhs.usingColorSpace(.deviceRGB)
+    }
+
+    private func contrastRatio(_ lhs: NSColor, _ rhs: NSColor) -> CGFloat {
+        let lighter = max(relativeLuminance(lhs), relativeLuminance(rhs))
+        let darker = min(relativeLuminance(lhs), relativeLuminance(rhs))
+        return (lighter + 0.05) / (darker + 0.05)
+    }
+
+    private func relativeLuminance(_ color: NSColor) -> CGFloat {
+        guard let rgb = color.usingColorSpace(.deviceRGB) else { return 0 }
+        func linear(_ channel: CGFloat) -> CGFloat {
+            channel <= 0.04045
+                ? channel / 12.92
+                : pow((channel + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * linear(rgb.redComponent)
+            + 0.7152 * linear(rgb.greenComponent)
+            + 0.0722 * linear(rgb.blueComponent)
+    }
+
     @Test
     @MainActor
     func chatHeaderNewSessionActionIsLocalizedAccessibleAndDisabledWhileBusy() throws {
@@ -253,7 +311,13 @@ struct QuickMenuPanelControllerTests {
             in: try #require(controller.responsePanel.contentView)
         )
 
-        #expect(action.backgroundColor == NSColor(calibratedWhite: 1, alpha: 1).cgColor)
+        #expect(action.backgroundColor == NSColor.clear.cgColor)
+        let actionButtons = buttons(in: controller.actionPanel.contentView)
+        #expect(actionButtons.count == 4)
+        #expect(actionButtons.allSatisfy {
+            $0.layer?.backgroundColor == AppTheme.light.palette.surface.cgColor
+                && $0.layer?.borderColor == AppTheme.light.palette.border.cgColor
+        })
         #expect(thinking.backgroundColor == NSColor(calibratedWhite: 1, alpha: 1).cgColor)
         #expect(layerBackgroundColors(in: responseBody).contains(
             NSColor(calibratedWhite: 1, alpha: 1).cgColor
@@ -264,6 +328,71 @@ struct QuickMenuPanelControllerTests {
         #expect(layerBackgroundColors(in: controller.responsePanel.contentView).contains(
             AppTheme.light.palette.secondaryAction.cgColor
         ))
+    }
+
+    @Test
+    @MainActor
+    func actionMenuUsesAdaptiveAlignedIntrinsicTailFreeBubbleSurfaces() throws {
+        _ = NSApplication.shared
+        let pet = FloatingPetWindowController {}
+        let controller = QuickMenuPanelController(
+            petController: pet,
+            viewModel: YumYumAppViewModel(fixtureProbe: UnusedFixtureProbe()),
+            workflow: FeedWorkflow(
+                sender: ControlledPromptSender(),
+                feedback: SilentFeedFeedback()
+            ),
+            openSettings: {}
+        )
+        defer { controller.prepareForTermination() }
+        controller.applyLanguage(.english)
+        controller.updateActionFrameForTesting(
+            petFrame: CGRect(x: 20, y: 100, width: 96, height: 96),
+            visibleFrames: [CGRect(x: 0, y: 0, width: 1_200, height: 800)]
+        )
+        let root = try #require(controller.actionPanel.contentView)
+        root.layoutSubtreeIfNeeded()
+        let actionButtons = buttons(in: root).sorted { $0.frame.maxY > $1.frame.maxY }
+        actionButtons.forEach { $0.layoutSubtreeIfNeeded() }
+        let stack = try #require(flattened(root).compactMap { $0 as? NSStackView }.first)
+
+        #expect(QuickMenuPanelController.actionPanelSize == CGSize(width: 248, height: 216))
+        #expect(root.layer?.backgroundColor == NSColor.clear.cgColor)
+        #expect(actionButtons.map(\.title) == ActionBubbleAction.allCases.map {
+            $0.title(language: .english)
+        })
+        #expect(stack.spacing == 8)
+        let widths = actionButtons.map(\.frame.width)
+        #expect(Set(widths.map { Int($0.rounded()) }).count > 1)
+        let chooseFiles = try #require(actionButtons.first { $0.title == "Choose Files" })
+        let settings = try #require(actionButtons.first { $0.title == "Settings" })
+        #expect(chooseFiles.frame.width > settings.frame.width)
+        #expect(controller.actionPanel.frame.minX == 20)
+        #expect(actionButtons.allSatisfy {
+            abs($0.frame.minX - actionButtons[0].frame.minX) < 0.5
+        })
+
+        controller.updateActionFrameForTesting(
+            petFrame: CGRect(x: 1_080, y: 100, width: 96, height: 96),
+            visibleFrames: [CGRect(x: 0, y: 0, width: 1_200, height: 800)]
+        )
+        root.layoutSubtreeIfNeeded()
+        #expect(controller.actionPanel.frame.maxX == 1_176)
+        #expect(actionButtons.allSatisfy {
+            abs($0.frame.maxX - actionButtons[0].frame.maxX) < 0.5
+        })
+        #expect(actionButtons.allSatisfy {
+            let contentWidth = $0.cell?.cellSize.width ?? $0.frame.width
+            let horizontalPadding = $0.frame.width - contentWidth
+            return $0.frame.height >= 44
+                && horizontalPadding / 2 >= 12
+                && $0.layer?.backgroundColor != NSColor.clear.cgColor
+                && ($0.layer?.borderWidth ?? 0) > 0
+                && $0.layer?.sublayers?.contains { $0 is CAShapeLayer } != true
+        })
+        #expect(zip(actionButtons, actionButtons.dropFirst()).allSatisfy {
+            $0.frame.minY - $1.frame.maxY >= 7
+        })
     }
 
     @Test

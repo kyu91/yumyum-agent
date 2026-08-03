@@ -4,6 +4,12 @@ All notable changes to this project will be documented here.
 
 ## [Unreleased]
 
+## [0.2.0]
+
+- Add live Settings theme updates and Soul response styles with save-before-reset behavior.
+- Make the quick menu adapt its intrinsic width and alignment to the pet's display position.
+- Add explicit Codex ChatGPT sign-in, sign-out, account switching, and readiness handling.
+
 ## [0.1.1]
 
 - Redesign the YumYum mascot and app branding.

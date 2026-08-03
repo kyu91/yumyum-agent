@@ -5,6 +5,30 @@ import Testing
 @Suite
 struct SoulProfileTests {
     @Test
+    func promptMarkdownRoundTripsForNormalResponseStyle() {
+        let profile = SoulProfile(name: "Momo")
+
+        #expect(SoulProfile.parse(markdown: profile.promptMarkdown) == profile)
+    }
+
+    @Test
+    func preservesLegacyPersonalityAndAddsCanonicalResponseStyleToPrompts() throws {
+        let legacy = SoulProfile(personality: "Curious and candid").markdown
+
+        let parsed = try #require(SoulProfile.parse(markdown: legacy))
+        #expect(parsed.personality == "Curious and candid")
+        #expect(parsed.responseStyle == .normal)
+        #expect(parsed.promptMarkdown.contains("Be direct and concise while including the context needed to act."))
+
+        let urgent = SoulProfile(
+            personality: "Curious and candid",
+            responseStyle: .urgent
+        )
+        #expect(SoulProfile.parse(markdown: urgent.markdown) == urgent)
+        #expect(urgent.promptMarkdown.contains("Lead with the action and keep context and detail to the minimum needed."))
+    }
+
+    @Test
     func normalizesBoundsRendersAndParsesDeterministically() throws {
         let profile = SoulProfile(
             name: "  Yum   Yum  ",

@@ -8,6 +8,7 @@ public enum UserFacingErrorCategory: CaseIterable, Equatable, Sendable {
     case agentUnavailable
     case agentTimedOut
     case agentFailure
+    case codexAuthenticationRequired
     case busy
     case capturePermission
     case captureFailure
@@ -34,6 +35,8 @@ public enum UserFacingErrorCategory: CaseIterable, Equatable, Sendable {
             AppText.localized(english: "The agent response timed out. Try again.", korean: "에이전트 응답 시간이 초과되었습니다. 다시 시도해 주세요.", language: language)
         case .agentFailure:
             AppText.localized(english: "The agent could not process the request. Try again.", korean: "에이전트가 요청을 처리하지 못했습니다. 다시 시도해 주세요.", language: language)
+        case .codexAuthenticationRequired:
+            AppText.localized(english: "ChatGPT sign-in expired. Sign in again, then retry when ready.", korean: "ChatGPT 로그인이 만료되었습니다. 다시 로그인한 뒤 준비되면 재시도하세요.", language: language)
         case .busy:
             AppText.localized(english: "Another input is already being processed.", korean: "이미 다른 입력을 처리하고 있습니다.", language: language)
         case .capturePermission:
@@ -75,8 +78,10 @@ public enum UserFacingErrorRedactor {
                 return UserFacingErrorCategory.agentTimedOut.message
             }
             return UserFacingErrorCategory.agentFailure.message
-        case is AgentRuntimeError:
-            return UserFacingErrorCategory.agentUnavailable.message
+        case let error as AgentRuntimeError:
+            return error == .codexAuthenticationRequired
+                ? UserFacingErrorCategory.codexAuthenticationRequired.message
+                : UserFacingErrorCategory.agentUnavailable.message
         case is FeedWorkflowError:
             return UserFacingErrorCategory.busy.message
         default:

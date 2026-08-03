@@ -1,14 +1,16 @@
 import AppKit
+import Combine
 import QuartzCore
 import UniformTypeIdentifiers
 import YumYumCore
 
 @MainActor
 final class QuickMenuPanelController: NSObject {
-    static let actionPanelSize = CGSize(width: 248, height: 200)
+    static let actionPanelSize = CGSize(width: 248, height: 216)
     static let thinkingPanelSize = CGSize(width: 112, height: 48)
 
     private let petController: FloatingPetWindowController
+    private weak var viewModel: YumYumAppViewModel?
     private let chatController: ChatPanelController
     private let openSettings: @MainActor () -> Void
     private let layout = QuickMenuLayout()
@@ -31,6 +33,7 @@ final class QuickMenuPanelController: NSObject {
     private var animationPanel: NSPanel?
     private var thinkingTask: Task<Void, Never>?
     private var thinkingGeneration: UUID?
+    private var codexLoginObservation: AnyCancellable?
     private var lastReduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
 #if DEBUG
     private(set) var responseFrameUpdateCountForTesting = 0
@@ -51,6 +54,7 @@ final class QuickMenuPanelController: NSObject {
         openSettings: @escaping @MainActor () -> Void
     ) {
         self.petController = petController
+        self.viewModel = viewModel
         self.openSettings = openSettings
         chatController = ChatPanelController(
             petController: petController,
@@ -74,6 +78,11 @@ final class QuickMenuPanelController: NSObject {
             defer: false
         )
         super.init()
+
+        codexLoginObservation = viewModel.$codexLoginState.dropFirst().sink { [weak self, weak viewModel] _ in
+            guard let viewModel else { return }
+            self?.update(snapshot: viewModel.agentSnapshot)
+        }
 
         Self.configure(
             actionPanel,
@@ -277,7 +286,7 @@ final class QuickMenuPanelController: NSObject {
 
     func update(snapshot: AgentRegistrySnapshot) {
         isCheckingAgents = false
-        canFeed = snapshot.canSend
+        canFeed = viewModel?.canSendPrompt ?? false
         actionViewController.setFeedActionsEnabled(
             canFeed && !isCheckingAgents && !chatController.isSending
         )
@@ -370,6 +379,10 @@ final class QuickMenuPanelController: NSObject {
 
     var chatPanelForTesting: QuickMenuPanel {
         chatController.panel
+    }
+
+    func updateActionFrameForTesting(petFrame: CGRect, visibleFrames: [CGRect]) {
+        updateActionFrame(petFrame: petFrame, visibleFrames: visibleFrames)
     }
 #endif
 
@@ -759,14 +772,20 @@ final class QuickMenuPanelController: NSObject {
     }
 
     private func updateActionFrame() {
-        actionPanel.setFrame(
-            layout.panelFrame(
-                petFrame: petController.panel.frame,
-                panelSize: Self.actionPanelSize,
-                visibleFrames: NSScreen.screens.map(\.visibleFrame)
-            ),
-            display: true
+        updateActionFrame(
+            petFrame: petController.panel.frame,
+            visibleFrames: NSScreen.screens.map(\.visibleFrame)
         )
+    }
+
+    private func updateActionFrame(petFrame: CGRect, visibleFrames: [CGRect]) {
+        let placement = layout.placement(
+            petFrame: petFrame,
+            panelSize: Self.actionPanelSize,
+            visibleFrames: visibleFrames
+        )
+        actionViewController.applyHorizontalAlignment(placement.horizontalAlignment)
+        actionPanel.setFrame(placement.frame, display: true)
     }
 
     private func updateThinkingFrame() {
@@ -905,12 +924,19 @@ private final class ActionBubbleViewController: NSViewController {
     var onAction: ((ActionBubbleAction) -> Void)?
 
     private var buttons: [ActionRowButton] = []
+    private var actionStack: NSStackView?
+    private var stackLeadingConstraint: NSLayoutConstraint?
+    private var stackTrailingConstraint: NSLayoutConstraint?
     private var feedActionsEnabled = false
     private var theme = AppTheme.dark
 
     override func loadView() {
-        let background = makeGlassBackground(cornerRadius: 18)
-        view = background
+        let root = NSView(
+            frame: CGRect(origin: .zero, size: QuickMenuPanelController.actionPanelSize)
+        )
+        root.wantsLayer = true
+        root.layer?.backgroundColor = NSColor.clear.cgColor
+        view = root
 
         buttons = ActionBubbleAction.allCases.map { action in
             let button = ActionRowButton(action: action)
@@ -920,18 +946,31 @@ private final class ActionBubbleViewController: NSViewController {
             return button
         }
         let stack = NSStackView(views: buttons)
+        actionStack = stack
         stack.orientation = .vertical
-        stack.spacing = 0
+        stack.spacing = 8
+        stack.alignment = .trailing
+        stack.distribution = .fill
         stack.translatesAutoresizingMaskIntoConstraints = false
         stack.setAccessibilityElement(true)
         stack.setAccessibilityRole(.list)
         stack.setAccessibilityLabel(AppText.localized("YumYum Agent 액션"))
-        background.addSubview(stack)
+        root.addSubview(stack)
+        let leadingConstraint = stack.leadingAnchor.constraint(
+            equalTo: root.leadingAnchor,
+            constant: 8
+        )
+        let trailingConstraint = stack.trailingAnchor.constraint(
+            equalTo: root.trailingAnchor,
+            constant: -8
+        )
+        stackLeadingConstraint = leadingConstraint
+        stackTrailingConstraint = trailingConstraint
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: background.leadingAnchor, constant: 12),
-            stack.trailingAnchor.constraint(equalTo: background.trailingAnchor, constant: -12),
-            stack.topAnchor.constraint(equalTo: background.topAnchor, constant: 12),
-            stack.bottomAnchor.constraint(equalTo: background.bottomAnchor, constant: -12),
+            trailingConstraint,
+            stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 8),
+            stack.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -8),
+            stack.leadingAnchor.constraint(greaterThanOrEqualTo: root.leadingAnchor, constant: 8),
         ])
         for index in buttons.indices {
             buttons[index].nextKeyView = buttons[(index + 1) % buttons.count]
@@ -940,21 +979,22 @@ private final class ActionBubbleViewController: NSViewController {
         applyTheme(theme)
     }
 
+    func applyHorizontalAlignment(_ alignment: QuickMenuHorizontalAlignment) {
+        _ = view
+        let isLeading = alignment == .leading
+        stackLeadingConstraint?.isActive = false
+        stackTrailingConstraint?.isActive = false
+        actionStack?.alignment = isLeading ? .leading : .trailing
+        (isLeading ? stackLeadingConstraint : stackTrailingConstraint)?.isActive = true
+    }
+
     func applyTheme(_ theme: AppTheme) {
         self.theme = theme
         guard isViewLoaded else { return }
         view.appearance = theme.appearance
         view.wantsLayer = true
-        let opaqueSurface = theme == .light
-            || NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
-        view.layer?.backgroundColor = opaqueSurface
-            ? theme.palette.surface.withAlphaComponent(1).cgColor
-            : NSColor.clear.cgColor
-        setGlassBackgroundsHidden(opaqueSurface, in: view)
-        view.layer?.borderWidth = theme == .light
-            ? (NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast ? 1 : 0.5)
-            : 0
-        view.layer?.borderColor = theme.palette.border.cgColor
+        view.layer?.backgroundColor = NSColor.clear.cgColor
+        buttons.forEach { $0.applyTheme(theme) }
     }
 
     func setFeedActionsEnabled(_ enabled: Bool) {
@@ -965,6 +1005,7 @@ private final class ActionBubbleViewController: NSViewController {
     }
 
     func focusFirstRow() {
+        buttons.forEach { $0.setFocusVisible(false) }
         let enabled = buttons.map(\.isEnabled)
         guard let index = ActionMenuFocusPolicy.firstEnabledIndex(in: enabled) else {
             return
@@ -983,6 +1024,7 @@ private final class ActionBubbleViewController: NSViewController {
             delta: delta,
             enabled: enabled
         ) else { return }
+        buttons.forEach { $0.setFocusVisible($0 === buttons[next]) }
         view.window?.makeFirstResponder(buttons[next])
     }
 
@@ -1031,12 +1073,53 @@ private final class ActionBubbleViewController: NSViewController {
     }
 }
 
+struct ActionRowAppearance {
+    let backgroundColor: NSColor
+    let textColor: NSColor
+    let opacity: CGFloat
+
+    static func resolve(
+        theme: AppTheme,
+        isEnabled: Bool = true,
+        isHovered: Bool = false,
+        isPressed: Bool = false,
+        isFocused: Bool = false
+    ) -> Self {
+        let palette = theme.palette
+        guard isEnabled else {
+            return Self(
+                backgroundColor: palette.surface.withAlphaComponent(1),
+                textColor: palette.text,
+                opacity: 0.42
+            )
+        }
+        var accent = NSColor.controlAccentColor
+        theme.appearance?.performAsCurrentDrawingAppearance {
+            accent = NSColor.controlAccentColor.usingColorSpace(.deviceRGB) ?? accent
+        }
+        let fraction: CGFloat? = isPressed
+            ? (theme == .light ? 0.22 : 0.30)
+            : (isHovered || isFocused ? (theme == .light ? 0.12 : 0.20) : nil)
+        let background = fraction.flatMap {
+            palette.surface.blended(withFraction: $0, of: accent)
+        } ?? palette.surface
+        return Self(
+            backgroundColor: background.withAlphaComponent(1),
+            textColor: palette.text,
+            opacity: 1
+        )
+    }
+}
+
 private final class ActionRowButton: NSButton {
     let actionItem: ActionBubbleAction
 
+    private static let horizontalContentPadding: CGFloat = 28
     private var trackingAreaReference: NSTrackingArea?
     private var isHovered = false
     private var isPressed = false
+    private var isFocusVisible = false
+    private var theme = AppTheme.dark
 
     init(action: ActionBubbleAction) {
         actionItem = action
@@ -1048,14 +1131,16 @@ private final class ActionRowButton: NSButton {
         )
         imagePosition = .imageLeading
         imageHugsTitle = true
-        alignment = .left
+        alignment = .center
         font = .systemFont(ofSize: 14, weight: .medium)
         isBordered = false
         focusRingType = .none
         contentTintColor = .labelColor
         wantsLayer = true
-        layer?.cornerRadius = 10
+        layer?.cornerRadius = 12
         layer?.cornerCurve = .continuous
+        layer?.shadowOffset = CGSize(width: 0, height: -1)
+        layer?.shadowRadius = 4
         setAccessibilityLabel(action.title)
         setAccessibilityRole(.button)
         updateAppearance()
@@ -1067,6 +1152,13 @@ private final class ActionRowButton: NSButton {
     }
 
     override var acceptsFirstResponder: Bool { true }
+
+    override var intrinsicContentSize: NSSize {
+        var size = super.intrinsicContentSize
+        size.width += Self.horizontalContentPadding
+        size.height = max(size.height, 44)
+        return size
+    }
 
     override var isEnabled: Bool {
         didSet { updateAppearance() }
@@ -1119,24 +1211,39 @@ private final class ActionRowButton: NSButton {
 
     private func updateAppearance() {
         guard let layer else { return }
-        alphaValue = isEnabled ? 1 : 0.42
-        let focused = window?.firstResponder === self
-        if isPressed {
-            layer.backgroundColor = NSColor.controlAccentColor
-                .withAlphaComponent(0.22).cgColor
-        } else if isHovered || focused {
-            layer.backgroundColor = NSColor.controlAccentColor
-                .withAlphaComponent(0.13).cgColor
-        } else {
-            layer.backgroundColor = NSColor.clear.cgColor
-        }
-        layer.borderWidth = focused ? 1 : 0
-        layer.borderColor = NSColor.keyboardFocusIndicatorColor
-            .withAlphaComponent(0.72).cgColor
+        let focused = isFocusVisible && window?.firstResponder === self
+        let appearance = ActionRowAppearance.resolve(
+            theme: theme,
+            isEnabled: isEnabled,
+            isHovered: isHovered,
+            isPressed: isPressed,
+            isFocused: focused
+        )
+        alphaValue = appearance.opacity
+        contentTintColor = appearance.textColor
+        layer.backgroundColor = appearance.backgroundColor.cgColor
+        layer.shadowColor = theme.palette.shadow.cgColor
+        layer.shadowOpacity = theme == .light ? 1 : 0
+        layer.borderWidth = focused
+            || NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast ? 1 : 0.5
+        layer.borderColor = focused
+            ? NSColor.keyboardFocusIndicatorColor.withAlphaComponent(0.72).cgColor
+            : theme.palette.border.cgColor
+    }
+
+    func applyTheme(_ theme: AppTheme) {
+        self.theme = theme
+        updateAppearance()
+    }
+
+    func setFocusVisible(_ visible: Bool) {
+        isFocusVisible = visible
+        updateAppearance()
     }
 
     func applyLanguage(_ language: AppLanguage = AppText.language) {
         title = actionItem.title(language: language)
+        invalidateIntrinsicContentSize()
         setAccessibilityLabel(title)
     }
 }
