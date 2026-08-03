@@ -5,6 +5,7 @@ import Foundation
 public final class ChatBubbleSession: ObservableObject {
     @Published public private(set) var state: ChatBubbleState
     @Published public private(set) var isPresented: Bool
+    @Published public private(set) var isRestarting = false
 
     private let submitter: any FeedSubmitting
     private var sendTask: Task<Void, Never>?
@@ -24,6 +25,10 @@ public final class ChatBubbleSession: ObservableObject {
         failedSubmission != nil && activeSubmission == nil
     }
 
+    public var canRestart: Bool {
+        activeSubmission == nil && state.phase != .capturing && !isRestarting
+    }
+
     public func show() {
         isPresented = true
     }
@@ -33,14 +38,17 @@ public final class ChatBubbleSession: ObservableObject {
     }
 
     public func setDraftText(_ text: String) {
+        guard !isRestarting else { return }
         state.draftText = text
     }
 
     public func addAttachment(_ attachment: ChatDraftAttachment) {
+        guard !isRestarting else { return }
         state.addAttachment(attachment)
     }
 
     public func removeAttachment(id: UUID) {
+        guard !isRestarting else { return }
         guard let attachment = state.removeAttachment(id: id),
               attachment.isTemporary else {
             return
@@ -50,7 +58,26 @@ public final class ChatBubbleSession: ObservableObject {
 
     @discardableResult
     public func beginCapture() -> Bool {
-        state.beginCapture()
+        guard !isRestarting else { return false }
+        return state.beginCapture()
+    }
+
+    @discardableResult
+    public func restartSession(
+        reset: @escaping @Sendable () async -> Bool
+    ) -> Bool {
+        guard canRestart else { return false }
+        isRestarting = true
+        Task { @MainActor [weak self] in
+            let didReset = await reset()
+            guard let self, self.isRestarting else { return }
+            if didReset {
+                self.removeFailedSubmission()
+                self.state.resetConversation()
+            }
+            self.isRestarting = false
+        }
+        return true
     }
 
     public func finishCapture(_ outcome: ChatCaptureOutcome) {
@@ -59,7 +86,7 @@ public final class ChatBubbleSession: ObservableObject {
 
     @discardableResult
     public func send(reduceMotion: Bool) -> Bool {
-        guard activeSubmission == nil else {
+        guard activeSubmission == nil, !isRestarting else {
             return false
         }
         let submission: ChatSubmission
@@ -85,7 +112,7 @@ public final class ChatBubbleSession: ObservableObject {
         _ attachments: [ChatDraftAttachment],
         reduceMotion: Bool
     ) -> Bool {
-        guard activeSubmission == nil else {
+        guard activeSubmission == nil, !isRestarting else {
             return false
         }
         let submission: ChatSubmission
@@ -108,7 +135,7 @@ public final class ChatBubbleSession: ObservableObject {
 
     @discardableResult
     public func retry(reduceMotion: Bool) -> Bool {
-        guard activeSubmission == nil,
+        guard activeSubmission == nil, !isRestarting,
               let previous = failedSubmission else {
             return false
         }
@@ -162,6 +189,12 @@ public final class ChatBubbleSession: ObservableObject {
     public func waitForCurrentSend() async {
         let task = sendTask
         await task?.value
+    }
+
+    public func waitForRestart() async {
+        while isRestarting {
+            await Task.yield()
+        }
     }
 
     private func start(_ submission: ChatSubmission, reduceMotion: Bool) {

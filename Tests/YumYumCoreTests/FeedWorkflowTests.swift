@@ -176,6 +176,67 @@ struct FeedWorkflowTests {
     }
 
     @Test
+    func sessionResetUsesTheSubmissionGateWithoutInterruptingActiveWork() async throws {
+        let sender = BlockingPromptSender()
+        let workflow = FeedWorkflow(sender: sender, feedback: RecordingFeedFeedback())
+        let reset = SessionResetRecorder()
+        let activeSubmission = Task {
+            try await workflow.submit(FeedInput(text: "first"), reduceMotion: true)
+        }
+        await sender.waitUntilStarted()
+
+        let rejectedReset = await workflow.resetSession { await reset.perform() }
+        #expect(!rejectedReset)
+        #expect(await reset.count == 0)
+
+        await sender.finish()
+        _ = try await activeSubmission.value
+        let acceptedReset = await workflow.resetSession { await reset.perform() }
+        #expect(acceptedReset)
+        #expect(await reset.count == 1)
+    }
+
+    @Test
+    func activeSessionResetRejectsBothSubmissionAPIsUntilResetCompletes() async throws {
+        let sender = CountingPromptSender()
+        let workflow = FeedWorkflow(sender: sender, feedback: RecordingFeedFeedback())
+        let reset = BlockingSessionReset()
+        let resetTask = Task {
+            await workflow.resetSession { await reset.perform() }
+        }
+        await reset.waitUntilStarted()
+
+        do {
+            _ = try await workflow.submit(FeedInput(text: "direct"), reduceMotion: true)
+            Issue.record("Expected submit to be rejected while reset is active")
+        } catch {
+            #expect(error as? FeedWorkflowError == .busy)
+        }
+
+        do {
+            for try await _ in workflow.submitEvents(
+                FeedInput(text: "events"),
+                reduceMotion: true
+            ) {}
+            Issue.record("Expected submitEvents to be rejected while reset is active")
+        } catch {
+            #expect(error as? FeedWorkflowError == .busy)
+        }
+
+        #expect(await reset.count == 1)
+        #expect(await sender.requests.isEmpty)
+        await reset.finish()
+        #expect(await resetTask.value)
+
+        let response = try await workflow.submit(
+            FeedInput(text: "after reset"),
+            reduceMotion: true
+        )
+        #expect(response == PromptResponse(text: "done"))
+        #expect(await sender.requests.count == 1)
+    }
+
+    @Test
     func removesOnlyStaleYumYumCaptureFilesAtStartup() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -266,6 +327,38 @@ struct FeedWorkflowTests {
         #expect(await feedback.mouthPresentations.isEmpty)
         #expect(await feedback.animationCount == 0)
         #expect(await sender.requests.isEmpty)
+    }
+}
+
+private actor SessionResetRecorder {
+    private(set) var count = 0
+
+    func perform() {
+        count += 1
+    }
+}
+
+private actor BlockingSessionReset {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
+    private(set) var count = 0
+
+    func perform() async {
+        count += 1
+        let waiters = startWaiters
+        startWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+        await withCheckedContinuation { continuation = $0 }
+    }
+
+    func waitUntilStarted() async {
+        guard continuation == nil else { return }
+        await withCheckedContinuation { startWaiters.append($0) }
+    }
+
+    func finish() {
+        continuation?.resume()
+        continuation = nil
     }
 }
 

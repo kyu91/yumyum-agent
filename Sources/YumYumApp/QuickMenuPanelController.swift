@@ -485,12 +485,15 @@ final class ChatPanelController: NSObject {
     private let viewController = QuickMenuViewController()
     private let captureCoordinator = ScreenCaptureCoordinator()
     private let session: ChatBubbleSession
+    private let resetAgentSession: @Sendable () async -> Bool
     private var stateObservation: AnyCancellable?
+    private var restartObservation: AnyCancellable?
     private var captureTask: Task<Void, Never>?
     private var captureGeneration: UUID?
     private var captureRestoration = (panel: false, pet: false)
     private var fileSelectionGate = CallbackGenerationGate()
     private var activeFilePanel: NSOpenPanel?
+    private var isWorkflowBusy = false
     private var agentNotice: AgentNotice?
     private(set) var hasPresented = false
 
@@ -508,10 +511,16 @@ final class ChatPanelController: NSObject {
     init(
         petController: FloatingPetWindowController,
         viewModel: YumYumAppViewModel,
-        workflow: FeedWorkflow
+        workflow: FeedWorkflow,
+        resetAgentSession: (@Sendable () async -> Bool)? = nil
     ) {
         self.petController = petController
         self.viewModel = viewModel
+        self.resetAgentSession = resetAgentSession ?? {
+            await workflow.resetSession {
+                await viewModel.agentRuntime.reset()
+            }
+        }
         session = ChatBubbleSession(submitter: workflow)
         panel = QuickMenuPanel(
             contentRect: CGRect(origin: .zero, size: Self.panelSize),
@@ -541,6 +550,7 @@ final class ChatPanelController: NSObject {
         panel.onCancel = { [weak self] in self?.hide() }
 
         viewController.onClose = { [weak self] in self?.hide() }
+        viewController.onRestartSession = { [weak self] in self?.restartSession() }
         viewController.onCapture = { [weak self] in self?.captureScreen() }
         viewController.onChooseFiles = { [weak self] in self?.chooseFiles() }
         viewController.onDraftChanged = { [weak self] text in
@@ -558,9 +568,14 @@ final class ChatPanelController: NSObject {
             self.viewController.render(
                 state: state,
                 canRetry: self.session.canRetry,
+                canRestart: self.canRestart,
+                isRestarting: self.session.isRestarting,
                 agentNotice: self.agentNotice
             )
             self.onStateChanged?(state)
+        }
+        restartObservation = session.$isRestarting.dropFirst().sink { [weak self] _ in
+            self?.renderCurrentState()
         }
 
         NotificationCenter.default.addObserver(
@@ -613,6 +628,8 @@ final class ChatPanelController: NSObject {
         viewController.render(
             state: state,
             canRetry: session.canRetry,
+            canRestart: canRestart,
+            isRestarting: session.isRestarting,
             agentNotice: agentNotice
         )
     }
@@ -623,6 +640,10 @@ final class ChatPanelController: NSObject {
 
     func waitForSendForTesting() async {
         await session.waitForCurrentSend()
+    }
+
+    func waitForRestartForTesting() async {
+        await session.waitForRestart()
     }
 #endif
 
@@ -639,6 +660,15 @@ final class ChatPanelController: NSObject {
     func showCheckingStatus() {}
 
     var isSending: Bool { session.state.isSending }
+
+    private var canRestart: Bool {
+        session.canRestart && activeFilePanel == nil && !isWorkflowBusy
+    }
+
+    func setWorkflowBusy(_ isBusy: Bool) {
+        isWorkflowBusy = isBusy
+        viewController.setRestartEnabled(canRestart)
+    }
 
     @discardableResult
     func feedAttachments(
@@ -688,6 +718,8 @@ final class ChatPanelController: NSObject {
         viewController.render(
             state: session.state,
             canRetry: session.canRetry,
+            canRestart: canRestart,
+            isRestarting: session.isRestarting,
             agentNotice: agentNotice
         )
     }
@@ -791,13 +823,14 @@ final class ChatPanelController: NSObject {
     }
 
     private func chooseFiles() {
-        guard !session.state.isSending, activeFilePanel == nil else {
+        guard session.canRestart, activeFilePanel == nil else {
             return
         }
         let generation = UUID()
         guard fileSelectionGate.begin(generation) else { return }
         let openPanel = NSOpenPanel()
         activeFilePanel = openPanel
+        renderCurrentState()
         openPanel.title = AppText.localized("대화에 첨부할 파일 선택")
         openPanel.prompt = AppText.localized("첨부")
         openPanel.allowsMultipleSelection = true
@@ -812,6 +845,7 @@ final class ChatPanelController: NSObject {
                     return
                 }
                 self.activeFilePanel = nil
+                self.renderCurrentState()
                 guard response == .OK, let urls = openPanel?.urls else { return }
                 for url in urls {
                     self.session.addAttachment(
@@ -828,6 +862,24 @@ final class ChatPanelController: NSObject {
         let panel = activeFilePanel
         activeFilePanel = nil
         panel?.cancel(nil)
+        if panel != nil {
+            renderCurrentState()
+        }
+    }
+
+    private func restartSession() {
+        guard activeFilePanel == nil else { return }
+        session.restartSession(reset: resetAgentSession)
+    }
+
+    private func renderCurrentState() {
+        viewController.render(
+            state: session.state,
+            canRetry: session.canRetry,
+            canRestart: canRestart,
+            isRestarting: session.isRestarting,
+            agentNotice: agentNotice
+        )
     }
 
     private func sendDraft() {
@@ -878,6 +930,7 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
     private static let autoScrollThreshold: CGFloat = 24
 
     var onClose: (() -> Void)?
+    var onRestartSession: (() -> Void)?
     var onCapture: (() -> Void)?
     var onChooseFiles: (() -> Void)?
     var onDraftChanged: ((String) -> Void)?
@@ -890,6 +943,7 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
     private let transcriptScroll = NSScrollView()
     private let transcriptDocument = FlippedDocumentView()
     private let header = NSStackView()
+    private let restartButton = NSButton(title: AppText.localized("새 세션"), target: nil, action: nil)
     private let attachmentStack = NSStackView()
     private let attachmentScroll = NSScrollView()
     private let captureButton = ChatAuxiliaryButton(title: AppText.localized("캡처"))
@@ -950,8 +1004,15 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
         closeButton.contentTintColor = .secondaryLabelColor
         closeButton.setAccessibilityLabel(AppText.localized("대화 말풍선 닫기"))
         self.closeButton = closeButton
+        restartButton.target = self
+        restartButton.action = #selector(restartSessionPressed)
+        restartButton.bezelStyle = .inline
+        restartButton.controlSize = .small
+        restartButton.setAccessibilityLabel(AppText.localized("새 대화 세션"))
+        restartButton.setAccessibilityHelp(AppText.localized("대화 내용을 지우고 현재 Soul을 다음 요청에 적용합니다"))
         header.addArrangedSubview(title)
         header.addArrangedSubview(NSView())
+        header.addArrangedSubview(restartButton)
         header.addArrangedSubview(closeButton)
         header.orientation = .horizontal
         header.alignment = .centerY
@@ -1150,6 +1211,8 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
     func render(
         state: ChatBubbleState,
         canRetry: Bool,
+        canRestart: Bool = true,
+        isRestarting: Bool = false,
         agentNotice: ChatPanelController.AgentNotice?
     ) {
         guard isViewLoaded else { return }
@@ -1169,7 +1232,7 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
         )
         rebuildAttachments(state.draftAttachments)
 
-        let isBusy: Bool
+        var isBusy: Bool
         let status: String
         let isError: Bool
         switch state.phase {
@@ -1195,8 +1258,10 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
             status = UserFacingErrorRedactor.sanitize(message)
             isError = true
         }
+        isBusy = isBusy || isRestarting
 
         captureButton.isEnabled = !isBusy
+        restartButton.isEnabled = canRestart && !isBusy
         fileButton.isEnabled = !isBusy
         composer.isEnabled = !isBusy
         let hasDraft = !state.draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -1206,6 +1271,10 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
         cancelButton.isHidden = !state.isSending
         applyComposerTheme()
         setStatus(status, isError: isError)
+    }
+
+    func setRestartEnabled(_ isEnabled: Bool) {
+        restartButton.isEnabled = isEnabled
     }
 
 #if DEBUG
@@ -1245,6 +1314,9 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
         self.language = language
         closeButton?.image = NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: AppText.localized("닫기", language: language))
         closeButton?.setAccessibilityLabel(AppText.localized("대화 말풍선 닫기", language: language))
+        restartButton.title = AppText.localized(english: "New Session", korean: "새 세션", language: language)
+        restartButton.setAccessibilityLabel(AppText.localized(english: "New chat session", korean: "새 대화 세션", language: language))
+        restartButton.setAccessibilityHelp(AppText.localized(english: "Clears the conversation and applies the current Soul to the next request", korean: "대화 내용을 지우고 현재 Soul을 다음 요청에 적용합니다", language: language))
         transcriptStack.setAccessibilityLabel(AppText.localized("대화 내용", language: language))
         attachmentStack.setAccessibilityLabel(AppText.localized("초안 첨부 파일", language: language))
         captureButton.title = AppText.localized(english: "Capture", korean: "캡처", language: language)
@@ -1585,6 +1657,7 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
     }
 
     @objc private func closePressed() { onClose?() }
+    @objc private func restartSessionPressed() { onRestartSession?() }
     @objc private func capturePressed() { onCapture?() }
     @objc private func filePressed() { onChooseFiles?() }
 
@@ -1768,13 +1841,18 @@ private final class ChatAuxiliaryButton: NSButton {
 
     override func becomeFirstResponder() -> Bool {
         let accepted = super.becomeFirstResponder()
-        updateAppearance()
+        if accepted {
+            layer?.borderWidth = 1
+            layer?.borderColor = NSColor.keyboardFocusIndicatorColor.cgColor
+        }
         return accepted
     }
 
     override func resignFirstResponder() -> Bool {
         let accepted = super.resignFirstResponder()
-        updateAppearance()
+        if accepted {
+            layer?.borderWidth = 0
+        }
         return accepted
     }
 

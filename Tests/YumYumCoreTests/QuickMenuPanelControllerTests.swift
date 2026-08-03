@@ -7,6 +7,118 @@ import YumYumCore
 struct QuickMenuPanelControllerTests {
     @Test
     @MainActor
+    func newSessionUsesTheProductionRuntimeResetPath() async throws {
+        _ = NSApplication.shared
+        let connector = ResetRecordingConnector()
+        let workflow = FeedWorkflow(
+            sender: ControlledPromptSender(),
+            feedback: SilentFeedFeedback()
+        )
+        let controller = ChatPanelController(
+            petController: FloatingPetWindowController {},
+            viewModel: YumYumAppViewModel(
+                fixtureProbe: UnusedFixtureProbe(),
+                connectors: [connector]
+            ),
+            workflow: workflow
+        )
+        let view = try #require(controller.panel.contentView)
+        let restart = try #require(buttons(in: view).first { $0.title == "새 세션" })
+
+        restart.performClick(nil)
+        await controller.waitForRestartForTesting()
+
+        #expect(await connector.resetCount == 1)
+    }
+
+    @Test
+    @MainActor
+    func newSessionDoesNothingWhileTheSharedWorkflowIsBusy() async throws {
+        _ = NSApplication.shared
+        let sender = ControlledPromptSender()
+        let workflow = FeedWorkflow(sender: sender, feedback: SilentFeedFeedback())
+        let connector = ResetRecordingConnector()
+        let controller = ChatPanelController(
+            petController: FloatingPetWindowController {},
+            viewModel: YumYumAppViewModel(
+                fixtureProbe: UnusedFixtureProbe(),
+                connectors: [connector]
+            ),
+            workflow: workflow
+        )
+        controller.setDraftText("기존 질문")
+        #expect(controller.sendDraftFromResponse())
+        #expect(await sender.waitForRequestCount(1))
+        await sender.completeRequest(at: 0)
+        await controller.waitForSendForTesting()
+        let messages = controller.state.messages
+
+        let activeSubmission = Task {
+            try await workflow.submit(FeedInput(text: "외부 요청"), reduceMotion: true)
+        }
+        #expect(await sender.waitForRequestCount(2))
+        let view = try #require(controller.panel.contentView)
+        let restart = try #require(buttons(in: view).first { $0.title == "새 세션" })
+        restart.performClick(nil)
+        await controller.waitForRestartForTesting()
+
+        #expect(await connector.resetCount == 0)
+        #expect(controller.state.messages == messages)
+        await sender.completeRequest(at: 1)
+        _ = try await activeSubmission.value
+    }
+
+    @Test
+    @MainActor
+    func chatHeaderNewSessionActionIsLocalizedAccessibleAndDisabledWhileBusy() throws {
+        _ = NSApplication.shared
+        let controller = QuickMenuViewController()
+        _ = controller.view
+
+        controller.applyLanguage(.english)
+        let english = try #require(buttons(in: controller.view).first {
+            $0.title == "New Session"
+        })
+        let close = try #require(buttons(in: controller.view).first {
+            $0.accessibilityLabel() == "Close chat bubble"
+        })
+        #expect(english.accessibilityLabel() == "New chat session")
+        #expect(english.accessibilityHelp() == "Clears the conversation and applies the current Soul to the next request")
+        #expect(index(of: english, in: controller.view) < index(of: close, in: controller.view))
+
+        controller.render(
+            state: ChatBubbleState(phase: .sending(UUID())),
+            canRetry: false,
+            canRestart: false,
+            agentNotice: nil
+        )
+        #expect(!english.isEnabled)
+
+        controller.render(
+            state: ChatBubbleState(draftText: "전송할 내용", phase: .failed("실패")),
+            canRetry: true,
+            canRestart: true,
+            isRestarting: true,
+            agentNotice: nil
+        )
+        #expect(buttons(in: controller.view).filter { button in
+            ["Capture", "File", "Send", "New Session"].contains(button.title)
+        }.allSatisfy { !$0.isEnabled })
+        let composer = try #require(textFields(in: controller.view).first {
+            $0.accessibilityLabel() == "Chat message"
+        })
+        #expect(!composer.isEnabled)
+        #expect(buttons(in: controller.view).first { $0.title == "Retry" }?.isHidden == true)
+
+        controller.applyLanguage(.korean)
+        #expect(english.title == "새 세션")
+        #expect(english.accessibilityLabel() == "새 대화 세션")
+        #expect(english.accessibilityHelp() == "대화 내용을 지우고 현재 Soul을 다음 요청에 적용합니다")
+        #expect(ChatPanelController.panelSize == CGSize(width: 400, height: 520))
+    }
+
+    @Test
+    @MainActor
     func chatThemeDoesNotChangeRenderedActionThinkingOrResponseSurfaces() throws {
         _ = NSApplication.shared
         let pet = FloatingPetWindowController {}
@@ -1001,6 +1113,22 @@ struct QuickMenuPanelControllerTests {
     @MainActor
     private func flattened(_ view: NSView) -> [NSView] {
         [view] + view.subviews.flatMap(flattened)
+    }
+}
+
+private actor ResetRecordingConnector: AgentConnecting {
+    let definitionID = AgentDefinitionID.hermes
+    private(set) var resetCount = 0
+
+    func send(
+        _ request: PromptRequest,
+        executableURL: URL
+    ) async throws -> PromptResponse {
+        PromptResponse(text: "unused")
+    }
+
+    func reset() {
+        resetCount += 1
     }
 }
 

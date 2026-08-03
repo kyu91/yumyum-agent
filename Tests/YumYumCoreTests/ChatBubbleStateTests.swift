@@ -240,6 +240,113 @@ struct ChatBubbleStateTests {
 struct ChatBubbleSessionTests {
     @Test
     @MainActor
+    func restartClearsConversationAfterResetWhilePreservingDraftAndAttachments() async {
+        let submitter = ControlledFeedSubmitter()
+        let attachment = ChatDraftAttachment(
+            url: URL(fileURLWithPath: "/private/tmp/draft.txt"),
+            isTemporary: true
+        )
+        let session = ChatBubbleSession(
+            state: ChatBubbleState(
+                draftText: "보존할 초안",
+                draftAttachments: [attachment],
+                messages: [ChatMessage(role: .assistant, text: "이전 대화")],
+                phase: .failed("실패")
+            ),
+            submitter: submitter
+        )
+        let reset = ControlledSessionReset()
+
+        #expect(session.restartSession { await reset.perform(); return true })
+        await reset.waitUntilStarted()
+        #expect(session.state.messages.map(\.text) == ["이전 대화"])
+        #expect(session.state.phase == .failed("실패"))
+        #expect(session.state.draftText == "보존할 초안")
+        #expect(session.state.draftAttachments == [attachment])
+        #expect(!session.restartSession { true })
+        #expect(!session.send(reduceMotion: true))
+        #expect(!session.beginCapture())
+
+        await reset.finish()
+        await session.waitForRestart()
+
+        #expect(session.state.messages.isEmpty)
+        #expect(session.state.phase == .idle)
+        #expect(session.state.draftText == "보존할 초안")
+        #expect(session.state.draftAttachments == [attachment])
+        #expect(await reset.count == 1)
+    }
+
+    @Test
+    @MainActor
+    func nextSendAfterRestartExcludesOldConversation() async {
+        let submitter = ControlledFeedSubmitter()
+        let session = ChatBubbleSession(
+            state: ChatBubbleState(messages: [
+                ChatMessage(role: .user, text: "이전 질문"),
+                ChatMessage(role: .assistant, text: "이전 답변"),
+            ]),
+            submitter: submitter
+        )
+
+        #expect(session.restartSession { true })
+        await session.waitForRestart()
+        session.setDraftText("새 질문")
+        #expect(session.send(reduceMotion: true))
+        await submitter.waitForSubmissionCount(1)
+
+        let input = await submitter.inputs[0]
+        #expect(input.text == "User: 새 질문")
+        #expect(!input.text.contains("이전"))
+        await submitter.succeed(at: 0, text: "새 답변")
+        await session.waitForCurrentSend()
+    }
+
+    @Test
+    @MainActor
+    func rejectedSharedWorkflowRestartDoesNotClearConversation() async {
+        let session = ChatBubbleSession(
+            state: ChatBubbleState(messages: [
+                ChatMessage(role: .assistant, text: "진행 중인 대화"),
+            ]),
+            submitter: ControlledFeedSubmitter()
+        )
+
+        #expect(session.restartSession { false })
+        await session.waitForRestart()
+
+        #expect(session.state.messages.map(\.text) == ["진행 중인 대화"])
+    }
+
+    @Test
+    @MainActor
+    func restartClearsRetryStateAndDeletesItsOwnedTemporaryFile() async throws {
+        let temporaryImage = try makeTemporaryCapture()
+        defer { try? FileManager.default.removeItem(at: temporaryImage) }
+        let session = ChatBubbleSession(
+            submitter: ScriptedFeedSubmitter(results: [
+                .failure(TestSendError.retryable),
+            ])
+        )
+        session.addAttachment(
+            ChatDraftAttachment(url: temporaryImage, isTemporary: true)
+        )
+        #expect(session.send(reduceMotion: true))
+        await session.waitForCurrentSend()
+        #expect(session.canRetry)
+        #expect(FileManager.default.fileExists(atPath: temporaryImage.path))
+
+        #expect(session.restartSession { true })
+        await session.waitForRestart()
+
+        #expect(!session.canRetry)
+        #expect(session.state.phase == .idle)
+        #expect(session.state.messages.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: temporaryImage.path))
+    }
+
+    @Test
+    @MainActor
     func emptySendIsRejectedWithoutStartingProductionTask() async {
         let submitter = ControlledFeedSubmitter()
         let session = ChatBubbleSession(submitter: submitter)
@@ -696,6 +803,27 @@ private actor ImmediateFeedSubmitter: FeedSubmitting {
     func submit(_ input: FeedInput, reduceMotion: Bool) async throws -> PromptResponse {
         inputs.append(input)
         return try result.get()
+    }
+}
+
+private actor ControlledSessionReset {
+    private(set) var count = 0
+    private var started = false
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    func perform() async {
+        count += 1
+        started = true
+        await withCheckedContinuation { continuation = $0 }
+    }
+
+    func waitUntilStarted() async {
+        while !started { await Task.yield() }
+    }
+
+    func finish() {
+        continuation?.resume()
+        continuation = nil
     }
 }
 

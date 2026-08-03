@@ -327,6 +327,12 @@ final class QuickMenuPanelController: NSObject {
 
     func applyFeedStatus(_ update: FeedStatusUpdate) {
         switch update.status {
+        case .validating, .animating, .sending:
+            chatController.setWorkflowBusy(true)
+        case .idle, .completed, .failed, .cancelled:
+            chatController.setWorkflowBusy(false)
+        }
+        switch update.status {
         case .idle:
             break
         case .validating:

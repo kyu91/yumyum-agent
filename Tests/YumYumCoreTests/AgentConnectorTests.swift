@@ -605,6 +605,11 @@ struct AgentConnectorTests {
         })
 
         let hermesTransport = RecordingHermesTransport()
+        let soulDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: soulDirectory) }
+        let soulStore = SoulProfileStore(fileURL: soulDirectory.appendingPathComponent("SOUL.md"))
+        try await soulStore.save(SoulProfile(name: "Before Reset"))
         let hermesRuntime = AgentRuntime(
             selection: RuntimeSelection(
                 installation: AgentInstallation(
@@ -615,14 +620,18 @@ struct AgentConnectorTests {
                     availability: .available
                 )
             ),
-            connectors: [HermesACPConnector(transport: hermesTransport)]
+            connectors: [HermesACPConnector(transport: hermesTransport)],
+            soulStore: soulStore
         )
         _ = try await hermesRuntime.send(PromptRequest(text: "Hermes 요청"))
 
+        try await soulStore.save(SoulProfile(name: "After Reset"))
         await hermesRuntime.reset()
+        _ = try await hermesRuntime.send(PromptRequest(text: "새 Hermes 요청"))
         await hermesRuntime.close()
 
         #expect(await hermesTransport.closeCount == 2)
+        #expect(await hermesTransport.invocation?.request.soulMarkdown?.contains("After Reset") == true)
     }
 
     @Test

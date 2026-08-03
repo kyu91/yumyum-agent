@@ -351,6 +351,12 @@ public struct ChatBubbleState: Sendable {
         }
     }
 
+    public mutating func resetConversation() {
+        messages.removeAll()
+        excludedMessageIDs.removeAll()
+        phase = .idle
+    }
+
     private func conversationText(currentUserText: String) -> String {
         var lines = messages.compactMap { message -> String? in
             guard !message.isLoading,

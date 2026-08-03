@@ -282,7 +282,12 @@ struct AppThemeTests {
         let composer = try #require(fields.first {
             $0.accessibilityLabel() == "대화 메시지"
         })
-        let capture = try #require(buttons.first { $0.title == "캡처" })
+        let restart = try #require(buttons.first {
+            $0.accessibilityLabel() == "새 대화 세션"
+        })
+        let capture = try #require(buttons.first {
+            $0.accessibilityLabel() == "화면 영역 캡처 첨부"
+        })
         let file = try #require(buttons.first { $0.title == "파일" })
         let send = try #require(buttons.first { $0.title == "보내기" })
         let retry = try #require(buttons.first { $0.title == "재시도" })
@@ -314,6 +319,8 @@ struct AppThemeTests {
                 theme.palette.assistantMessage.cgColor
             ))
             #expect(composer.backgroundColor == theme.palette.composerSurface)
+            #expect(restart.title == "새 세션")
+            #expect(restart.layer?.backgroundColor == nil)
             #expect(capture.layer?.backgroundColor == theme.palette.auxiliarySurface.cgColor)
             #expect(file.layer?.backgroundColor == theme.palette.auxiliarySurface.cgColor)
             #expect(send.layer?.backgroundColor == nil)

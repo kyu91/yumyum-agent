@@ -372,6 +372,16 @@ public actor FeedWorkflow: FeedSubmitting {
         }
     }
 
+    public func resetSession(
+        _ reset: @escaping @Sendable () async -> Void
+    ) async -> Bool {
+        guard !isSubmitting else { return false }
+        isSubmitting = true
+        defer { isSubmitting = false }
+        await reset()
+        return true
+    }
+
     private func performSubmit(
         _ input: FeedInput,
         reduceMotion: Bool,
