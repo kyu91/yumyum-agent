@@ -574,8 +574,8 @@ final class ChatPanelController: NSObject {
             )
             self.onStateChanged?(state)
         }
-        restartObservation = session.$isRestarting.dropFirst().sink { [weak self] _ in
-            self?.renderCurrentState()
+        restartObservation = session.$isRestarting.dropFirst().sink { [weak self] isRestarting in
+            self?.renderCurrentState(isRestarting: isRestarting)
         }
 
         NotificationCenter.default.addObserver(
@@ -873,11 +873,19 @@ final class ChatPanelController: NSObject {
     }
 
     private func renderCurrentState() {
+        renderCurrentState(isRestarting: session.isRestarting)
+    }
+
+    private func renderCurrentState(isRestarting: Bool) {
+        let canRestart = (session.canRestart || session.isRestarting)
+            && activeFilePanel == nil
+            && !isWorkflowBusy
+            && !isRestarting
         viewController.render(
             state: session.state,
             canRetry: session.canRetry,
             canRestart: canRestart,
-            isRestarting: session.isRestarting,
+            isRestarting: isRestarting,
             agentNotice: agentNotice
         )
     }

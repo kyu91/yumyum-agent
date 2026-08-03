@@ -206,32 +206,28 @@ public final class ChatBubbleSession: ObservableObject {
                     submission.input,
                     reduceMotion: reduceMotion
                 )
-                var didComplete = false
                 for try await event in events {
                     try Task.checkCancellation()
                     guard let self,
                           self.activeSubmission?.id == submission.id else {
                         return
                     }
+                    if case .completed = event {
+                        self.removeTemporaryFiles(for: submission)
+                        self.finishTask(id: submission.id)
+                        self.state.applyResponseEvent(
+                            event,
+                            submissionID: submission.id
+                        )
+                        return
+                    }
                     self.state.applyResponseEvent(
                         event,
                         submissionID: submission.id
                     )
-                    if case .completed = event {
-                        didComplete = true
-                        break
-                    }
                 }
                 try Task.checkCancellation()
-                guard didComplete else {
-                    throw AgentConnectorError.emptyResponse
-                }
-                guard let self,
-                      self.activeSubmission?.id == submission.id else {
-                    return
-                }
-                self.removeTemporaryFiles(for: submission)
-                self.finishTask(id: submission.id)
+                throw AgentConnectorError.emptyResponse
             } catch is CancellationError {
                 guard let self,
                       self.activeSubmission?.id == submission.id else {

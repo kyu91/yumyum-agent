@@ -3,8 +3,119 @@ import Testing
 import YumYumCore
 @testable import YumYumApp
 
-@Suite
+@Suite(.serialized)
 struct QuickMenuPanelControllerTests {
+    @Test
+    @MainActor
+    func completedChatEnablesNewSession() async throws {
+        _ = NSApplication.shared
+        let sender = ControlledPromptSender()
+        let controller = ChatPanelController(
+            petController: FloatingPetWindowController {},
+            viewModel: YumYumAppViewModel(fixtureProbe: UnusedFixtureProbe()),
+            workflow: FeedWorkflow(sender: sender, feedback: SilentFeedFeedback())
+        )
+        controller.setDraftText("질문")
+        #expect(controller.sendDraftFromResponse())
+        #expect(await sender.waitForRequestCount(1))
+
+        await sender.completeRequest(at: 0)
+        await controller.waitForSendForTesting()
+
+        let view = try #require(controller.panel.contentView)
+        #expect(buttons(in: view).first { $0.title == "새 세션" }?.isEnabled == true)
+    }
+
+    @Test
+    @MainActor
+    func emptyChatResetRestoresComposerActionsAndDraftSendEnablement() async throws {
+        _ = NSApplication.shared
+        let controller = ChatPanelController(
+            petController: FloatingPetWindowController {},
+            viewModel: YumYumAppViewModel(fixtureProbe: UnusedFixtureProbe()),
+            workflow: FeedWorkflow(sender: ControlledPromptSender(), feedback: SilentFeedFeedback()),
+            resetAgentSession: { true }
+        )
+        let view = try #require(controller.panel.contentView)
+        try pressButton(titled: "새 세션", in: view)
+
+        await controller.waitForRestartForTesting()
+
+        let composer = try #require(textFields(in: view).first {
+            $0.accessibilityLabel() == "대화 메시지"
+        })
+        #expect(composer.isEnabled)
+        #expect(buttons(in: view).filter {
+            ["캡처", "파일", "새 세션"].contains($0.title)
+        }.allSatisfy { $0.isEnabled })
+        #expect(buttons(in: view).first { $0.title == "보내기" }?.isEnabled == false)
+        controller.setDraftText("새 질문")
+        #expect(buttons(in: view).first { $0.title == "보내기" }?.isEnabled == true)
+    }
+
+    @Test
+    @MainActor
+    func rejectedResetRestoresControlsAndPreservesTranscript() async throws {
+        _ = NSApplication.shared
+        let sender = ControlledPromptSender()
+        let controller = ChatPanelController(
+            petController: FloatingPetWindowController {},
+            viewModel: YumYumAppViewModel(fixtureProbe: UnusedFixtureProbe()),
+            workflow: FeedWorkflow(sender: sender, feedback: SilentFeedFeedback()),
+            resetAgentSession: { false }
+        )
+        controller.setDraftText("질문")
+        #expect(controller.sendDraftFromResponse())
+        #expect(await sender.waitForRequestCount(1))
+        await sender.completeRequest(at: 0)
+        await controller.waitForSendForTesting()
+        let messages = controller.state.messages
+        let view = try #require(controller.panel.contentView)
+
+        try pressButton(titled: "새 세션", in: view)
+        await controller.waitForRestartForTesting()
+
+        #expect(controller.state.messages == messages)
+        #expect(buttons(in: view).first { $0.title == "새 세션" }?.isEnabled == true)
+        #expect(textFields(in: view).first {
+            $0.accessibilityLabel() == "대화 메시지"
+        }?.isEnabled == true)
+    }
+
+    @Test
+    @MainActor
+    func blockingResetDisablesInteractiveControlsOnlyUntilItFinishes() async throws {
+        _ = NSApplication.shared
+        let reset = BlockingPanelReset()
+        let controller = ChatPanelController(
+            petController: FloatingPetWindowController {},
+            viewModel: YumYumAppViewModel(fixtureProbe: UnusedFixtureProbe()),
+            workflow: FeedWorkflow(sender: ControlledPromptSender(), feedback: SilentFeedFeedback()),
+            resetAgentSession: { await reset.perform() }
+        )
+        controller.setDraftText("보존할 초안")
+        let view = try #require(controller.panel.contentView)
+        try pressButton(titled: "새 세션", in: view)
+        await reset.waitUntilStarted()
+
+        #expect(buttons(in: view).filter {
+            ["캡처", "파일", "보내기", "새 세션"].contains($0.title)
+        }.allSatisfy { !$0.isEnabled })
+        #expect(textFields(in: view).first {
+            $0.accessibilityLabel() == "대화 메시지"
+        }?.isEnabled == false)
+
+        await reset.finish()
+        await controller.waitForRestartForTesting()
+
+        #expect(buttons(in: view).filter {
+            ["캡처", "파일", "보내기", "새 세션"].contains($0.title)
+        }.allSatisfy { $0.isEnabled })
+        #expect(textFields(in: view).first {
+            $0.accessibilityLabel() == "대화 메시지"
+        }?.isEnabled == true)
+    }
+
     @Test
     @MainActor
     func newSessionUsesTheProductionRuntimeResetPath() async throws {
@@ -1129,6 +1240,29 @@ private actor ResetRecordingConnector: AgentConnecting {
 
     func reset() {
         resetCount += 1
+    }
+}
+
+private actor BlockingPanelReset {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func perform() async -> Bool {
+        let waiters = startWaiters
+        startWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+        await withCheckedContinuation { continuation = $0 }
+        return true
+    }
+
+    func waitUntilStarted() async {
+        guard continuation == nil else { return }
+        await withCheckedContinuation { startWaiters.append($0) }
+    }
+
+    func finish() {
+        continuation?.resume()
+        continuation = nil
     }
 }
 
