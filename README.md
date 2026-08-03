@@ -4,7 +4,7 @@
 
 YumYum Agent is a Swift/AppKit macOS app that lets you “feed” a selected screen area or local file to a floating pet and read responses from an installed local CLI agent in native bubbles and chat.
 
-> **Unsigned developer preview (0.1.0):** [YumYum Agent 0.1.0 — Unsigned Preview](https://github.com/kyu91/yumyum-agent/releases/tag/v0.1.0) is available as a prerelease. It is **not Developer ID signed or Apple notarized**.
+> **Unsigned developer preview (0.1.1):** [YumYum Agent 0.1.1 — Unsigned Preview](https://github.com/kyu91/yumyum-agent/releases/tag/v0.1.1) is prepared as the next prerelease but has not been published yet. It is **not Developer ID signed or Apple notarized**.
 
 ## Features
 
@@ -25,19 +25,30 @@ This Apple Silicon Command Line Tools host has built and mounted a local unsigne
 
 ## Download and install
 
-Download both `YumYum-Agent-0.1.0-macOS.dmg` and `YumYum-Agent-0.1.0-macOS.dmg.sha256` from the [v0.1.0 release](https://github.com/kyu91/yumyum-agent/releases/tag/v0.1.0). This **Unsigned Preview** is not Developer ID signed or Apple notarized. Trust only assets from the official repository and verify them in the same directory:
+This **Unsigned Preview** is not Developer ID signed or Apple notarized. Download it only from the [official v0.1.1 release](https://github.com/kyu91/yumyum-agent/releases/tag/v0.1.1).
+
+1. Download `YumYum-Agent-0.1.1-macOS.dmg`.
+2. Open the DMG.
+3. Drag **YumYum.app** to **Applications**.
+4. Launch **YumYum.app** once. If macOS blocks it, acknowledge or close the warning.
+5. Open **System Settings → Privacy & Security**, scroll to **Security**, and click **Open Anyway**.
+6. Authenticate if prompted, then confirm **Open**.
+
+Button names and warning text can vary by macOS version. macOS may also request Screen Recording, Input Monitoring, or Accessibility permission for app features. Clean-machine Gatekeeper behavior and Intel hardware execution remain unverified even though both architecture slices are present.
+
+### Optional: verify the SHA-256 checksum (recommended)
+
+Download both `YumYum-Agent-0.1.1-macOS.dmg` and `YumYum-Agent-0.1.1-macOS.dmg.sha256` to **Downloads**, or place both files in the same folder. If they are in Downloads, run:
 
 ```sh
-shasum -a 256 -c YumYum-Agent-0.1.0-macOS.dmg.sha256
+cd ~/Downloads && shasum -a 256 -c YumYum-Agent-0.1.1-macOS.dmg.sha256
 ```
-
-Open the DMG, drag the app to **Applications**, then Control-click/right-click it and choose **Open**. If blocked, use **System Settings → Privacy & Security → Open Anyway**; warning text varies. Never disable Gatekeeper globally. macOS privacy permissions may still be requested. Clean-machine Gatekeeper behavior and Intel hardware execution remain unverified even though both architecture slices are present.
 
 Local developers can explicitly create and verify an unsigned DMG:
 
 ```sh
 ./scripts/package-release.sh --unsigned
-./scripts/test-release.sh .build/release/YumYum-Agent-0.1.0-macOS.dmg
+./scripts/test-release.sh .build/release/YumYum-Agent-0.1.1-macOS.dmg
 ```
 
 ## Build and run from source

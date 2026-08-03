@@ -4,6 +4,10 @@ All notable changes to this project will be documented here.
 
 ## [Unreleased]
 
+## [0.1.1]
+
+- Redesign the YumYum mascot and app branding.
+- Add GUI-first unsigned preview installation instructions and optional SHA-256 verification guidance.
 - Add explicit unsigned DMG packaging and verification plus a tag-only Developer ID signing, notarization, checksum, and GitHub Releases workflow.
 
 ## [0.1.0]

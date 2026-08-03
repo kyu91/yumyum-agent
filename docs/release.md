@@ -2,14 +2,18 @@
 
 YumYum Agent 0.1.0 is published as the prerelease [YumYum Agent 0.1.0 — Unsigned Preview](https://github.com/kyu91/yumyum-agent/releases/tag/v0.1.0). It is not a draft and contains exactly `YumYum-Agent-0.1.0-macOS.dmg` and `YumYum-Agent-0.1.0-macOS.dmg.sha256`. It is not Developer ID signed or Apple notarized; clean-machine Gatekeeper behavior and Intel hardware execution remain unverified.
 
+## Next unsigned prerelease
+
+Version 0.1.1 is prepared as the next unsigned prerelease from commit `2990044` and the release-preparation changes. The proposed tag is `v0.1.1`; it has not been created or published.
+
 ## Current source gate
 
 ```sh
 swift build
 swift test
 ./scripts/build-app.sh
-ARCHITECTURES='arm64 x86_64' ./scripts/package-release.sh --version 0.1.0 --unsigned
-EXPECTED_ARCHITECTURES='arm64 x86_64' ./scripts/test-release.sh .build/release/YumYum-Agent-0.1.0-macOS.dmg
+ARCHITECTURES='arm64 x86_64' ./scripts/package-release.sh --version 0.1.1 --unsigned
+EXPECTED_ARCHITECTURES='arm64 x86_64' ./scripts/test-release.sh .build/release/YumYum-Agent-0.1.1-macOS.dmg
 git diff --check
 ```
 
