@@ -4,7 +4,7 @@
 
 YumYum Agent is a Swift/AppKit macOS app that lets you “feed” a selected screen area or local file to a floating pet and read responses from an installed local CLI agent in native bubbles and chat.
 
-> **Unsigned developer preview (0.1.1):** [YumYum Agent 0.1.1 — Unsigned Preview](https://github.com/kyu91/yumyum-agent/releases/tag/v0.1.1) is prepared as the next prerelease but has not been published yet. It is **not Developer ID signed or Apple notarized**.
+> **Unsigned developer preview (0.1.1):** [YumYum Agent 0.1.1 — Unsigned Preview](https://github.com/kyu91/yumyum-agent/releases/tag/v0.1.1) is available as a public prerelease. It is **not Developer ID signed or Apple notarized**.
 
 ## Features
 

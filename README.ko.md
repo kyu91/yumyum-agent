@@ -4,7 +4,7 @@
 
 YumYum Agent는 선택한 화면 영역이나 로컬 파일을 플로팅 펫에게 “먹이고”, 설치된 로컬 CLI 에이전트의 응답을 네이티브 말풍선과 채팅으로 확인할 수 있는 Swift/AppKit macOS 앱입니다.
 
-> **미서명 개발자 프리뷰(0.1.1):** [YumYum Agent 0.1.1 — Unsigned Preview](https://github.com/kyu91/yumyum-agent/releases/tag/v0.1.1)는 다음 prerelease로 준비되었으며 아직 공개되지 않았습니다. **Developer ID 서명 또는 Apple 공증을 받지 않았습니다.**
+> **미서명 개발자 프리뷰(0.1.1):** [YumYum Agent 0.1.1 — Unsigned Preview](https://github.com/kyu91/yumyum-agent/releases/tag/v0.1.1)는 공개 prerelease로 제공됩니다. **Developer ID 서명 또는 Apple 공증을 받지 않았습니다.**
 
 ## 기능
 
