@@ -155,6 +155,40 @@ struct AppShellViewModelTests {
 
     @Test
     @MainActor
+    func findingAndRemovingAnAgentUpdatesTheDefaultSelection() async {
+        let hermes = AgentInstallation(
+            definitionID: .hermes,
+            path: "/safe/hermes",
+            version: "Hermes 1.0",
+            runtimeContract: .hermesACP,
+            availability: .available
+        )
+        let connector = LifecycleConnector(definitionID: .hermes)
+        let registry = AgentRegistry(
+            discovery: StaticAgentDiscovery(installations: [hermes]),
+            persistence: EmptyAgentSelectionPersistence(),
+            visibilityPersistence: EmptyAgentVisibilityPersistence()
+        )
+        let viewModel = YumYumAppViewModel(
+            fixtureProbe: ImmediateFixtureProbe(result: .success("unused")),
+            agentRegistry: registry,
+            connectors: [connector]
+        )
+
+        await viewModel.findAndRegisterAgent(.hermes)
+
+        #expect(viewModel.agentSnapshot.selectedInstallation == hermes)
+        #expect(viewModel.agentSnapshot.isExplicitPath(hermes))
+
+        await viewModel.removeAgentInstallation(hermes)
+
+        #expect(viewModel.agentSnapshot.selection == .unselected)
+        #expect(viewModel.agentSnapshot.installations.isEmpty)
+        #expect(await connector.resetCount == 2)
+    }
+
+    @Test
+    @MainActor
     func selectionChangesResetConnectorsAndShutdownClosesThem() async throws {
         let previousLanguage = AppText.language
         defer { AppText.setLanguage(previousLanguage) }
@@ -500,6 +534,11 @@ private actor StaticAgentDiscovery: AgentDiscovering {
 private actor EmptyAgentSelectionPersistence: AgentSelectionPersisting {
     func load() -> SelectedAgentReference? { nil }
     func save(_ reference: SelectedAgentReference?) {}
+}
+
+private actor EmptyAgentVisibilityPersistence: AgentVisibilityPersisting {
+    func loadHiddenInstallationIDs() -> Set<String> { [] }
+    func saveHiddenInstallationIDs(_ identifiers: Set<String>) {}
 }
 
 private struct ImmediateFixtureProbe: FixtureProbing {

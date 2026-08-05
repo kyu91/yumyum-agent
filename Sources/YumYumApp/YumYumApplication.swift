@@ -191,8 +191,8 @@ private struct YumYumContentView: View {
     @ObservedObject var viewModel: YumYumAppViewModel
     @ObservedObject var appDelegate: YumYumAppDelegate
     @State private var connectionTask: Task<Void, Never>?
-    @State private var explicitAgentID = AgentDefinitionID.hermes
-    @State private var explicitAgentPath = ""
+    @State private var agentExecutablePanel: NSOpenPanel?
+    @State private var agentToRegister = AgentDefinitionID.hermes
     @State private var soulProfile = SoulProfile.empty
     @State private var soulSaveTask: Task<Void, Never>?
     @State private var confirmsSoulReset = false
@@ -246,6 +246,8 @@ private struct YumYumContentView: View {
         }
         .onDisappear {
             connectionTask?.cancel()
+            agentExecutablePanel?.cancel(nil)
+            agentExecutablePanel = nil
             soulSaveTask?.cancel()
             if let codexLoginApproval {
                 viewModel.cancelCodexLoginApproval(codexLoginApproval)
@@ -543,152 +545,342 @@ private struct YumYumContentView: View {
 
     private var agentSection: some View {
         GroupBox {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 12) {
                 if viewModel.isDiscoveringAgents {
                     ProgressView(AppText.localized("안전한 설치 경로 확인 중…"))
                         .controlSize(.small)
                 }
 
-                ForEach(viewModel.agentSnapshot.installations) { installation in
-                    HStack(alignment: .top, spacing: 10) {
-                        Image(systemName: installation.availability == .available
-                            ? "checkmark.circle.fill"
-                            : "xmark.circle")
-                            .foregroundStyle(installation.availability == .available ? .green : .secondary)
-                            .accessibilityHidden(true)
+                if needsAgentSetup {
+                    agentSetupCard
+                } else {
+                    ForEach(viewModel.agentSnapshot.installations) { installation in
+                        agentRow(installation)
+                        Divider()
+                    }
 
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(installation.definitionID.displayName)
-                                .font(.callout.weight(.semibold))
-                            Text(installation.path ?? AppText.localized("안전한 설치 경로에서 찾지 못함"))
-                                .font(.system(.caption, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            Text(AppText.localized(
-                                english: "Agents run on this Mac but may send selected content according to the chosen agent's network and authentication policy.",
-                                korean: "에이전트는 이 Mac에서 실행되지만 선택한 에이전트의 네트워크 및 인증 정책에 따라 선택한 콘텐츠를 전송할 수 있습니다."
-                            ))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                            Text(agentDetail(installation))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            if installation.definitionID == .codex,
-                               installation.availability == .available {
-                                Text(viewModel.codexLoginState.localizedDescription)
-                                    .font(.caption)
-                                    .foregroundStyle(codexLoginStatusColor)
-                                    .accessibilityIdentifier("codex-login-status")
-                                Text(AppText.localized(
-                                    english: "Codex usage counts against your ChatGPT plan limits. Available models and limits may vary by plan. YumYum never receives your password or token.",
-                                    korean: "Codex 사용량은 ChatGPT 플랜 한도에 포함됩니다. 사용 가능한 모델과 한도는 플랜에 따라 다를 수 있습니다. YumYum은 비밀번호나 토큰을 받지 않습니다."
-                                ))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            }
-                        }
-
+                    HStack {
+                        agentRegistrationControls
                         Spacer()
-
-                        VStack(alignment: .trailing, spacing: 6) {
-                            if installation.definitionID == .codex,
-                               installation.availability == .available {
-                                if [.awaitingBrowserSignIn, .loggingOut, .changingAccount].contains(viewModel.codexLoginState) {
-                                    Button(AppText.localized("취소")) {
-                                        viewModel.cancelCodexLogin()
-                                    }
-                                    .accessibilityIdentifier("cancel-codex-login-button")
-                                } else if viewModel.codexLoginState == .signedIn {
-                                    Button(AppText.localized(english: "Change account", korean: "계정 변경")) {
-                                        requestCodexApproval(for: installation, operation: .changeAccount)
-                                    }
-                                    Button(AppText.localized(english: "Logout", korean: "로그아웃"), role: .destructive) {
-                                        requestCodexApproval(for: installation, operation: .logout)
-                                    }
-                                } else {
-                                    Button(AppText.localized(
-                                        english: "Sign in with ChatGPT",
-                                        korean: "ChatGPT로 로그인"
-                                    )) {
-                                        requestCodexApproval(for: installation, operation: .login)
-                                    }
-                                    .disabled(viewModel.codexLoginState == .checking)
-                                    .accessibilityIdentifier("sign-in-codex-button")
-                                }
-                                Button(AppText.localized(
-                                    english: "Check connection again",
-                                    korean: "연결 다시 확인"
-                                )) {
-                                    Task { await viewModel.refreshCodexLoginStatus(for: installation) }
-                                }
-                                .disabled([.checking, .awaitingBrowserSignIn, .loggingOut, .changingAccount].contains(viewModel.codexLoginState))
-                                .accessibilityIdentifier("check-codex-connection-button")
-                            }
-
-                            Button(
-                                viewModel.agentSnapshot.selectedInstallation?.id == installation.id
-                                    ? AppText.localized("선택됨")
-                                    : AppText.localized("기본으로 선택")
-                            ) {
-                                guard let path = installation.path else { return }
-                                Task {
-                                    try? await viewModel.selectAgent(
-                                        installation.definitionID,
-                                        path: path
-                                    )
-                                }
-                            }
-                            .disabled(
-                                installation.availability != .available
-                                    || (installation.definitionID == .codex && viewModel.codexLoginState != .signedIn)
-                                    || viewModel.agentSnapshot.selectedInstallation?.id == installation.id
-                            )
-                            .accessibilityHint(
-                                installation.definitionID == .codex && viewModel.codexLoginState != .signedIn
-                                    ? viewModel.codexLoginState.localizedDescription
-                                    : ""
-                            )
+                        Button(AppText.localized("다시 검색"), systemImage: "arrow.clockwise") {
+                            refreshAgents()
                         }
+                        .disabled(viewModel.isDiscoveringAgents || agentExecutablePanel != nil)
                     }
-                    Divider()
                 }
 
-                HStack {
-                    Picker(AppText.localized("에이전트"), selection: $explicitAgentID) {
-                        ForEach(AgentDefinitionID.allCases, id: \.self) { definitionID in
-                            Text(definitionID.displayName).tag(definitionID)
-                        }
-                    }
-                    .labelsHidden()
-                    .frame(width: 130)
+                Label(
+                    AppText.localized(
+                        english: "Automatic search checks only safe default locations. Choose directly if yours is elsewhere.",
+                        korean: "자동 검색은 안전한 기본 설치 위치만 확인합니다. 다른 위치에 설치했다면 직접 선택하세요."
+                    ),
+                    systemImage: "lock"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
-                    TextField("/absolute/path/to/executable", text: $explicitAgentPath)
-                        .textFieldStyle(.roundedBorder)
-
-                    Button(AppText.localized("경로 확인")) {
-                        let path = explicitAgentPath.trimmingCharacters(in: .whitespacesAndNewlines)
-                        guard NSString(string: path).isAbsolutePath else { return }
-                        Task {
-                            await viewModel.addExplicitAgentPath(path, for: explicitAgentID)
-                        }
-                    }
-                    .disabled(
-                        !NSString(
-                            string: explicitAgentPath.trimmingCharacters(in: .whitespacesAndNewlines)
-                        ).isAbsolutePath
-                    )
-                }
-
-                Button(AppText.localized("다시 검색")) {
-                    Task { await viewModel.refreshAgents(trigger: .manualRescan) }
-                }
-                .disabled(viewModel.isDiscoveringAgents)
+                Text(AppText.localized(
+                    english: "Agents run on this Mac and may send selected content under their own network and authentication policies.",
+                    korean: "에이전트는 이 Mac에서 실행되며, 선택한 콘텐츠는 각 에이전트의 네트워크 및 인증 정책에 따라 전송될 수 있습니다."
+                ))
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
             .padding(.top, 4)
         } label: {
             mascotSectionLabel(AppText.localized("로컬 에이전트"), symbol: "cpu")
         }
+    }
+
+    private var needsAgentSetup: Bool {
+        !viewModel.isDiscoveringAgents
+            && !viewModel.agentSnapshot.installations.isEmpty
+            && viewModel.agentSnapshot.installations.allSatisfy { $0.path == nil }
+            && !viewModel.agentSnapshot.installations.contains {
+                $0.availability == .available
+            }
+    }
+
+    private var agentSetupCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(
+                AppText.localized(
+                    english: "No supported agent found yet",
+                    korean: "아직 사용할 수 있는 에이전트를 찾지 못했습니다"
+                ),
+                systemImage: "pawprint.fill"
+            )
+            .font(.callout.weight(.semibold))
+
+            Text(AppText.localized(
+                english: "Choose an agent and find it in safe default locations to register it. If it is elsewhere, choose its executable directly.",
+                korean: "연결할 에이전트를 선택해 안전한 기본 설치 위치에서 찾아 등록하세요. 다른 위치에 설치했다면 실행 파일을 직접 선택하세요."
+            ))
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+            HStack {
+                installationGuideMenu
+                agentRegistrationControls
+                Button(AppText.localized("다시 검색"), systemImage: "arrow.clockwise") {
+                    refreshAgents()
+                }
+                .disabled(viewModel.isDiscoveringAgents || agentExecutablePanel != nil)
+            }
+        }
+        .padding(12)
+        .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+        .accessibilityIdentifier("agent-setup-card")
+    }
+
+    private func agentRow(_ installation: AgentInstallation) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: installation.availability == .available
+                ? "checkmark.circle.fill"
+                : "xmark.circle")
+                .foregroundStyle(installation.availability == .available ? .green : .secondary)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(installation.definitionID.displayName)
+                    .font(.callout.weight(.semibold))
+                Text(installation.path ?? AppText.localized("안전한 설치 경로에서 찾지 못함"))
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(agentDetail(installation))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if installation.definitionID == .codex,
+                   installation.availability == .available {
+                    Text(viewModel.codexLoginState.localizedDescription)
+                        .font(.caption)
+                        .foregroundStyle(codexLoginStatusColor)
+                        .accessibilityIdentifier("codex-login-status")
+                    Text(AppText.localized(
+                        english: "Codex usage counts against your ChatGPT plan limits. Available models and limits may vary by plan. YumYum never receives your password or token.",
+                        korean: "Codex 사용량은 ChatGPT 플랜 한도에 포함됩니다. 사용 가능한 모델과 한도는 플랜에 따라 다를 수 있습니다. YumYum은 비밀번호나 토큰을 받지 않습니다."
+                    ))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+            }
+
+            Spacer()
+
+            VStack(alignment: .trailing, spacing: 6) {
+                if installation.definitionID == .codex,
+                   installation.availability == .available {
+                    codexControls(for: installation)
+                }
+
+                installationGuideLink(for: installation.definitionID)
+
+                if installation.availability == .available {
+                    Button(
+                        viewModel.agentSnapshot.selectedInstallation?.id == installation.id
+                            ? AppText.localized("선택됨")
+                            : AppText.localized("기본으로 선택")
+                    ) {
+                        guard let path = installation.path else { return }
+                        Task {
+                            try? await viewModel.selectAgent(
+                                installation.definitionID,
+                                path: path
+                            )
+                        }
+                    }
+                    .disabled(
+                        (installation.definitionID == .codex && viewModel.codexLoginState != .signedIn)
+                            || viewModel.agentSnapshot.selectedInstallation?.id == installation.id
+                    )
+                    .accessibilityHint(
+                        installation.definitionID == .codex && viewModel.codexLoginState != .signedIn
+                            ? viewModel.codexLoginState.localizedDescription
+                            : ""
+                    )
+                } else {
+                    Button(
+                        AppText.localized(english: "Find and register", korean: "찾아 등록"),
+                        systemImage: "magnifyingglass"
+                    ) {
+                        findAndRegisterAgent(installation.definitionID)
+                    }
+                    .disabled(viewModel.isDiscoveringAgents || agentExecutablePanel != nil)
+                }
+
+                Button(
+                    AppText.localized(english: "Remove from list", korean: "목록에서 제거"),
+                    role: .destructive
+                ) {
+                    removeAgentInstallation(installation)
+                }
+                .disabled(viewModel.isDiscoveringAgents || agentExecutablePanel != nil)
+                .accessibilityHint(AppText.localized(
+                    english: "Hides this item from YumYum without deleting its executable. Find and register it again to restore it.",
+                    korean: "실행 파일을 삭제하지 않고 YumYum 목록에서만 숨깁니다. 다시 찾아 등록하면 복원됩니다."
+                ))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func codexControls(for installation: AgentInstallation) -> some View {
+        if [.awaitingBrowserSignIn, .loggingOut, .changingAccount].contains(viewModel.codexLoginState) {
+            Button(AppText.localized("취소")) {
+                viewModel.cancelCodexLogin()
+            }
+            .accessibilityIdentifier("cancel-codex-login-button")
+        } else if viewModel.codexLoginState == .signedIn {
+            Button(AppText.localized(english: "Change account", korean: "계정 변경")) {
+                requestCodexApproval(for: installation, operation: .changeAccount)
+            }
+            Button(AppText.localized(english: "Logout", korean: "로그아웃"), role: .destructive) {
+                requestCodexApproval(for: installation, operation: .logout)
+            }
+        } else {
+            Button(AppText.localized(
+                english: "Sign in with ChatGPT",
+                korean: "ChatGPT로 로그인"
+            )) {
+                requestCodexApproval(for: installation, operation: .login)
+            }
+            .disabled(viewModel.codexLoginState == .checking)
+            .accessibilityIdentifier("sign-in-codex-button")
+        }
+        Button(AppText.localized(
+            english: "Check connection again",
+            korean: "연결 다시 확인"
+        )) {
+            Task { await viewModel.refreshCodexLoginStatus(for: installation) }
+        }
+        .disabled([.checking, .awaitingBrowserSignIn, .loggingOut, .changingAccount].contains(viewModel.codexLoginState))
+        .accessibilityIdentifier("check-codex-connection-button")
+    }
+
+    private var agentRegistrationControls: some View {
+        HStack(spacing: 8) {
+            Picker(
+                AppText.localized(english: "Agent to connect", korean: "연결할 에이전트"),
+                selection: $agentToRegister
+            ) {
+                ForEach(AgentDefinitionID.allCases, id: \.self) { definitionID in
+                    Text(definitionID.displayName).tag(definitionID)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .frame(width: 150)
+            .accessibilityLabel(AppText.localized(
+                english: "Agent to connect",
+                korean: "연결할 에이전트"
+            ))
+
+            Button(
+                AppText.localized(english: "Find and register", korean: "찾아 등록"),
+                systemImage: "magnifyingglass"
+            ) {
+                findAndRegisterAgent(agentToRegister)
+            }
+            .disabled(viewModel.isDiscoveringAgents || agentExecutablePanel != nil)
+
+            Menu {
+                Button(AppText.localized(
+                    english: "Choose executable directly",
+                    korean: "실행 파일 직접 선택"
+                )) {
+                    chooseAgentExecutable(for: agentToRegister)
+                }
+            } label: {
+                Label(
+                    AppText.localized(english: "Choose directly", korean: "직접 선택"),
+                    systemImage: "folder"
+                )
+            }
+            .disabled(viewModel.isDiscoveringAgents || agentExecutablePanel != nil)
+        }
+    }
+
+    private func findAndRegisterAgent(_ definitionID: AgentDefinitionID) {
+        Task { await viewModel.findAndRegisterAgent(definitionID) }
+    }
+
+    private var installationGuideMenu: some View {
+        Menu {
+            ForEach(AgentDefinitionID.allCases, id: \.self) { definitionID in
+                if let url = installationGuideURL(for: definitionID) {
+                    Link(destination: url) {
+                        Label(definitionID.displayName, systemImage: "arrow.up.right.square")
+                    }
+                }
+            }
+        } label: {
+            Label(
+                AppText.localized(english: "Install guide", korean: "설치 안내"),
+                systemImage: "arrow.up.right.square"
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func installationGuideLink(for definitionID: AgentDefinitionID) -> some View {
+        if let url = installationGuideURL(for: definitionID) {
+            Link(destination: url) {
+                Label(
+                    AppText.localized(english: "Install guide", korean: "설치 안내"),
+                    systemImage: "arrow.up.right.square"
+                )
+            }
+        }
+    }
+
+    private func installationGuideURL(for definitionID: AgentDefinitionID) -> URL? {
+        switch definitionID {
+        case .hermes:
+            URL(string: "https://hermes-agent.nousresearch.com/docs/getting-started/quickstart/")
+        case .openCode:
+            URL(string: "https://opencode.ai/docs")
+        case .codex:
+            URL(string: "https://learn.chatgpt.com/docs/codex/cli")
+        case .claudeCode:
+            URL(string: "https://code.claude.com/docs/en/setup")
+        }
+    }
+
+    private func refreshAgents() {
+        Task { await viewModel.refreshAgents(trigger: .manualRescan) }
+    }
+
+    private func chooseAgentExecutable(for definitionID: AgentDefinitionID) {
+        guard agentExecutablePanel == nil else { return }
+        let panel = NSOpenPanel()
+        panel.title = AppText.localized(
+            english: "Choose \(definitionID.displayName) Executable",
+            korean: "\(definitionID.displayName) 실행 파일 선택"
+        )
+        panel.message = AppText.localized(
+            english: "Choose the installed executable. YumYum will verify its local command contract before using it.",
+            korean: "설치된 실행 파일을 선택하세요. YumYum이 사용 전에 로컬 실행 계약을 확인합니다."
+        )
+        panel.prompt = AppText.localized(english: "Choose", korean: "선택")
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.resolvesAliases = false
+        agentExecutablePanel = panel
+        panel.begin { response in
+            Task { @MainActor in
+                guard self.agentExecutablePanel === panel else { return }
+                self.agentExecutablePanel = nil
+                guard response == .OK, let url = panel.url else { return }
+                await viewModel.addExplicitAgentPath(url.path, for: definitionID)
+            }
+        }
+    }
+
+    private func removeAgentInstallation(_ installation: AgentInstallation) {
+        Task { await viewModel.removeAgentInstallation(installation) }
     }
 
     private var shortcutSection: some View {

@@ -336,12 +336,55 @@ public final class YumYumAppViewModel: ObservableObject {
         }
     }
 
+    public func findAndRegisterAgent(_ definitionID: AgentDefinitionID) async {
+        isDiscoveringAgents = true
+        agentSnapshot = await agentRegistry.restoreInstallations(for: definitionID)
+        guard let installation = agentSnapshot.installations.first(where: {
+            $0.definitionID == definitionID && $0.availability == .available
+        }), let path = installation.path else {
+            isDiscoveringAgents = false
+            await refreshCodexLoginStatus()
+            return
+        }
+        try? await selectAgent(definitionID, path: path)
+        isDiscoveringAgents = false
+        await refreshCodexLoginStatus()
+    }
+
     public func addExplicitAgentPath(
         _ path: String,
         for definitionID: AgentDefinitionID
     ) async {
         await agentRegistry.addExplicitPath(path, for: definitionID)
-        await refreshAgents(trigger: .manualRescan)
+        agentSnapshot = await agentRegistry.refresh(trigger: .manualRescan)
+        if let installation = agentSnapshot.installations.first(where: {
+            $0.definitionID == definitionID
+                && $0.path == URL(fileURLWithPath: path).standardizedFileURL.path
+                && $0.availability == .available
+        }) {
+            try? await selectAgent(definitionID, path: installation.path ?? path)
+        }
+        await refreshCodexLoginStatus()
+    }
+
+    public func removeExplicitAgentPath(
+        for definitionID: AgentDefinitionID
+    ) async {
+        let previousSelection = agentSnapshot.selection
+        agentSnapshot = await agentRegistry.removeExplicitPath(for: definitionID)
+        if agentSnapshot.selection != previousSelection {
+            await agentRuntime.reset()
+        }
+        await refreshCodexLoginStatus()
+    }
+
+    public func removeAgentInstallation(_ installation: AgentInstallation) async {
+        let previousSelection = agentSnapshot.selection
+        agentSnapshot = await agentRegistry.removeInstallation(installation)
+        if agentSnapshot.selection != previousSelection {
+            await agentRuntime.reset()
+        }
+        await refreshCodexLoginStatus()
     }
 
     public var hermesPathStatus: HermesPathStatus {

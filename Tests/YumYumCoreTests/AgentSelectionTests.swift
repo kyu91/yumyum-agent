@@ -53,6 +53,72 @@ struct AgentSelectionTests {
         #expect(reselected.canSend)
         #expect(reselected.selectedInstallation?.path == fallbackPath)
     }
+
+    @Test
+    func removingAnExplicitSelectedPathClearsSelectionWithoutFallback() async throws {
+        let selectedPath = "/custom/hermes"
+        let fallbackPath = "/known/hermes"
+        let discovery = SelectionDiscovery(
+            scans: [
+                [
+                    available(.hermes, path: selectedPath),
+                    available(.hermes, path: fallbackPath),
+                ],
+                [available(.hermes, path: fallbackPath)],
+            ]
+        )
+        let persistence = SelectionPersistence()
+        let registry = AgentRegistry(discovery: discovery, persistence: persistence)
+
+        await registry.addExplicitPath(selectedPath, for: .hermes)
+        let discovered = await registry.refresh(trigger: .manualRescan)
+        let selected = try await registry.select(.hermes, path: selectedPath)
+
+        #expect(discovered.isExplicitPath(try #require(discovered.installations.first)))
+        #expect(selected.selectedInstallation?.path == selectedPath)
+
+        let removed = await registry.removeExplicitPath(for: .hermes)
+
+        #expect(removed.selection == .unselected)
+        #expect(removed.explicitPaths.isEmpty)
+        #expect(removed.installations.map(\.path) == [fallbackPath])
+        #expect(await persistence.storedReference == nil)
+    }
+
+    @Test
+    func removingAnInstallationHidesItUntilItIsFoundAgain() async throws {
+        let path = "/known/codex"
+        let codex = available(.codex, path: path)
+        let hermes = available(.hermes, path: "/known/hermes")
+        let discovery = SelectionDiscovery(scans: [[codex, hermes]])
+        let selection = SelectionPersistence()
+        let visibility = VisibilityPersistence()
+        let registry = AgentRegistry(
+            discovery: discovery,
+            persistence: selection,
+            visibilityPersistence: visibility
+        )
+
+        _ = await registry.refresh(trigger: .appStart)
+        _ = try await registry.select(.codex, path: path)
+
+        let removed = await registry.removeInstallation(codex)
+
+        #expect(removed.installations == [hermes])
+        #expect(removed.selection == .unselected)
+        #expect(await selection.storedReference == nil)
+
+        let restoredRegistry = AgentRegistry(
+            discovery: discovery,
+            persistence: selection,
+            visibilityPersistence: visibility
+        )
+        let stillHidden = await restoredRegistry.refresh(trigger: .appStart)
+        #expect(stillHidden.installations == [hermes])
+
+        let restored = await restoredRegistry.restoreInstallations(for: .codex)
+        #expect(restored.installations == [codex, hermes])
+    }
 }
 
 private actor SelectionDiscovery: AgentDiscovering {
@@ -80,6 +146,18 @@ private actor SelectionPersistence: AgentSelectionPersisting {
 
     func save(_ reference: SelectedAgentReference?) {
         storedReference = reference
+    }
+}
+
+private actor VisibilityPersistence: AgentVisibilityPersisting {
+    private var identifiers: Set<String> = []
+
+    func loadHiddenInstallationIDs() -> Set<String> {
+        identifiers
+    }
+
+    func saveHiddenInstallationIDs(_ identifiers: Set<String>) {
+        self.identifiers = identifiers
     }
 }
 

@@ -49,6 +49,41 @@ public actor UserDefaultsAgentSelectionStore: AgentSelectionPersisting {
     }
 }
 
+public protocol AgentVisibilityPersisting: Sendable {
+    func loadHiddenInstallationIDs() async -> Set<String>
+    func saveHiddenInstallationIDs(_ identifiers: Set<String>) async
+}
+
+public actor UserDefaultsAgentVisibilityStore: AgentVisibilityPersisting {
+    private let defaults: UserDefaults
+    private let key: String
+
+    public init(
+        defaults: UserDefaults = .standard,
+        key: String = "YumYum.HiddenAgentInstallations"
+    ) {
+        self.defaults = defaults
+        self.key = key
+    }
+
+    public func loadHiddenInstallationIDs() -> Set<String> {
+        guard let data = defaults.data(forKey: key),
+              let identifiers = try? JSONDecoder().decode(Set<String>.self, from: data) else {
+            return []
+        }
+        return identifiers
+    }
+
+    public func saveHiddenInstallationIDs(_ identifiers: Set<String>) {
+        guard !identifiers.isEmpty else {
+            defaults.removeObject(forKey: key)
+            return
+        }
+        guard let data = try? JSONEncoder().encode(identifiers) else { return }
+        defaults.set(data, forKey: key)
+    }
+}
+
 public enum AgentRefreshTrigger: Equatable, Sendable {
     case appStart
     case manualRescan
@@ -65,6 +100,7 @@ public enum AgentSelectionState: Equatable, Sendable {
 public struct AgentRegistrySnapshot: Equatable, Sendable {
     public let installations: [AgentInstallation]
     public let selection: AgentSelectionState
+    public let explicitPaths: [AgentDefinitionID: String]
 
     public var selectedInstallation: AgentInstallation? {
         guard case let .selected(installation) = selection else {
@@ -84,12 +120,19 @@ public struct AgentRegistrySnapshot: Equatable, Sendable {
         return false
     }
 
+    public func isExplicitPath(_ installation: AgentInstallation) -> Bool {
+        guard let path = installation.path else { return false }
+        return explicitPaths[installation.definitionID] == path
+    }
+
     public init(
         installations: [AgentInstallation],
-        selection: AgentSelectionState
+        selection: AgentSelectionState,
+        explicitPaths: [AgentDefinitionID: String] = [:]
     ) {
         self.installations = installations
         self.selection = selection
+        self.explicitPaths = explicitPaths
     }
 }
 
@@ -117,24 +160,29 @@ public protocol AgentSelectionValidating: Sendable {
 public actor AgentRegistry: AgentSelectionValidating {
     private let discovery: any AgentDiscovering
     private let persistence: any AgentSelectionPersisting
+    private let visibilityPersistence: any AgentVisibilityPersisting
     private var installations: [AgentInstallation] = []
     private var selectedReference: SelectedAgentReference?
     private var explicitPaths: [AgentDefinitionID: String] = [:]
-    private var didLoadSelection = false
+    private var hiddenInstallationIDs: Set<String> = []
+    private var didLoadPreferences = false
     private var selectionWasInvalidated = false
 
     public init(
         discovery: any AgentDiscovering = AgentDiscovery(),
-        persistence: any AgentSelectionPersisting = UserDefaultsAgentSelectionStore()
+        persistence: any AgentSelectionPersisting = UserDefaultsAgentSelectionStore(),
+        visibilityPersistence: any AgentVisibilityPersisting = UserDefaultsAgentVisibilityStore()
     ) {
         self.discovery = discovery
         self.persistence = persistence
+        self.visibilityPersistence = visibilityPersistence
     }
 
     @discardableResult
     public func refresh(trigger: AgentRefreshTrigger) async -> AgentRegistrySnapshot {
-        await loadSelectionIfNeeded()
-        installations = await discovery.scan(explicitPaths: explicitPaths)
+        await loadPreferencesIfNeeded()
+        let discoveredInstallations = await discovery.scan(explicitPaths: explicitPaths)
+        installations = discoveredInstallations.filter { !hiddenInstallationIDs.contains($0.id) }
 
         guard let selectedReference else {
             return snapshot(selection: .unselected)
@@ -186,8 +234,75 @@ public actor AgentRegistry: AgentSelectionValidating {
     public func addExplicitPath(
         _ path: String,
         for definitionID: AgentDefinitionID
-    ) {
-        explicitPaths[definitionID] = URL(fileURLWithPath: path).standardizedFileURL.path
+    ) async {
+        await loadPreferencesIfNeeded()
+        let standardizedPath = URL(fileURLWithPath: path).standardizedFileURL.path
+        let didRestoreInstallation = hiddenInstallationIDs.remove(
+            "\(definitionID.rawValue):\(standardizedPath)"
+        ) != nil
+        let didRestoreUnavailableInstallation = hiddenInstallationIDs.remove(
+            "\(definitionID.rawValue):unavailable"
+        ) != nil
+        if didRestoreInstallation || didRestoreUnavailableInstallation {
+            await visibilityPersistence.saveHiddenInstallationIDs(hiddenInstallationIDs)
+        }
+        explicitPaths[definitionID] = standardizedPath
+    }
+
+    @discardableResult
+    public func removeExplicitPath(
+        for definitionID: AgentDefinitionID
+    ) async -> AgentRegistrySnapshot {
+        await loadPreferencesIfNeeded()
+        guard let removedPath = explicitPaths.removeValue(forKey: definitionID) else {
+            return await refresh(trigger: .manualRescan)
+        }
+        if selectedReference?.path == removedPath {
+            selectedReference = nil
+            selectionWasInvalidated = false
+            await persistence.save(nil)
+        }
+        return await refresh(trigger: .manualRescan)
+    }
+
+    @discardableResult
+    public func removeInstallation(_ installation: AgentInstallation) async -> AgentRegistrySnapshot {
+        await loadPreferencesIfNeeded()
+        hiddenInstallationIDs.insert(installation.id)
+        await visibilityPersistence.saveHiddenInstallationIDs(hiddenInstallationIDs)
+
+        if let path = installation.path {
+            let reference = SelectedAgentReference(
+                definitionID: installation.definitionID,
+                path: path
+            )
+            if explicitPaths[installation.definitionID] == reference.path {
+                explicitPaths.removeValue(forKey: installation.definitionID)
+            }
+            if selectedReference == reference {
+                selectedReference = nil
+                selectionWasInvalidated = false
+                await persistence.save(nil)
+            }
+        }
+        return await refresh(trigger: .manualRescan)
+    }
+
+    @discardableResult
+    public func restoreInstallations(
+        for definitionID: AgentDefinitionID
+    ) async -> AgentRegistrySnapshot {
+        await loadPreferencesIfNeeded()
+        let prefix = "\(definitionID.rawValue):"
+        let restoredInstallationIDs = hiddenInstallationIDs.filter {
+            $0.hasPrefix(prefix)
+        }
+        guard !restoredInstallationIDs.isEmpty else {
+            return await refresh(trigger: .manualRescan)
+        }
+        hiddenInstallationIDs.subtract(restoredInstallationIDs)
+        await visibilityPersistence.saveHiddenInstallationIDs(hiddenInstallationIDs)
+        return await refresh(trigger: .manualRescan)
     }
 
     public func validatedSelection() async throws -> AgentInstallation {
@@ -225,12 +340,13 @@ public actor AgentRegistry: AgentSelectionValidating {
         )
     }
 
-    private func loadSelectionIfNeeded() async {
-        guard !didLoadSelection else {
+    private func loadPreferencesIfNeeded() async {
+        guard !didLoadPreferences else {
             return
         }
-        didLoadSelection = true
+        didLoadPreferences = true
         selectedReference = await persistence.load()
+        hiddenInstallationIDs = await visibilityPersistence.loadHiddenInstallationIDs()
         if let selectedReference {
             explicitPaths[selectedReference.definitionID] = selectedReference.path
         }
@@ -253,6 +369,10 @@ public actor AgentRegistry: AgentSelectionValidating {
     }
 
     private func snapshot(selection: AgentSelectionState) -> AgentRegistrySnapshot {
-        AgentRegistrySnapshot(installations: installations, selection: selection)
+        AgentRegistrySnapshot(
+            installations: installations,
+            selection: selection,
+            explicitPaths: explicitPaths
+        )
     }
 }

@@ -78,7 +78,7 @@ swift test \
 ## First use
 
 1. Install a supported CLI and complete its own sign-in flow.
-2. Run YumYum Agent and explicitly select a discovered executable in **Settings → Agent**.
+2. Open **Settings → Agent**, choose an agent to connect, then use **Find and register**. YumYum checks safe default locations, verifies its local command contract, and selects it as the default when ready. If it is not found, use **Install guide**; use **Choose directly** only when the executable is elsewhere. Codex must be signed in before it can become the default.
 3. If needed, grant Screen Recording, Input Monitoring, or Accessibility permission in macOS Settings.
 4. Click the pet or press `Control+Option+Space` to capture, choose files, or chat.
 
@@ -120,6 +120,13 @@ The default English product reference is the [product specification](docs/produc
 - In **Soul**, confirm `soul-response-style` exposes Urgent/Normal/Relaxed in English and 급함/보통/느긋함 in Korean, defaults to Normal, and VoiceOver explains that it changes response directness, context, and detail rather than processing speed.
 - Quit and relaunch to confirm the explicit language choice persists.
 - With no stored choice, verify Korean is selected only when the first resolved macOS preferred language is Korean; all other cases use English.
+
+## Manual agent setup verification
+
+- With no supported executable in a safe location, **Agent** shows `agent-setup-card` with **Install guide**, an agent picker, **Find and register**, and **Rescan**.
+- Each agent row shows its **Install guide**, including available installations.
+- Finding a valid supported agent verifies it locally and selects it as the default; Codex remains unselected until its ChatGPT sign-in succeeds.
+- Removing an agent hides it from YumYum without deleting its executable; finding and registering it again restores it to the list.
 
 ## Contributing
 
