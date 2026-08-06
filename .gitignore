@@ -18,3 +18,5 @@ xcuserdata/
 *.key
 *.p12
 *.mobileprovision
+.claude/settings.local.json
+docs/handoff.md

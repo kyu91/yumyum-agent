@@ -8,6 +8,7 @@ YumYum Agent is a Swift/AppKit app that "feeds" the user's selected screen area 
 
 - The user must explicitly approve the action of changing the external state separately from the task just before execution. Previous approvals, comprehensive approvals, and approvals from other Task·approval·toolsets cannot be reused.
 - The current product does not execute external changes. `ExternalChangeToolsetPolicy` is a default rejection, and `TaskApprovalGate` only implements a one-time approval model in memory and is not connected to the UI and Connector execution flow.
+- Codex sign-in, sign-out, and account switching are the separate account-lifecycle exception: Settings requires a fresh, operation-specific confirmation, then `CodexLoginService` revalidates the exact selected executable before invocation. This must not become an agent-proposed external-change permission path.
 - `session/request_permission` of Hermes ACP always responds to `cancelled` at present. This behavior is not mitigated until the approved UI and Task scope verification are connected to the actual execution path.
 - Input is only delivered to the data explicitly selected by the user and the agent. In the case of blank input, invalid attachment, cancellation, permission refusal, or agent not selected, no request is created or sent.
 
@@ -42,6 +43,8 @@ Main route:
 
 The pet click or the set global shortcut opens the action speech bubble. The order of actions and state transfer are owned by `ActionBubbleAction` and `ActionFlowStateMachine`, and `QuickMenuPanelController` reflects the effect in the AppKit UI. The chat status is owned by `ChatBubbleState`, and the asynchronous transmission lifetime is owned by `ChatBubbleSession`. Simply hiding the panel does not cancel the transmission, and only explicit cancellation cancels `Task`.
 
+`YumYumAppDelegate` runs the one-time `LegacyPreferencesMigration` before loading preferences and owns the global shortcut, theme, and live English/Korean switching. Language or theme changes must update the existing panels without resetting chat state, drafts, attachments, or scroll position.
+
 ### Input and response
 
 Capture is performed by `ScreenCaptureCoordinator` displaying a selection overlay on all screens and calculating at least 8pt and pixel fragments per display with `CaptureRegionPolicy`. macOS 15.2 and later uses a single-area API, while macOS 14~15.1 uses capture and synthesis per display. Successful captures retain a temporary PNG and the original screen coordinates.
@@ -49,6 +52,8 @@ Capture is performed by `ScreenCaptureCoordinator` displaying a selection overla
 File selection and capture are combined with `FeedInput`. `FeedValidator` only allows general files with absolute paths, removes duplicates, applies a 20MB limit per file, supports extensions, and blocks certificate file names/extensions. `FeedWorkflow` serializes the sequence of verification → preview animation → `PromptRequest` creation → streaming transmission → completion/failure/cancellation feedback, and organizes the input status and temporary files at all termination paths.
 
 The response arrives in the UI as a snapshot/delta/completed stream from `PromptResponseEvent`. `ChatBubbleState` updates the transcript and the current streaming response, while `AssistantMarkdownRenderer` renders ongoing incomplete Markdown and completed Markdown differently. User display errors prevent path, token, and raw stderr exposure by passing through `UserFacingErrorRedactor`.
+
+`SoulProfileStore` owns the normalized plaintext `~/Library/Application Support/YumYum/SOUL.md`. `AgentRuntime` injects Soul only into the first prompt of a new logical session; a session reset waits for the latest Soul draft to save. Do not add external Soul imports, hooks, command syntax, or secret content.
 
 ### Agent discovery, selection, execution
 
@@ -62,8 +67,8 @@ The transmission route is as follows.
 
 - Hermes: `HermesACPConnector` → Long-term connection `ACPProcessTransport` → `HermesACPProtocolClient`; Use `initialize`, `session/new`, `session/prompt` and cancel the authorization request.
 - OpenCode: Structured `opencode run --pure --format json`; The confirmed attachment is forwarded as `--file`.
-- Codex: structured `codex exec` with read-only sandbox and untrusted approval policy; only the image is delivered as `--image`.
-- Claude Code: structured print execution of plan permission mode and non-persistent sessions.
+- Codex: structured `codex exec` with read-only sandbox and untrusted approval policy. Images use `--image`; confirmed non-image attachments are listed only as local paths in standard input. Codex requires a verified signed-in state before selection and transmission.
+- Claude Code: structured print execution of plan permission mode. Its logical session ID is held for the current runtime, starts with `--session-id`, and follows up with `--resume`; cancellation, failure, selection change, reset, or shutdown discards it.
 
 CLI starts with the exact execution URL and argv without going through the shell. The execution of general agents maintains a 120-second timeout and a combined stdout/stderr limit of 2MB. It preserves the reuse, reset after cancellation, and stale generation suppression behavior of Codex/Claude sessions.
 
@@ -122,6 +127,8 @@ Probes and model responses that require the actual path and external CLI login/n
 - Function changes are verified with Swift Testing against Core policies/states. If they are connected to existing XCTest-based process regressions, the `PhaseZeroXCTests` pattern is maintained.
 - Agent/process changes verify the correct executable URL, argv, minimum environment, timeout, output limit, unused shell, cancellation/forced termination, and stream drain.
 - ACP changes verify initialization/session reuse, permission cancellation, cancellation notification, connection abandonment and reconnection after timeout, and stale event suppression.
+- Codex authentication changes verify fresh confirmation/cancellation, exact executable revalidation, status, timeout, and no process launch after a cancelled or stale approval.
+- Soul, localization, theme, and legacy preference migration changes verify latest-draft persistence before session reset, no duplicate Soul on follow-up, live UI-state preservation, and one-time migration behavior.
 - Input/chat changes are verified to be sent exactly once, busy rejection, transcript context, attachment path exposure prevention, retry/cancel, and temporary file organization of all paths.
 - Capture changes verify four-way drag, minimum area, negative/vertical screen coordinates, mixed scale, display boundary synthesis, and delayed callback suppression after cancellation.
 - UI/accessibility changes are checked manually in the README and the relevant items are checked on the actual macOS. In particular, VoiceOver, Reduce Motion, multi-display, and focus levitation are not completed by unit testing alone.
@@ -141,6 +148,8 @@ If you change the app bundle or package settings, `swift build` and `./scripts/b
 - `FeedWorkflow`, `FeedValidator`: Do not create `PromptRequest` before verification. Do not weaken file restrictions, certificate blocking, deduplication, single transmission, or temporary capture organization.
 - `AgentDiscovery`, `AgentSelection`: Re-verify the exact absolute path and local help contract. Even if the selected path disappears, it will not automatically switch to another installation.
 - `AgentRuntime`, `StructuredCLIStreaming`: Only use the actual confirmed argv in each CLI. Do not abstract or add unconfirmed flags by adding the difference in attachment support.
+- `SoulProfile`, `YumYumAppViewModel`: Preserve normalization, latest-draft-wins persistence, first-session-only injection, and save-before-reset behavior. Soul remains app-owned plaintext and must not accept secrets or executable directives.
+- `CodexLoginService`, `AppLocalization`, `LegacyPreferencesMigration`: Keep authentication actions behind their own fresh confirmation and exact-path revalidation. Preserve live language/theme state and the one-time, known-key-only migration boundary.
 - `HermesACPTransport`: ACP v1 JSON-RPC order, connection/session reuse, permission `cancelled`, 2MB budget reset, preserves process termination and reconnection to the next request in case of timeout/cancel.
 - `ProcessRunner`: Continuously drain stdout/stderr at the same time and prevent child deadlock even after reaching the output limit. When timeout/cancel, terminate and kill if necessary. Even if a descendant grabs the pipe, it does not wait for the child to terminate directly.
 - `ScreenCaptureCoordinator`, `CaptureRegionPolicy`: Maintains API branch by macOS version and AppKit/ScreenCaptureKit coordinate system conversion. Hides all YumYum Agent surfaces before capturing and keeps the source rect of the result as the starting point of the preview.
@@ -156,6 +165,12 @@ If you change the app bundle or package settings, `swift build` and `./scripts/b
 - Does not expose the local absolute path, raw stderr, or string in the form of a token to the user display message and transcript. Only when the Connector requires a path input does it pass the user-selected path in the current request in a limited manner.
 - To add external change tools or allow permission responses, the independent approval UI, Task/approval/toolset matching, one-time consume, cancellation/refusal path must be implemented and validated together. It cannot be made to run with only some of them implemented.
 - Network calls, package additions, remote service linking, and telemetry are not added without the user's explicit request.
+
+## Session continuity
+
+Keep every result in the repository, not in the conversation. A conclusion that exists only in an agent's chat history is lost the moment that session ends. Write findings into source, tests, or a commit as you reach them.
+
+When asked to hand off, write `docs/handoff.md`: current state, decisions already settled, and remaining work — written so the next session can continue from that file alone, not as a transcript summary. It is a scratch file; do not commit it.
 
 ## Git work rules
 
