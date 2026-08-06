@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 import YumYumCore
 
@@ -21,6 +22,7 @@ final class YumYumAppDelegate: NSObject, NSApplicationDelegate, ObservableObject
     private var runtimeShutdownTask: Task<Void, Never>?
     private var didShutdownRuntime = false
     private var terminationReplyPending = false
+    private var connectedAgentCancellable: AnyCancellable?
 
     override init() {
         LegacyPreferencesMigration.migrate()
@@ -39,6 +41,7 @@ final class YumYumAppDelegate: NSObject, NSApplicationDelegate, ObservableObject
             self?.toggleQuickMenu()
         }
         petWindowController = controller
+        controller.applyConnectedAgent(viewModel?.agentSnapshot.selectedInstallation?.definitionID)
         assembleQuickMenuIfPossible()
         if petVisibility.isVisible {
             controller.show()
@@ -103,6 +106,12 @@ final class YumYumAppDelegate: NSObject, NSApplicationDelegate, ObservableObject
     func configure(viewModel: YumYumAppViewModel) {
         self.viewModel = viewModel
         assembleQuickMenuIfPossible()
+        connectedAgentCancellable = viewModel.$agentSnapshot
+            .map(\.selectedInstallation?.definitionID)
+            .removeDuplicates()
+            .sink { [weak self] definitionID in
+                self?.petWindowController?.applyConnectedAgent(definitionID)
+            }
     }
 
     private func assembleQuickMenuIfPossible() {
@@ -297,6 +306,11 @@ final class FloatingPetWindowController: NSObject {
         applyChewFrame(.resting)
     }
 
+    func applyConnectedAgent(_ definitionID: AgentDefinitionID?) {
+        guard presentationModel.connectedAgentID != definitionID else { return }
+        presentationModel.connectedAgentID = definitionID
+    }
+
     func applyLanguage(_ language: AppLanguage) {
         presentationModel.language = language
         hostingView.setAccessibilityElement(true)
@@ -372,6 +386,7 @@ final class PetPresentationModel: ObservableObject {
     @Published var chewFrame = PetChewFrame.resting
     @Published var isFileDropTarget = false
     @Published var language = AppText.language
+    @Published var connectedAgentID: AgentDefinitionID?
 
     var accessibilityLabel: String {
         AppText.localized("YumYum Agent 플로팅 펫", language: language)
@@ -574,6 +589,26 @@ final class FloatingPetHostingView<Content: View>: NSHostingView<Content> {
     }
 }
 
+extension AgentDefinitionID {
+    var headbandColor: Color {
+        switch self {
+        case .hermes: Color(red: 0.42, green: 0.36, blue: 0.91)
+        case .openCode: Color(red: 0.16, green: 0.55, blue: 0.82)
+        case .codex: Color(red: 0.22, green: 0.66, blue: 0.40)
+        case .claudeCode: Color(red: 0.72, green: 0.25, blue: 0.48)
+        }
+    }
+
+    var headbandIconName: String {
+        switch self {
+        case .hermes: "AgentIcon-Hermes"
+        case .openCode: "AgentIcon-OpenCode"
+        case .codex: "AgentIcon-Codex"
+        case .claudeCode: "AgentIcon-ClaudeCode"
+        }
+    }
+}
+
 struct YumYumPetView: View {
     struct MouthDetails: Equatable {
         let noseCount: Int
@@ -715,6 +750,34 @@ struct YumYumPetView: View {
             accent.addLine(to: point(end.x, end.y))
             context.stroke(accent, with: .color(Color(red: 0.98, green: 0.56, blue: 0.20)), style: StrokeStyle(lineWidth: 2 * scale, lineCap: .round))
         }
+
+        if let connectedAgentID = presentationModel.connectedAgentID {
+            var band = Path()
+            band.move(to: point(19, 29))
+            band.addQuadCurve(to: point(79, 30), control: point(49, 35))
+            context.stroke(band, with: .color(outline), style: StrokeStyle(lineWidth: 11 * scale, lineCap: .round))
+            context.stroke(band, with: .color(connectedAgentID.headbandColor), style: StrokeStyle(lineWidth: 8 * scale, lineCap: .round))
+
+            let badgeCenter = point(49, 31)
+            let badgeRadius = 10 * scale
+            let badgeRect = CGRect(
+                x: badgeCenter.x - badgeRadius,
+                y: badgeCenter.y - badgeRadius,
+                width: badgeRadius * 2,
+                height: badgeRadius * 2
+            )
+            let badgePath = Path(ellipseIn: badgeRect)
+            context.fill(badgePath, with: .color(.white))
+            context.drawLayer { layer in
+                layer.clip(to: badgePath)
+                layer.draw(
+                    Image(nsImage: NSImage(named: connectedAgentID.headbandIconName) ?? NSImage()),
+                    in: badgeRect
+                )
+            }
+            context.stroke(badgePath, with: .color(outline), style: StrokeStyle(lineWidth: 1.5 * scale))
+        }
+
         context.fill(
             Path(
                 ellipseIn: rect(

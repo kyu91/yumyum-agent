@@ -66,6 +66,9 @@ fi
 /usr/bin/install -m 644 "$ROOT_DIR/AppBundle/AppIcon.icns" "$RESOURCES_DIR/AppIcon.icns"
 /usr/bin/install -m 644 "$ROOT_DIR/AppBundle/MenuBarMascot.png" "$RESOURCES_DIR/MenuBarMascot.png"
 /usr/bin/install -m 644 "$ROOT_DIR/AppBundle/MenuBarMascot@2x.png" "$RESOURCES_DIR/MenuBarMascot@2x.png"
+for icon in "$ROOT_DIR"/AppBundle/AgentIcons/*.png; do
+    /usr/bin/install -m 644 "$icon" "$RESOURCES_DIR/$(basename "$icon")"
+done
 
 /usr/bin/touch "$APP_DIR"
 printf 'Built %s\n' "$APP_DIR"

@@ -62,6 +62,45 @@ struct PetFileDropTests {
     }
 
     @Test
+    @MainActor
+    func connectedAgentUpdatesPresentationOnlyWhenItChanges() {
+        let controller = FloatingPetWindowController {}
+        let model = controller.presentationModel
+        #expect(model.connectedAgentID == nil)
+
+        controller.applyConnectedAgent(.claudeCode)
+        #expect(model.connectedAgentID == .claudeCode)
+
+        controller.applyConnectedAgent(.claudeCode)
+        #expect(model.connectedAgentID == .claudeCode)
+
+        controller.applyConnectedAgent(nil)
+        #expect(model.connectedAgentID == nil)
+    }
+
+    @Test
+    func eachAgentHasADistinctHeadbandColorAndIcon() {
+        let ids = AgentDefinitionID.allCases
+        #expect(Set(ids.map(\.headbandIconName)).count == ids.count)
+        let resolvedColors = ids.map { $0.headbandColor.resolve(in: EnvironmentValues()) }
+        #expect(Set(resolvedColors.map { "\($0.red),\($0.green),\($0.blue)" }).count == ids.count)
+    }
+
+    @Test
+    func eachAgentHeadbandIconResourceExistsInTheAppBundle() {
+        let agentIconsDirectory = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("AppBundle/AgentIcons")
+
+        for id in AgentDefinitionID.allCases {
+            let path = agentIconsDirectory.appendingPathComponent("\(id.headbandIconName).png").path
+            #expect(FileManager.default.fileExists(atPath: path), "Missing \(id.headbandIconName).png in AppBundle/AgentIcons")
+        }
+    }
+
+    @Test
     func preflightAcceptsRegularFilesDeduplicatesAndRejectsInvalidBatches() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
