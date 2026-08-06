@@ -665,6 +665,16 @@ private struct YumYumContentView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 }
+
+                if installation.definitionID == .claudeCode,
+                   installation.availability == .available {
+                    Text(AppText.localized(
+                        english: "Claude Code manages its own sign-in. Open Terminal and follow the CLI's login prompts. YumYum never receives your password or token.",
+                        korean: "Claude Code는 자체적으로 로그인을 관리합니다. 터미널을 열어 CLI 안내에 따라 로그인하세요. YumYum은 비밀번호나 토큰을 받지 않습니다."
+                    ))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
             }
 
             Spacer()
@@ -673,6 +683,17 @@ private struct YumYumContentView: View {
                 if installation.definitionID == .codex,
                    installation.availability == .available {
                     codexControls(for: installation)
+                }
+
+                if installation.definitionID == .claudeCode,
+                   installation.availability == .available {
+                    Button(
+                        AppText.localized(english: "Open Terminal", korean: "터미널 열기"),
+                        systemImage: "terminal"
+                    ) {
+                        openTerminalForClaudeCodeLogin()
+                    }
+                    .accessibilityIdentifier("open-terminal-claude-login-button")
                 }
 
                 installationGuideLink(for: installation.definitionID)
@@ -850,6 +871,16 @@ private struct YumYumContentView: View {
 
     private func refreshAgents() {
         Task { await viewModel.refreshAgents(trigger: .manualRescan) }
+    }
+
+    private func openTerminalForClaudeCodeLogin() {
+        guard let terminalURL = NSWorkspace.shared.urlForApplication(
+            withBundleIdentifier: "com.apple.Terminal"
+        ) else { return }
+        NSWorkspace.shared.openApplication(
+            at: terminalURL,
+            configuration: NSWorkspace.OpenConfiguration()
+        )
     }
 
     private func chooseAgentExecutable(for definitionID: AgentDefinitionID) {
