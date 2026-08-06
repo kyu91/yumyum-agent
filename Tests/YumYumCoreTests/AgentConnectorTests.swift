@@ -235,7 +235,7 @@ struct AgentConnectorTests {
             #expect(invocation.timeout == .seconds(120))
             #expect(invocation.command.outputByteLimit == 2_097_152)
             #expect(invocation.command.environment?.keys.sorted() == [
-                "HOME", "LANG", "LC_ALL", "PATH", "TERM",
+                "HOME", "LANG", "LC_ALL", "LOGNAME", "PATH", "TERM", "USER",
             ])
             #expect(invocation.command.executableURL.path != "/bin/sh")
         }

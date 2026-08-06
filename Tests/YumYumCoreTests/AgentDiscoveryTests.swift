@@ -65,6 +65,19 @@ struct AgentDiscoveryTests {
     }
 
     @Test
+    func processEnvironmentIncludesUserIdentityAlongsideHomeAndPath() {
+        let environment = AgentProcessEnvironment.make(
+            executableDirectory: URL(fileURLWithPath: "/safe/bin"),
+            homeDirectory: URL(fileURLWithPath: "/safe/home"),
+            userName: "duncan"
+        )
+
+        #expect(environment["USER"] == "duncan")
+        #expect(environment["LOGNAME"] == "duncan")
+        #expect(environment["HOME"] == "/safe/home")
+    }
+
+    @Test
     func rejectsAgentsWhenARuntimeCriticalFlagIsMissingFromHelp() async throws {
         let cases: [(AgentDefinitionID, String)] = [
             (.openCode, "--pure"),

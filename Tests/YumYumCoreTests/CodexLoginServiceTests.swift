@@ -25,15 +25,11 @@ struct CodexLoginServiceTests {
         #expect(calls.map(\.command.arguments) == [["login", "status"], ["login"], ["login", "status"]])
         #expect(calls.map(\.timeout) == [.seconds(5), .seconds(600), .seconds(5)])
         #expect(calls.allSatisfy { $0.command.outputByteLimit == 65_536 })
-        #expect(calls.allSatisfy {
-            $0.command.environment == [
-                "HOME": "/safe/home",
-                "LANG": "en_US.UTF-8",
-                "LC_ALL": "en_US.UTF-8",
-                "PATH": "/safe:/usr/bin:/bin",
-                "TERM": "dumb",
-            ]
-        })
+        let expectedEnvironment = AgentProcessEnvironment.make(
+            executableDirectory: URL(fileURLWithPath: "/safe"),
+            homeDirectory: URL(fileURLWithPath: "/safe/home")
+        )
+        #expect(calls.allSatisfy { $0.command.environment == expectedEnvironment })
     }
 
     @Test

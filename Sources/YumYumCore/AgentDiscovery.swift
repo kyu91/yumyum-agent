@@ -70,18 +70,21 @@ public struct AgentInstallation: Identifiable, Equatable, Sendable {
 public enum AgentProcessEnvironment {
     public static func make(
         executableDirectory: URL,
-        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
+        userName: String = ProcessInfo.processInfo.userName
     ) -> [String: String] {
         [
             "HOME": homeDirectory.standardizedFileURL.path,
             "LANG": "en_US.UTF-8",
             "LC_ALL": "en_US.UTF-8",
+            "LOGNAME": userName,
             "PATH": [
                 executableDirectory.standardizedFileURL.path,
                 "/usr/bin",
                 "/bin",
             ].joined(separator: ":"),
             "TERM": "dumb",
+            "USER": userName,
         ]
     }
 }
