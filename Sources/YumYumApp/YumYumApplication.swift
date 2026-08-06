@@ -558,26 +558,7 @@ private struct YumYumContentView: View {
                         agentRow(installation)
                         Divider()
                     }
-
-                    HStack {
-                        agentRegistrationControls
-                        Spacer()
-                        Button(AppText.localized("다시 검색"), systemImage: "arrow.clockwise") {
-                            refreshAgents()
-                        }
-                        .disabled(viewModel.isDiscoveringAgents || agentExecutablePanel != nil)
-                    }
                 }
-
-                Label(
-                    AppText.localized(
-                        english: "Automatic search checks only safe default locations. Choose directly if yours is elsewhere.",
-                        korean: "자동 검색은 안전한 기본 설치 위치만 확인합니다. 다른 위치에 설치했다면 직접 선택하세요."
-                    ),
-                    systemImage: "lock"
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
 
                 Text(AppText.localized(
                     english: "Agents run on this Mac and may send selected content under their own network and authentication policies.",
@@ -679,88 +660,31 @@ private struct YumYumContentView: View {
 
             Spacer()
 
-            VStack(alignment: .trailing, spacing: 6) {
-                if installation.definitionID == .codex,
-                   installation.availability == .available {
-                    codexControls(for: installation)
-                }
-
-                if installation.definitionID == .claudeCode,
-                   installation.availability == .available {
-                    Button(
-                        AppText.localized(english: "Open Terminal", korean: "터미널 열기"),
-                        systemImage: "terminal"
-                    ) {
-                        openTerminalForClaudeCodeLogin()
-                    }
-                    .accessibilityIdentifier("open-terminal-claude-login-button")
-                }
-
-                installationGuideLink(for: installation.definitionID)
-
-                if installation.availability == .available {
-                    Button(
-                        viewModel.agentSnapshot.selectedInstallation?.id == installation.id
-                            ? AppText.localized("선택됨")
-                            : AppText.localized("기본으로 선택")
-                    ) {
-                        guard let path = installation.path else { return }
-                        Task {
-                            try? await viewModel.selectAgent(
-                                installation.definitionID,
-                                path: path
-                            )
-                        }
-                    }
-                    .disabled(
-                        (installation.definitionID == .codex && viewModel.codexLoginState != .signedIn)
-                            || viewModel.agentSnapshot.selectedInstallation?.id == installation.id
-                    )
-                    .accessibilityHint(
-                        installation.definitionID == .codex && viewModel.codexLoginState != .signedIn
-                            ? viewModel.codexLoginState.localizedDescription
-                            : ""
-                    )
-                } else {
-                    Button(
-                        AppText.localized(english: "Find and register", korean: "찾아 등록"),
-                        systemImage: "magnifyingglass"
-                    ) {
-                        findAndRegisterAgent(installation.definitionID)
-                    }
-                    .disabled(viewModel.isDiscoveringAgents || agentExecutablePanel != nil)
-                }
-
-                Button(
-                    AppText.localized(english: "Remove from list", korean: "목록에서 제거"),
-                    role: .destructive
-                ) {
-                    removeAgentInstallation(installation)
-                }
-                .disabled(viewModel.isDiscoveringAgents || agentExecutablePanel != nil)
-                .accessibilityHint(AppText.localized(
-                    english: "Hides this item from YumYum without deleting its executable. Find and register it again to restore it.",
-                    korean: "실행 파일을 삭제하지 않고 YumYum 목록에서만 숨깁니다. 다시 찾아 등록하면 복원됩니다."
-                ))
+            HStack(alignment: .top, spacing: 6) {
+                agentPrimaryAction(for: installation)
+                agentRowMenu(for: installation)
             }
         }
     }
 
     @ViewBuilder
-    private func codexControls(for installation: AgentInstallation) -> some View {
-        if [.awaitingBrowserSignIn, .loggingOut, .changingAccount].contains(viewModel.codexLoginState) {
+    private func agentPrimaryAction(for installation: AgentInstallation) -> some View {
+        if installation.availability != .available {
+            Button(
+                AppText.localized(english: "Find and register", korean: "찾아 등록"),
+                systemImage: "magnifyingglass"
+            ) {
+                findAndRegisterAgent(installation.definitionID)
+            }
+            .disabled(viewModel.isDiscoveringAgents || agentExecutablePanel != nil)
+        } else if installation.definitionID == .codex,
+                  [.awaitingBrowserSignIn, .loggingOut, .changingAccount].contains(viewModel.codexLoginState) {
             Button(AppText.localized("취소")) {
                 viewModel.cancelCodexLogin()
             }
             .accessibilityIdentifier("cancel-codex-login-button")
-        } else if viewModel.codexLoginState == .signedIn {
-            Button(AppText.localized(english: "Change account", korean: "계정 변경")) {
-                requestCodexApproval(for: installation, operation: .changeAccount)
-            }
-            Button(AppText.localized(english: "Logout", korean: "로그아웃"), role: .destructive) {
-                requestCodexApproval(for: installation, operation: .logout)
-            }
-        } else {
+        } else if installation.definitionID == .codex,
+                  viewModel.codexLoginState != .signedIn {
             Button(AppText.localized(
                 english: "Sign in with ChatGPT",
                 korean: "ChatGPT로 로그인"
@@ -769,15 +693,83 @@ private struct YumYumContentView: View {
             }
             .disabled(viewModel.codexLoginState == .checking)
             .accessibilityIdentifier("sign-in-codex-button")
+        } else {
+            Button(
+                viewModel.agentSnapshot.selectedInstallation?.id == installation.id
+                    ? AppText.localized("선택됨")
+                    : AppText.localized("기본으로 선택")
+            ) {
+                guard let path = installation.path else { return }
+                Task {
+                    try? await viewModel.selectAgent(
+                        installation.definitionID,
+                        path: path
+                    )
+                }
+            }
+            .disabled(viewModel.agentSnapshot.selectedInstallation?.id == installation.id)
         }
-        Button(AppText.localized(
-            english: "Check connection again",
-            korean: "연결 다시 확인"
-        )) {
-            Task { await viewModel.refreshCodexLoginStatus(for: installation) }
+    }
+
+    @ViewBuilder
+    private func agentRowMenu(for installation: AgentInstallation) -> some View {
+        Menu {
+            if let url = installationGuideURL(for: installation.definitionID) {
+                Link(destination: url) {
+                    Label(
+                        AppText.localized(english: "Install guide", korean: "설치 안내"),
+                        systemImage: "arrow.up.right.square"
+                    )
+                }
+            }
+
+            if installation.definitionID == .codex,
+               installation.availability == .available {
+                if viewModel.codexLoginState == .signedIn {
+                    Button(AppText.localized(english: "Change account", korean: "계정 변경")) {
+                        requestCodexApproval(for: installation, operation: .changeAccount)
+                    }
+                    Button(AppText.localized(english: "Logout", korean: "로그아웃"), role: .destructive) {
+                        requestCodexApproval(for: installation, operation: .logout)
+                    }
+                }
+                Button(AppText.localized(
+                    english: "Check connection again",
+                    korean: "연결 다시 확인"
+                )) {
+                    Task { await viewModel.refreshCodexLoginStatus(for: installation) }
+                }
+                .disabled([.checking, .awaitingBrowserSignIn, .loggingOut, .changingAccount].contains(viewModel.codexLoginState))
+                .accessibilityIdentifier("check-codex-connection-button")
+            }
+
+            if installation.definitionID == .claudeCode,
+               installation.availability == .available {
+                Button(
+                    AppText.localized(english: "Open Terminal", korean: "터미널 열기"),
+                    systemImage: "terminal"
+                ) {
+                    openTerminalForClaudeCodeLogin()
+                }
+                .accessibilityIdentifier("open-terminal-claude-login-button")
+            }
+
+            Divider()
+
+            Button(
+                AppText.localized(english: "Remove from list", korean: "목록에서 제거"),
+                role: .destructive
+            ) {
+                removeAgentInstallation(installation)
+            }
+            .disabled(viewModel.isDiscoveringAgents || agentExecutablePanel != nil)
+        } label: {
+            Image(systemName: "ellipsis.circle")
         }
-        .disabled([.checking, .awaitingBrowserSignIn, .loggingOut, .changingAccount].contains(viewModel.codexLoginState))
-        .accessibilityIdentifier("check-codex-connection-button")
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .accessibilityLabel(AppText.localized(english: "More actions", korean: "더 보기"))
+        .accessibilityIdentifier("agent-row-more-menu")
     }
 
     private var agentRegistrationControls: some View {
@@ -841,18 +833,6 @@ private struct YumYumContentView: View {
                 AppText.localized(english: "Install guide", korean: "설치 안내"),
                 systemImage: "arrow.up.right.square"
             )
-        }
-    }
-
-    @ViewBuilder
-    private func installationGuideLink(for definitionID: AgentDefinitionID) -> some View {
-        if let url = installationGuideURL(for: definitionID) {
-            Link(destination: url) {
-                Label(
-                    AppText.localized(english: "Install guide", korean: "설치 안내"),
-                    systemImage: "arrow.up.right.square"
-                )
-            }
         }
     }
 
