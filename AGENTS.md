@@ -179,5 +179,5 @@ When asked to hand off, write `docs/handoff.md`: current state, decisions alread
 - Only the minimum range directly connected to the requested file is modified. Irrelevant format changes, dead code deletion, and product commits are not made.
 - `.build/`, `.swiftpm/`, `DerivedData/`, `.DS_Store`, do not commit Xcode user status.
 - Irreversible operations (file deletion, forced push, history rewrite) require prior approval.
-- Do not create commits, pushes, branches, tags, or remote changes without request.
+- Commits are created automatically once a change passes verification (build/tests, `git diff --check`), without asking first each time; this is a low-risk, local, reversible action. Pushes, branches, tags, and other remote changes still require explicit request.
 - Before completing, check the `git diff --check` and the entire status, and report the failed verification with the reason.
