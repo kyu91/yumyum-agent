@@ -223,7 +223,11 @@ final class QuickMenuPanelController: NSObject {
     }
 
     func canAcceptDroppedFiles(_ urls: [URL]) -> Bool {
-        guard presentationEnabled, !chatController.isSending else {
+        guard presentationEnabled,
+              !chatController.isSending,
+              chatController.state.draftAttachments.isEmpty,
+              chatController.state.draftText
+                  .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return false
         }
         return (try? FeedValidator().validate(
@@ -235,17 +239,21 @@ final class QuickMenuPanelController: NSObject {
     func feedDroppedFiles(_ urls: [URL]) -> Bool {
         guard presentationEnabled,
               !chatController.isSending,
+              captureTask == nil,
+              fileGeneration == nil,
+              chatController.state.draftAttachments.isEmpty,
+              chatController.state.draftText
+                  .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               let validated = try? FeedValidator().validate(
                   FeedInput(fileURLs: urls)
+              ), chatController.stageAttachments(
+                  validated.attachments.map {
+                      ChatDraftAttachment(url: $0.url, isTemporary: false)
+                  }
               ) else {
             return false
         }
-        return chatController.feedAttachments(
-            validated.attachments.map {
-                ChatDraftAttachment(url: $0.url, isTemporary: false)
-            },
-            reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        )
+        return presentStagedDraftBubble()
     }
 
     @discardableResult
@@ -262,16 +270,7 @@ final class QuickMenuPanelController: NSObject {
 
         let urls = FloatingPetHostingView<YumYumPetView>.fileURLs(from: pasteboard)
         if !urls.isEmpty {
-            guard let validated = try? FeedValidator().validate(
-                FeedInput(fileURLs: urls)
-            ), chatController.stageAttachments(
-                validated.attachments.map {
-                    ChatDraftAttachment(url: $0.url, isTemporary: false)
-                }
-            ) else {
-                return false
-            }
-            return presentStagedDraftBubble()
+            return feedDroppedFiles(urls)
         }
 
         if let url = Self.writeTemporaryPNG(from: pasteboard) {
@@ -506,9 +505,6 @@ final class QuickMenuPanelController: NSObject {
             return
         }
         perform(flow.select(action, generation: UUID()))
-        if action == .feedClipboard {
-            _ = feedFromClipboard()
-        }
     }
 
     private func perform(_ effects: [ActionFlowEffect]) {

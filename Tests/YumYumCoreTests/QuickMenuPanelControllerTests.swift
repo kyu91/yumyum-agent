@@ -336,7 +336,7 @@ struct QuickMenuPanelControllerTests {
 
         #expect(action.backgroundColor == NSColor.clear.cgColor)
         let actionButtons = buttons(in: controller.actionPanel.contentView)
-        #expect(actionButtons.count == 5)
+        #expect(actionButtons.count == 4)
         #expect(actionButtons.allSatisfy {
             $0.layer?.backgroundColor == AppTheme.light.palette.surface.cgColor
                 && $0.layer?.borderColor == AppTheme.light.palette.border.cgColor
@@ -379,7 +379,7 @@ struct QuickMenuPanelControllerTests {
         actionButtons.forEach { $0.layoutSubtreeIfNeeded() }
         let stack = try #require(flattened(root).compactMap { $0 as? NSStackView }.first)
 
-        #expect(QuickMenuPanelController.actionPanelSize == CGSize(width: 248, height: 268))
+        #expect(QuickMenuPanelController.actionPanelSize == CGSize(width: 248, height: 216))
         #expect(root.layer?.backgroundColor == NSColor.clear.cgColor)
         #expect(actionButtons.map(\.title) == ActionBubbleAction.allCases.map {
             $0.title(language: .english)
@@ -707,7 +707,7 @@ struct QuickMenuPanelControllerTests {
 
     @Test
     @MainActor
-    func droppedFilesUseTheProductionWorkflowExactlyOnceAndRejectInvalidOrBusyDrops() async throws {
+    func droppedFilesStageIntoTheChatDraftAndRejectInvalidOrRepeatedDrops() async throws {
         _ = NSApplication.shared
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -732,7 +732,21 @@ struct QuickMenuPanelControllerTests {
         #expect(!controller.canAcceptDroppedFiles([file, invalid]))
         #expect(!controller.feedDroppedFiles([invalid]))
         #expect(controller.feedDroppedFiles([file, file]))
+        #expect(controller.chatStateForTesting.draftAttachments.map(\.url) == [file])
+        #expect(controller.responsePanel.isVisible)
+        #expect(await sender.requestCount == 0)
+
+        #expect(!controller.canAcceptDroppedFiles([file]))
         #expect(!controller.feedDroppedFiles([file]))
+        #expect(controller.chatStateForTesting.draftAttachments.map(\.url) == [file])
+
+        let composer = try #require(textFields(in: controller.responsePanel.contentView).first {
+            $0.accessibilityLabel() == "인라인 채팅 메시지"
+        })
+        composer.stringValue = "summarize this"
+        let returnAction = try #require(composer.action)
+        composer.sendAction(returnAction, to: composer.target)
+
         try #require(await sender.waitForRequestCount(1))
         let request = try #require(await sender.requests.first)
         #expect(request.attachments.map(\.url) == [file])
