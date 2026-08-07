@@ -560,6 +560,10 @@ private struct YumYumContentView: View {
                     }
                 }
 
+                if !viewModel.agentSnapshot.hiddenDefinitionIDs.isEmpty {
+                    hiddenAgentsMenu
+                }
+
                 Text(AppText.localized(
                     english: "Agents run on this Mac and may send selected content under their own network and authentication policies.",
                     korean: "에이전트는 이 Mac에서 실행되며, 선택한 콘텐츠는 각 에이전트의 네트워크 및 인증 정책에 따라 전송될 수 있습니다."
@@ -575,7 +579,6 @@ private struct YumYumContentView: View {
 
     private var needsAgentSetup: Bool {
         !viewModel.isDiscoveringAgents
-            && !viewModel.agentSnapshot.installations.isEmpty
             && viewModel.agentSnapshot.installations.allSatisfy { $0.path == nil }
             && !viewModel.agentSnapshot.installations.contains {
                 $0.availability == .available
@@ -754,6 +757,16 @@ private struct YumYumContentView: View {
                 .accessibilityIdentifier("open-terminal-claude-login-button")
             }
 
+            if installation.availability != .available {
+                Button(AppText.localized(
+                    english: "Choose executable directly",
+                    korean: "실행 파일 직접 선택"
+                )) {
+                    chooseAgentExecutable(for: installation.definitionID)
+                }
+                .disabled(viewModel.isDiscoveringAgents || agentExecutablePanel != nil)
+            }
+
             Divider()
 
             Button(
@@ -763,6 +776,10 @@ private struct YumYumContentView: View {
                 removeAgentInstallation(installation)
             }
             .disabled(viewModel.isDiscoveringAgents || agentExecutablePanel != nil)
+            .accessibilityHint(AppText.localized(
+                english: "Removes this agent from the list without deleting its executable. Restore it from Hidden agents or by finding and registering it again.",
+                korean: "실행 파일을 삭제하지 않고 이 에이전트를 목록에서 제거합니다. 숨긴 에이전트 메뉴에서 복원하거나 다시 찾아 등록할 수 있습니다."
+            ))
         } label: {
             Image(systemName: "ellipsis.circle")
         }
@@ -770,6 +787,23 @@ private struct YumYumContentView: View {
         .menuIndicator(.hidden)
         .accessibilityLabel(AppText.localized(english: "More actions", korean: "더 보기"))
         .accessibilityIdentifier("agent-row-more-menu")
+    }
+
+    private var hiddenAgentsMenu: some View {
+        Menu {
+            ForEach(viewModel.agentSnapshot.hiddenDefinitionIDs, id: \.self) { definitionID in
+                Button(definitionID.displayName) {
+                    findAndRegisterAgent(definitionID)
+                }
+            }
+        } label: {
+            Label(
+                AppText.localized(english: "Hidden agents", korean: "숨긴 에이전트"),
+                systemImage: "eye.slash"
+            )
+        }
+        .disabled(viewModel.isDiscoveringAgents || agentExecutablePanel != nil)
+        .accessibilityIdentifier("hidden-agents-menu")
     }
 
     private var agentRegistrationControls: some View {

@@ -106,6 +106,7 @@ struct AgentSelectionTests {
 
         #expect(removed.installations == [hermes])
         #expect(removed.selection == .unselected)
+        #expect(removed.hiddenDefinitionIDs == [.codex])
         #expect(await selection.storedReference == nil)
 
         let restoredRegistry = AgentRegistry(
@@ -115,9 +116,33 @@ struct AgentSelectionTests {
         )
         let stillHidden = await restoredRegistry.refresh(trigger: .appStart)
         #expect(stillHidden.installations == [hermes])
+        #expect(stillHidden.hiddenDefinitionIDs == [.codex])
 
         let restored = await restoredRegistry.restoreInstallations(for: .codex)
         #expect(restored.installations == [codex, hermes])
+        #expect(restored.hiddenDefinitionIDs.isEmpty)
+    }
+
+    @Test
+    func hiddenAgentTypesRemainRestorableAfterAnotherAgentIsRegistered() async throws {
+        let codex = available(.codex, path: "/known/codex")
+        let hermes = available(.hermes, path: "/known/hermes")
+        let registry = AgentRegistry(
+            discovery: SelectionDiscovery(scans: [[codex, hermes]]),
+            persistence: SelectionPersistence(),
+            visibilityPersistence: VisibilityPersistence()
+        )
+
+        _ = await registry.refresh(trigger: .appStart)
+        _ = await registry.removeInstallation(codex)
+        let removed = await registry.removeInstallation(hermes)
+
+        #expect(removed.installations.isEmpty)
+        #expect(removed.hiddenDefinitionIDs == [.hermes, .codex])
+
+        let restored = await registry.restoreInstallations(for: .hermes)
+        #expect(restored.installations == [hermes])
+        #expect(restored.hiddenDefinitionIDs == [.codex])
     }
 }
 

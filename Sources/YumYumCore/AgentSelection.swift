@@ -101,6 +101,7 @@ public struct AgentRegistrySnapshot: Equatable, Sendable {
     public let installations: [AgentInstallation]
     public let selection: AgentSelectionState
     public let explicitPaths: [AgentDefinitionID: String]
+    public let hiddenDefinitionIDs: [AgentDefinitionID]
 
     public var selectedInstallation: AgentInstallation? {
         guard case let .selected(installation) = selection else {
@@ -128,11 +129,13 @@ public struct AgentRegistrySnapshot: Equatable, Sendable {
     public init(
         installations: [AgentInstallation],
         selection: AgentSelectionState,
-        explicitPaths: [AgentDefinitionID: String] = [:]
+        explicitPaths: [AgentDefinitionID: String] = [:],
+        hiddenDefinitionIDs: [AgentDefinitionID] = []
     ) {
         self.installations = installations
         self.selection = selection
         self.explicitPaths = explicitPaths
+        self.hiddenDefinitionIDs = hiddenDefinitionIDs
     }
 }
 
@@ -369,10 +372,14 @@ public actor AgentRegistry: AgentSelectionValidating {
     }
 
     private func snapshot(selection: AgentSelectionState) -> AgentRegistrySnapshot {
-        AgentRegistrySnapshot(
+        let hiddenDefinitionIDs = AgentDefinitionID.allCases.filter { definitionID in
+            hiddenInstallationIDs.contains { $0.hasPrefix("\(definitionID.rawValue):") }
+        }
+        return AgentRegistrySnapshot(
             installations: installations,
             selection: selection,
-            explicitPaths: explicitPaths
+            explicitPaths: explicitPaths,
+            hiddenDefinitionIDs: hiddenDefinitionIDs
         )
     }
 }

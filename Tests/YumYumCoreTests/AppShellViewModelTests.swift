@@ -189,6 +189,42 @@ struct AppShellViewModelTests {
 
     @Test
     @MainActor
+    func registeringOneRemovedAgentKeepsOtherRemovedAgentsRestorable() async {
+        let hermes = AgentInstallation(
+            definitionID: .hermes,
+            path: "/safe/hermes",
+            version: "Hermes 1.0",
+            runtimeContract: .hermesACP,
+            availability: .available
+        )
+        let codex = AgentInstallation(
+            definitionID: .codex,
+            path: "/safe/codex",
+            version: "codex-cli 0.144.6",
+            runtimeContract: .codexExec,
+            availability: .available
+        )
+        let registry = AgentRegistry(
+            discovery: StaticAgentDiscovery(installations: [hermes, codex]),
+            persistence: EmptyAgentSelectionPersistence(),
+            visibilityPersistence: EmptyAgentVisibilityPersistence()
+        )
+        let viewModel = YumYumAppViewModel(
+            fixtureProbe: ImmediateFixtureProbe(result: .success("unused")),
+            agentRegistry: registry,
+            connectors: [LifecycleConnector(definitionID: .hermes)]
+        )
+
+        await viewModel.removeAgentInstallation(hermes)
+        await viewModel.removeAgentInstallation(codex)
+        await viewModel.findAndRegisterAgent(.hermes)
+
+        #expect(viewModel.agentSnapshot.selectedInstallation == hermes)
+        #expect(viewModel.agentSnapshot.hiddenDefinitionIDs == [.codex])
+    }
+
+    @Test
+    @MainActor
     func selectionChangesResetConnectorsAndShutdownClosesThem() async throws {
         let previousLanguage = AppText.language
         defer { AppText.setLanguage(previousLanguage) }

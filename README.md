@@ -126,7 +126,8 @@ The default English product reference is the [product specification](docs/produc
 - With no supported executable in a safe location, **Agent** shows `agent-setup-card` with **Install guide**, an agent picker, **Find and register**, and **Rescan**.
 - Each agent row shows its **Install guide**, including available installations.
 - Finding a valid supported agent verifies it locally and selects it as the default; Codex remains unselected until its ChatGPT sign-in succeeds.
-- Removing an agent hides it from YumYum without deleting its executable; finding and registering it again restores it to the list.
+- Removing an agent hides it from YumYum without deleting its executable; restore it from the **Hidden agents** menu or by finding and registering it again.
+- Remove two agents, register one again with **Find and register**, and confirm the other remains under **Hidden agents** and can be restored from there.
 
 ## Contributing
 
