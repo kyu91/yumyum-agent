@@ -78,6 +78,24 @@ struct AgentDiscoveryTests {
     }
 
     @Test
+    func processEnvironmentPathCoversBothHomebrewPrefixesForShebangInterpreters() throws {
+        let environment = AgentProcessEnvironment.make(
+            executableDirectory: URL(fileURLWithPath: "/Users/duncan/.local/bin"),
+            homeDirectory: URL(fileURLWithPath: "/safe/home")
+        )
+
+        let path = try #require(environment["PATH"])
+        let components = path.split(separator: ":").map(String.init)
+        #expect(components == [
+            "/Users/duncan/.local/bin",
+            "/opt/homebrew/bin",
+            "/usr/local/bin",
+            "/usr/bin",
+            "/bin",
+        ])
+    }
+
+    @Test
     func rejectsAgentsWhenARuntimeCriticalFlagIsMissingFromHelp() async throws {
         let cases: [(AgentDefinitionID, String)] = [
             (.openCode, "--pure"),

@@ -80,6 +80,8 @@ public enum AgentProcessEnvironment {
             "LOGNAME": userName,
             "PATH": [
                 executableDirectory.standardizedFileURL.path,
+                "/opt/homebrew/bin",
+                "/usr/local/bin",
                 "/usr/bin",
                 "/bin",
             ].joined(separator: ":"),
