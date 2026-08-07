@@ -743,7 +743,7 @@ struct QuickMenuPanelControllerTests {
 
     @Test
     @MainActor
-    func clipboardStagingPrefersFilesThenImageThenTextWithoutSendingAndStacks() async throws {
+    func clipboardStagingPrefersFilesOverImageAndText() async throws {
         _ = NSApplication.shared
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -776,28 +776,107 @@ struct QuickMenuPanelControllerTests {
         })
         #expect(await sender.requestCount == 0)
         #expect(pet.presentationModel.chewFrame == .resting)
+    }
+
+    @Test
+    @MainActor
+    func clipboardStagingPrefersImageOverTextWhenNoFileIsPresent() async throws {
+        _ = NSApplication.shared
+        let sender = ControlledPromptSender()
+        let pet = FloatingPetWindowController {}
+        let controller = QuickMenuPanelController(
+            petController: pet,
+            viewModel: YumYumAppViewModel(fixtureProbe: UnusedFixtureProbe()),
+            workflow: FeedWorkflow(sender: sender, feedback: SilentFeedFeedback()),
+            openSettings: {}
+        )
+        defer { controller.prepareForTermination() }
 
         #expect(controller.feedFromClipboard(pasteboard([
             imageForPasteboard(),
             "  image text  " as NSString,
         ])))
         let attachments = controller.chatStateForTesting.draftAttachments
-        #expect(attachments.count == 2)
-        #expect(attachments[1].isTemporary)
-        #expect(attachments[1].url.lastPathComponent.hasPrefix(CaptureTemporaryFileCleanup.filenamePrefix))
+        #expect(attachments.count == 1)
+        #expect(attachments.first?.isTemporary == true)
+        #expect(attachments.first?.url.lastPathComponent.hasPrefix(CaptureTemporaryFileCleanup.filenamePrefix) == true)
+        #expect(controller.chatStateForTesting.draftText.isEmpty)
         #expect(await sender.requestCount == 0)
+    }
+
+    @Test
+    @MainActor
+    func clipboardStagingUsesTextWhenNoFileOrImageIsPresent() async throws {
+        _ = NSApplication.shared
+        let sender = ControlledPromptSender()
+        let pet = FloatingPetWindowController {}
+        let controller = QuickMenuPanelController(
+            petController: pet,
+            viewModel: YumYumAppViewModel(fixtureProbe: UnusedFixtureProbe()),
+            workflow: FeedWorkflow(sender: sender, feedback: SilentFeedFeedback()),
+            openSettings: {}
+        )
+        defer { controller.prepareForTermination() }
 
         #expect(controller.feedFromClipboard(pasteboard([
             "  text only  " as NSString,
         ])))
         #expect(controller.chatStateForTesting.draftText == "text only")
-        #expect(controller.chatStateForTesting.draftAttachments.count == 2)
+        #expect(controller.chatStateForTesting.draftAttachments.isEmpty)
         let composer = try #require(textFields(in: controller.responsePanel.contentView).first {
             $0.accessibilityLabel() == "인라인 채팅 메시지"
         })
         #expect(composer.stringValue == "text only")
         #expect(await sender.requestCount == 0)
-        #expect(pet.presentationModel.chewFrame == .resting)
+    }
+
+    @Test
+    @MainActor
+    func repeatedClipboardFeedIsRejectedWhileAnAttachmentIsStaged() async throws {
+        _ = NSApplication.shared
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("clipboard.txt")
+        try Data("clipboard".utf8).write(to: file)
+
+        let sender = ControlledPromptSender()
+        let pet = FloatingPetWindowController {}
+        let controller = QuickMenuPanelController(
+            petController: pet,
+            viewModel: YumYumAppViewModel(fixtureProbe: UnusedFixtureProbe()),
+            workflow: FeedWorkflow(sender: sender, feedback: SilentFeedFeedback()),
+            openSettings: {}
+        )
+        defer { controller.prepareForTermination() }
+
+        #expect(controller.feedFromClipboard(pasteboard([file as NSURL])))
+        #expect(!controller.feedFromClipboard(pasteboard([imageForPasteboard()])))
+        #expect(!controller.feedFromClipboard(pasteboard(["second text" as NSString])))
+        #expect(controller.chatStateForTesting.draftAttachments.map(\.url) == [file])
+        #expect(controller.chatStateForTesting.draftText.isEmpty)
+        #expect(await sender.requestCount == 0)
+    }
+
+    @Test
+    @MainActor
+    func repeatedClipboardFeedIsRejectedWhileDraftTextIsStagedAndDoesNotAppend() async throws {
+        _ = NSApplication.shared
+        let sender = ControlledPromptSender()
+        let pet = FloatingPetWindowController {}
+        let controller = QuickMenuPanelController(
+            petController: pet,
+            viewModel: YumYumAppViewModel(fixtureProbe: UnusedFixtureProbe()),
+            workflow: FeedWorkflow(sender: sender, feedback: SilentFeedFeedback()),
+            openSettings: {}
+        )
+        defer { controller.prepareForTermination() }
+
+        #expect(controller.feedFromClipboard(pasteboard(["clipboard text" as NSString])))
+        #expect(!controller.feedFromClipboard(pasteboard(["more text" as NSString])))
+        #expect(controller.chatStateForTesting.draftText == "clipboard text")
+        #expect(await sender.requestCount == 0)
     }
 
     @Test
@@ -962,6 +1041,59 @@ struct QuickMenuPanelControllerTests {
         await sender.completeRequest(at: 0)
         await controller.waitForChatSendForTesting()
         #expect(!FileManager.default.fileExists(atPath: url.path))
+    }
+
+    @Test
+    @MainActor
+    func removingTheStagedAttachmentDeletesItsTemporaryFileAndUnblocksTheNextClipboardFeed() async throws {
+        _ = NSApplication.shared
+        let sender = ControlledPromptSender()
+        let pet = FloatingPetWindowController {}
+        let controller = QuickMenuPanelController(
+            petController: pet,
+            viewModel: YumYumAppViewModel(fixtureProbe: UnusedFixtureProbe()),
+            workflow: FeedWorkflow(sender: sender, feedback: SilentFeedFeedback()),
+            openSettings: {}
+        )
+        defer { controller.prepareForTermination() }
+
+        #expect(controller.feedFromClipboard(pasteboard([imageForPasteboard()])))
+        let url = try #require(controller.chatStateForTesting.draftAttachments.first).url
+        #expect(FileManager.default.fileExists(atPath: url.path))
+        let view = try #require(controller.responsePanel.contentView)
+        let remove = try #require(buttons(in: view).first {
+            $0.accessibilityLabel() == "\(url.lastPathComponent) 첨부 제거"
+        })
+        remove.performClick(nil)
+
+        #expect(controller.chatStateForTesting.draftAttachments.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: url.path))
+        #expect(controller.feedFromClipboard(pasteboard([imageForPasteboard()])))
+        #expect(await sender.requestCount == 0)
+    }
+
+    @Test
+    @MainActor
+    func stagedImageAttachmentRendersAThumbnailInTheResponseBubble() throws {
+        _ = NSApplication.shared
+        let sender = ControlledPromptSender()
+        let pet = FloatingPetWindowController {}
+        let controller = QuickMenuPanelController(
+            petController: pet,
+            viewModel: YumYumAppViewModel(fixtureProbe: UnusedFixtureProbe()),
+            workflow: FeedWorkflow(sender: sender, feedback: SilentFeedFeedback()),
+            openSettings: {}
+        )
+        defer { controller.prepareForTermination() }
+
+        #expect(controller.feedFromClipboard(pasteboard([imageForPasteboard()])))
+        let view = try #require(controller.responsePanel.contentView)
+        let thumbnail = try #require(
+            flattened(view).first {
+                $0.identifier?.rawValue == "response-attachment-thumbnail"
+            } as? NSImageView
+        )
+        #expect(thumbnail.image?.size == CGSize(width: 4, height: 4))
     }
 
     @Test
@@ -1382,9 +1514,9 @@ struct QuickMenuPanelControllerTests {
                 && $0.accessibilityLabel() == "인라인 채팅 메시지"
                 && $0.accessibilityHelp() == "Return을 눌러 전송합니다"
         })
-        #expect(textFields(in: controller.view).contains {
-            $0.stringValue == "report.pdf · 1개 첨부"
-                && $0.accessibilityLabel() == "전송 예정 첨부"
+        #expect(flattened(controller.view).contains {
+            $0.accessibilityLabel() == "첨부 파일 report.pdf"
+                && textFields(in: $0).contains { $0.stringValue == "report.pdf" }
         })
         #expect(textFields(in: controller.view).contains {
             $0.stringValue == UserFacingErrorCategory.invalidFile.message(language: .korean)

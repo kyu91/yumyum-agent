@@ -124,6 +124,9 @@ final class QuickMenuPanelController: NSObject {
         responseViewController.onRequestInput = { [weak self] in
             self?.responsePanel.beginInput()
         }
+        responseViewController.onRemoveAttachment = { [weak self] id in
+            self?.chatController.removeAttachment(id: id)
+        }
         responseViewController.onPreferredSizeChanged = { [weak self] in
             self?.updateResponseFrame()
         }
@@ -250,7 +253,10 @@ final class QuickMenuPanelController: NSObject {
         guard presentationEnabled,
               !chatController.isSending,
               captureTask == nil,
-              fileGeneration == nil else {
+              fileGeneration == nil,
+              chatController.state.draftAttachments.isEmpty,
+              chatController.state.draftText
+                  .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return false
         }
 
@@ -1412,12 +1418,15 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
     private static let actionHeight: CGFloat = 36
     private static let composerHeight: CGFloat = 50
     private static let stackSpacing: CGFloat = 8
+    private static let attachmentRowHeight: CGFloat = 36
+    private static let attachmentThumbnailSize: CGFloat = 28
 
     var onOpenChat: (() -> Void)?
     var onRetry: (() -> Void)?
     var onDraftChanged: ((String) -> Void)?
     var onSend: (() -> Void)?
     var onRequestInput: (() -> Void)?
+    var onRemoveAttachment: ((UUID) -> Void)?
     var onPreferredSizeChanged: (() -> Void)?
 
     private let label = NSTextField(wrappingLabelWithString: "")
@@ -1428,7 +1437,7 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
     private let retryRow = NSStackView()
     private let composer = NSTextField()
     private let sendButton = NSButton(title: AppText.localized("전송"), target: nil, action: nil)
-    private let attachmentLabel = NSTextField(labelWithString: "")
+    private let attachmentStack = NSStackView()
     private let inlineStack = NSStackView()
     private let bodySurface = ResponseSurfaceView(identifier: "response-body-surface")
     private let inlineActionSurface = ResponseSurfaceView(identifier: "response-inline-action-surface")
@@ -1445,6 +1454,7 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
         showsOpenChat: false
     )
     private var chatState = ChatBubbleState()
+    private var renderedAttachments: [ChatDraftAttachment] = []
     private var theme = AppTheme.dark
     private var language = AppText.language
 
@@ -1472,9 +1482,9 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
 
     private var composerSurfaceHeight: CGFloat {
         guard isInlineExpanded else { return 0 }
-        let attachmentHeight = attachmentLabel.isHidden
+        let attachmentHeight = attachmentStack.isHidden
             ? 0
-            : ceil(attachmentLabel.intrinsicContentSize.height) + inlineStack.spacing
+            : Self.attachmentRowHeight + inlineStack.spacing
         return Self.composerHeight + attachmentHeight
     }
 
@@ -1567,14 +1577,19 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
         sendButton.action = #selector(sendPressed)
         sendButton.keyEquivalent = "\r"
         sendButton.setAccessibilityLabel(AppText.localized("인라인 메시지 전송"))
-        attachmentLabel.font = .systemFont(ofSize: 11)
-        attachmentLabel.textColor = .secondaryLabelColor
-        attachmentLabel.lineBreakMode = .byTruncatingMiddle
-        attachmentLabel.setAccessibilityLabel(AppText.localized("전송 예정 첨부"))
+        attachmentStack.orientation = .horizontal
+        attachmentStack.alignment = .centerY
+        attachmentStack.spacing = 6
+        attachmentStack.isHidden = true
+        attachmentStack.setAccessibilityElement(true)
+        attachmentStack.setAccessibilityRole(.list)
+        attachmentStack.setAccessibilityLabel(AppText.localized("전송 예정 첨부"))
+        attachmentStack.heightAnchor
+            .constraint(equalToConstant: Self.attachmentRowHeight).isActive = true
         let composerRow = NSStackView(views: [composer, sendButton])
         composerRow.orientation = .horizontal
         composerRow.spacing = 8
-        inlineStack.setViews([attachmentLabel, composerRow], in: .top)
+        inlineStack.setViews([attachmentStack, composerRow], in: .top)
         inlineStack.orientation = .vertical
         inlineStack.spacing = 5
 
@@ -1672,7 +1687,8 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
         )
         inlineToggleButton.contentTintColor = .white
         openChatButton.contentTintColor = theme == .light ? theme.palette.text : .white
-        attachmentLabel.textColor = theme.palette.secondaryText
+        renderedAttachments = []
+        renderChat(chatState)
         render(content, resetScroll: false)
         responseScroll.contentView.scroll(to: scrollOrigin)
         responseScroll.reflectScrolledClipView(responseScroll.contentView)
@@ -1717,19 +1733,86 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
             composer.stringValue = state.draftText
         }
         let attachments = state.draftAttachments
-        attachmentLabel.stringValue = attachments.isEmpty
-            ? ""
-            : AppText.localized(
-                english: "\(attachments.first?.displayName ?? "") · \(attachments.count) attached",
-                korean: "\(attachments.first?.displayName ?? "") · \(attachments.count)개 첨부",
-                language: language
-            )
-        attachmentLabel.isHidden = attachments.isEmpty
+        if attachments != renderedAttachments {
+            renderedAttachments = attachments
+            rebuildAttachments(attachments)
+        }
         let hasDraft = !state.draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || !attachments.isEmpty
         composer.isEnabled = !state.isSending
         sendButton.isEnabled = hasDraft && !state.isSending
         updateLayout()
+    }
+
+    private func rebuildAttachments(_ attachments: [ChatDraftAttachment]) {
+        attachmentStack.arrangedSubviews.forEach {
+            attachmentStack.removeArrangedSubview($0)
+            $0.removeFromSuperview()
+        }
+        attachmentStack.isHidden = attachments.isEmpty
+        for attachment in attachments {
+            let thumbnail = NSImageView(
+                image: NSImage(contentsOf: attachment.url)
+                    ?? NSWorkspace.shared.icon(forFile: attachment.url.path)
+            )
+            thumbnail.imageScaling = .scaleProportionallyUpOrDown
+            thumbnail.wantsLayer = true
+            thumbnail.layer?.cornerRadius = 6
+            thumbnail.layer?.cornerCurve = .continuous
+            thumbnail.layer?.masksToBounds = true
+            thumbnail.identifier = NSUserInterfaceItemIdentifier("response-attachment-thumbnail")
+            NSLayoutConstraint.activate([
+                thumbnail.widthAnchor.constraint(equalToConstant: Self.attachmentThumbnailSize),
+                thumbnail.heightAnchor.constraint(equalToConstant: Self.attachmentThumbnailSize),
+            ])
+            let name = NSTextField(labelWithString: attachment.displayName)
+            name.font = .systemFont(ofSize: 11)
+            name.textColor = theme.palette.secondaryText
+            name.lineBreakMode = .byTruncatingMiddle
+            name.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            let remove = NSButton(
+                image: NSImage(
+                    systemSymbolName: "xmark",
+                    accessibilityDescription: AppText.localized("첨부 제거", language: language)
+                )!,
+                target: self,
+                action: #selector(removeAttachmentPressed(_:))
+            )
+            remove.isBordered = false
+            remove.identifier = NSUserInterfaceItemIdentifier(attachment.id.uuidString)
+            remove.setAccessibilityLabel(AppText.localized(
+                english: "Remove \(attachment.displayName)",
+                korean: "\(attachment.displayName) 첨부 제거",
+                language: language
+            ))
+            let row = NSStackView(views: [thumbnail, name, remove])
+            row.orientation = .horizontal
+            row.alignment = .centerY
+            row.spacing = 6
+            row.wantsLayer = true
+            row.layer?.cornerRadius = 8
+            row.layer?.backgroundColor = theme.palette.userMessage.cgColor
+            row.edgeInsets = NSEdgeInsets(top: 4, left: 4, bottom: 4, right: 4)
+            row.setAccessibilityElement(true)
+            row.setAccessibilityRole(.group)
+            row.setAccessibilityLabel(AppText.localized(
+                english: "Attached file \(attachment.displayName)",
+                korean: "첨부 파일 \(attachment.displayName)",
+                language: language
+            ))
+            attachmentStack.addArrangedSubview(row)
+        }
+        guard !attachments.isEmpty else { return }
+        attachmentStack.addArrangedSubview(NSView())
+    }
+
+    @objc
+    private func removeAttachmentPressed(_ sender: NSButton) {
+        guard let rawID = sender.identifier?.rawValue,
+              let id = UUID(uuidString: rawID) else {
+            return
+        }
+        onRemoveAttachment?(id)
     }
 
     func fitPanelHeight(_ height: CGFloat) {
@@ -1766,9 +1849,10 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
         composer.setAccessibilityLabel(AppText.localized("인라인 채팅 메시지", language: language))
         composer.setAccessibilityHelp(AppText.localized("Return을 눌러 전송합니다", language: language))
         sendButton.setAccessibilityLabel(AppText.localized("인라인 메시지 전송", language: language))
-        attachmentLabel.setAccessibilityLabel(AppText.localized("전송 예정 첨부", language: language))
+        attachmentStack.setAccessibilityLabel(AppText.localized("전송 예정 첨부", language: language))
         let scrollOrigin = responseScroll.contentView.bounds.origin
         render(content, resetScroll: false)
+        renderedAttachments = []
         renderChat(chatState)
         responseScroll.contentView.scroll(to: scrollOrigin)
         responseScroll.reflectScrolledClipView(responseScroll.contentView)

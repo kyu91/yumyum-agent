@@ -124,7 +124,7 @@ The default English product reference is the [product specification](docs/produc
 
 ## Manual pet interaction verification
 
-- Confirm left-drag still moves the pet without staging the clipboard, while right-click never moves the window; right-click opens the action bubble and left-click shows the compact response bubble with the clipboard staged in the chat draft without sending until Return.
+- Confirm left-drag still moves the pet without staging the clipboard, while right-click never moves the window; right-click opens the action bubble and left-click shows the compact response bubble with the clipboard staged in the chat draft without sending until Return. Staged images show a thumbnail with a remove control, and clicking the pet again while anything is staged does nothing until it is sent or removed.
 
 ## Manual agent setup verification
 

@@ -697,6 +697,10 @@ final class ChatPanelController: NSObject {
         return true
     }
 
+    func removeAttachment(id: UUID) {
+        session.removeAttachment(id: id)
+    }
+
     func retryLastSend() {
         retrySend()
     }
@@ -1607,7 +1611,8 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
         attachmentScroll.isHidden = attachments.isEmpty
         for attachment in attachments {
             let icon = NSImageView(
-                image: NSWorkspace.shared.icon(forFile: attachment.url.path)
+                image: NSImage(contentsOf: attachment.url)
+                    ?? NSWorkspace.shared.icon(forFile: attachment.url.path)
             )
             icon.imageScaling = .scaleProportionallyDown
             icon.translatesAutoresizingMaskIntoConstraints = false
