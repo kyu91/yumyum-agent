@@ -131,14 +131,6 @@ struct ActionFlowPolicyTests {
     }
 
     @Test
-    func showChatMovesTheSurfaceToChat() {
-        var flow = ActionFlowStateMachine()
-        flow.showChat()
-
-        #expect(flow.surface == .chat)
-    }
-
-    @Test
     func chatAndSettingsActionsCloseTheActionBubbleBeforeTheirDestination() {
         var chatFlow = ActionFlowStateMachine()
         _ = chatFlow.openActionBubble()

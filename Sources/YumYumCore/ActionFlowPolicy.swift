@@ -252,10 +252,6 @@ public struct ActionFlowStateMachine: Equatable, Sendable {
         surface = .response
     }
 
-    public mutating func showChat() {
-        surface = .chat
-    }
-
     public mutating func responseClicked() -> [ActionFlowEffect] {
         guard surface == .response else { return [] }
         surface = .chat

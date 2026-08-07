@@ -265,7 +265,7 @@ final class QuickMenuPanelController: NSObject {
             ) else {
                 return false
             }
-            return presentChatForStagedDraft()
+            return presentStagedDraftBubble()
         }
 
         if let url = Self.writeTemporaryPNG(from: pasteboard) {
@@ -275,7 +275,7 @@ final class QuickMenuPanelController: NSObject {
                 try? FileManager.default.removeItem(at: url)
                 return false
             }
-            return presentChatForStagedDraft()
+            return presentStagedDraftBubble()
         }
 
         guard let text = pasteboard.string(forType: .string)?
@@ -285,14 +285,23 @@ final class QuickMenuPanelController: NSObject {
         }
         let existing = chatController.state.draftText
         chatController.setDraftText(existing.isEmpty ? text : existing + "\n" + text)
-        return presentChatForStagedDraft()
+        return presentStagedDraftBubble()
     }
 
     @discardableResult
-    private func presentChatForStagedDraft() -> Bool {
-        flow.showChat()
-        showChat(scrollToLatest: false)
+    private func presentStagedDraftBubble() -> Bool {
+        showResponse(Self.stagedDraftContent())
+        if responsePanel.isVisible {
+            responseViewController.beginInlineCompose()
+        }
         return true
+    }
+
+    private static func stagedDraftContent() -> PetResponseContent {
+        PetResponsePolicy.content(for: AppText.localized(
+            english: "Staged for chat. Add an instruction and press Return.",
+            korean: "채팅 초안에 담았어요. 지침을 입력하고 Return을 누르세요."
+        ))
     }
 
     private static func writeTemporaryPNG(from pasteboard: NSPasteboard) -> URL? {
@@ -1793,6 +1802,15 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
 
     func controlTextDidChange(_ notification: Notification) {
         onDraftChanged?(composer.stringValue)
+    }
+
+    func beginInlineCompose() {
+        guard isInlineExpanded else {
+            toggleInline()
+            return
+        }
+        onRequestInput?()
+        view.window?.makeFirstResponder(composer)
     }
 
     @objc

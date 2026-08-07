@@ -769,7 +769,11 @@ struct QuickMenuPanelControllerTests {
         ])))
         #expect(controller.chatStateForTesting.draftAttachments.map(\.url) == [file])
         #expect(controller.chatStateForTesting.draftText.isEmpty)
-        #expect(controller.chatPanelForTesting.isVisible)
+        #expect(controller.responsePanel.isVisible)
+        #expect(!controller.chatPanelForTesting.isVisible)
+        #expect(textFields(in: controller.responsePanel.contentView).contains {
+            $0.accessibilityLabel() == "인라인 채팅 메시지"
+        })
         #expect(await sender.requestCount == 0)
         #expect(pet.presentationModel.chewFrame == .resting)
 
@@ -788,6 +792,10 @@ struct QuickMenuPanelControllerTests {
         ])))
         #expect(controller.chatStateForTesting.draftText == "text only")
         #expect(controller.chatStateForTesting.draftAttachments.count == 2)
+        let composer = try #require(textFields(in: controller.responsePanel.contentView).first {
+            $0.accessibilityLabel() == "인라인 채팅 메시지"
+        })
+        #expect(composer.stringValue == "text only")
         #expect(await sender.requestCount == 0)
         #expect(pet.presentationModel.chewFrame == .resting)
     }
@@ -816,6 +824,7 @@ struct QuickMenuPanelControllerTests {
         #expect(controller.chatStateForTesting.draftAttachments.isEmpty)
         #expect(controller.chatStateForTesting.draftText.isEmpty)
         #expect(!controller.chatPanelForTesting.isVisible)
+        #expect(!controller.responsePanel.isVisible)
         #expect(await sender.requestCount == 0)
         #expect(!(await sender.requests).contains { $0.text.contains(invalid.path) })
     }
@@ -848,6 +857,7 @@ struct QuickMenuPanelControllerTests {
         #expect(controller.chatStateForTesting.draftAttachments.isEmpty)
         #expect(controller.chatStateForTesting.draftText.isEmpty)
         #expect(!controller.chatPanelForTesting.isVisible)
+        #expect(!controller.responsePanel.isVisible)
         #expect(await sender.requestCount == 0)
         #expect(pet.presentationModel.chewFrame == .resting)
     }
@@ -868,8 +878,8 @@ struct QuickMenuPanelControllerTests {
         let board = pasteboard(["first" as NSString])
 
         #expect(controller.feedFromClipboard(board))
-        let composer = try #require(textFields(in: controller.chatPanelForTesting.contentView).first {
-            $0.accessibilityLabel() == "대화 메시지"
+        let composer = try #require(textFields(in: controller.responsePanel.contentView).first {
+            $0.accessibilityLabel() == "인라인 채팅 메시지"
         })
         let returnAction = try #require(composer.action)
         composer.sendAction(returnAction, to: composer.target)
@@ -897,8 +907,8 @@ struct QuickMenuPanelControllerTests {
         defer { controller.prepareForTermination() }
 
         #expect(controller.feedFromClipboard(pasteboard(["clipboard text" as NSString])))
-        let composer = try #require(textFields(in: controller.chatPanelForTesting.contentView).first {
-            $0.accessibilityLabel() == "대화 메시지"
+        let composer = try #require(textFields(in: controller.responsePanel.contentView).first {
+            $0.accessibilityLabel() == "인라인 채팅 메시지"
         })
         #expect(composer.stringValue == "clipboard text")
         composer.stringValue = "clipboard text\nadd an instruction"
@@ -935,8 +945,8 @@ struct QuickMenuPanelControllerTests {
         #expect(FileManager.default.fileExists(atPath: url.path))
         #expect(await sender.requestCount == 0)
 
-        let composer = try #require(textFields(in: controller.chatPanelForTesting.contentView).first {
-            $0.accessibilityLabel() == "대화 메시지"
+        let composer = try #require(textFields(in: controller.responsePanel.contentView).first {
+            $0.accessibilityLabel() == "인라인 채팅 메시지"
         })
         composer.stringValue = "describe this image"
         let returnAction = try #require(composer.action)
