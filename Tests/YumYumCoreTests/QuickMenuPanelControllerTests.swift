@@ -881,6 +881,34 @@ struct QuickMenuPanelControllerTests {
 
     @Test
     @MainActor
+    func toggleStagedDraftBubbleStagesOnFirstClickHidesOnSecondAndReopensWithoutRestagingOnThird() async throws {
+        _ = NSApplication.shared
+        let sender = ControlledPromptSender()
+        let pet = FloatingPetWindowController {}
+        let controller = QuickMenuPanelController(
+            petController: pet,
+            viewModel: YumYumAppViewModel(fixtureProbe: UnusedFixtureProbe()),
+            workflow: FeedWorkflow(sender: sender, feedback: SilentFeedFeedback()),
+            openSettings: {}
+        )
+        defer { controller.prepareForTermination() }
+
+        controller.toggleStagedDraftBubble(pasteboard(["clipboard text" as NSString]))
+        #expect(controller.chatStateForTesting.draftText == "clipboard text")
+        #expect(controller.responsePanel.isVisible)
+
+        controller.toggleStagedDraftBubble(pasteboard(["ignored while hiding" as NSString]))
+        #expect(!controller.responsePanel.isVisible)
+        #expect(controller.chatStateForTesting.draftText == "clipboard text")
+
+        controller.toggleStagedDraftBubble(pasteboard(["should not be staged" as NSString]))
+        #expect(controller.responsePanel.isVisible)
+        #expect(controller.chatStateForTesting.draftText == "clipboard text")
+        #expect(await sender.requestCount == 0)
+    }
+
+    @Test
+    @MainActor
     func clipboardStagingRejectsInvalidFilesWithoutFallingBackToPathText() async throws {
         _ = NSApplication.shared
         let invalid = FileManager.default.temporaryDirectory

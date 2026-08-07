@@ -39,7 +39,7 @@ final class YumYumAppDelegate: NSObject, NSApplicationDelegate, ObservableObject
     func applicationDidFinishLaunching(_ notification: Notification) {
         let controller = FloatingPetWindowController(
             onFeedFromClipboard: { [weak self] in
-                self?.quickMenuController?.feedFromClipboard()
+                self?.quickMenuController?.toggleStagedDraftBubble()
             }
         ) { [weak self] in
             self?.toggleQuickMenu()

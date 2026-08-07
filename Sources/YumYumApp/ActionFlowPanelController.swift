@@ -294,6 +294,23 @@ final class QuickMenuPanelController: NSObject {
         return presentStagedDraftBubble()
     }
 
+    func toggleStagedDraftBubble(_ pasteboard: NSPasteboard = .general) {
+        guard presentationEnabled else { return }
+        if responsePanel.isVisible {
+            responsePanel.orderOut(nil)
+            flow.returnToPet()
+            return
+        }
+        let hasPendingDraft = !chatController.state.draftAttachments.isEmpty
+            || !chatController.state.draftText
+                .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if hasPendingDraft {
+            presentStagedDraftBubble()
+        } else {
+            feedFromClipboard(pasteboard)
+        }
+    }
+
     @discardableResult
     private func presentStagedDraftBubble() -> Bool {
         showResponse(Self.stagedDraftContent())
