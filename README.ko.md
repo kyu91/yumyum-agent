@@ -4,7 +4,7 @@
 
 YumYum Agent는 선택한 화면 영역이나 로컬 파일을 플로팅 펫에게 “먹이고”, 설치된 로컬 CLI 에이전트의 응답을 네이티브 말풍선과 채팅으로 확인할 수 있는 Swift/AppKit macOS 앱입니다.
 
-> **미서명 개발자 프리뷰(0.1.1):** [YumYum Agent 0.1.1 — Unsigned Preview](https://github.com/kyu91/yumyum-agent/releases/tag/v0.1.1)는 공개 prerelease로 제공됩니다. **Developer ID 서명 또는 Apple 공증을 받지 않았습니다.**
+> **미서명 개발자 프리뷰:** [최신 Unsigned Preview 릴리스](https://github.com/kyu91/yumyum-agent/releases/latest)는 공개 prerelease로 제공됩니다. **Developer ID 서명 또는 Apple 공증을 받지 않았습니다.**
 
 ## 기능
 
@@ -25,9 +25,9 @@ YumYum Agent는 선택한 화면 영역이나 로컬 파일을 플로팅 펫에�
 
 ## 다운로드 및 설치
 
-이 **Unsigned Preview**는 Developer ID 서명 또는 Apple 공증을 받지 않았습니다. [공식 v0.1.1 릴리스](https://github.com/kyu91/yumyum-agent/releases/tag/v0.1.1)에서만 다운로드하세요.
+이 **Unsigned Preview**는 Developer ID 서명 또는 Apple 공증을 받지 않았습니다. [공식 릴리스 페이지](https://github.com/kyu91/yumyum-agent/releases/latest)에서만 다운로드하세요.
 
-1. `YumYum-Agent-0.1.1-macOS.dmg`를 다운로드합니다.
+1. `YumYum-Agent-<version>-macOS.dmg`를 다운로드합니다.
 2. DMG를 엽니다.
 3. **YumYum.app**을 **Applications(응용 프로그램)**로 드래그합니다.
 4. **YumYum.app**을 한 번 실행합니다. macOS가 차단하면 경고를 확인하거나 닫습니다.
@@ -38,17 +38,17 @@ YumYum Agent는 선택한 화면 영역이나 로컬 파일을 플로팅 펫에�
 
 ### 선택 사항: SHA-256 체크섬 검증(권장)
 
-`YumYum-Agent-0.1.1-macOS.dmg`와 `YumYum-Agent-0.1.1-macOS.dmg.sha256`를 모두 **다운로드** 폴더에 받거나, 두 파일을 같은 폴더에 둡니다. 다운로드 폴더에 있다면 다음 명령을 실행하세요.
+`YumYum-Agent-<version>-macOS.dmg`와 `YumYum-Agent-<version>-macOS.dmg.sha256`를 모두 **다운로드** 폴더에 받거나, 두 파일을 같은 폴더에 둡니다. 다운로드 폴더에 있다면 다음 명령을 실행하세요.
 
 ```sh
-cd ~/Downloads && shasum -a 256 -c YumYum-Agent-0.1.1-macOS.dmg.sha256
+cd ~/Downloads && shasum -a 256 -c YumYum-Agent-<version>-macOS.dmg.sha256
 ```
 
 로컬 개발자는 unsigned DMG를 명시적으로 생성하고 검증할 수 있습니다.
 
 ```sh
 ./scripts/package-release.sh --unsigned
-./scripts/test-release.sh .build/release/YumYum-Agent-0.1.1-macOS.dmg
+./scripts/test-release.sh .build/release/YumYum-Agent-<version>-macOS.dmg
 ```
 
 ## 소스에서 빌드 및 실행

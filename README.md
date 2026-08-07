@@ -4,7 +4,7 @@
 
 YumYum Agent is a Swift/AppKit macOS app that lets you “feed” a selected screen area or local file to a floating pet and read responses from an installed local CLI agent in native bubbles and chat.
 
-> **Unsigned developer preview (0.1.1):** [YumYum Agent 0.1.1 — Unsigned Preview](https://github.com/kyu91/yumyum-agent/releases/tag/v0.1.1) is available as a public prerelease. It is **not Developer ID signed or Apple notarized**.
+> **Unsigned developer preview:** the [latest Unsigned Preview release](https://github.com/kyu91/yumyum-agent/releases/latest) is available as a public prerelease. It is **not Developer ID signed or Apple notarized**.
 
 ## Features
 
@@ -25,9 +25,9 @@ This Apple Silicon Command Line Tools host has built and mounted a local unsigne
 
 ## Download and install
 
-This **Unsigned Preview** is not Developer ID signed or Apple notarized. Download it only from the [official v0.1.1 release](https://github.com/kyu91/yumyum-agent/releases/tag/v0.1.1).
+This **Unsigned Preview** is not Developer ID signed or Apple notarized. Download it only from the [official releases page](https://github.com/kyu91/yumyum-agent/releases/latest).
 
-1. Download `YumYum-Agent-0.1.1-macOS.dmg`.
+1. Download `YumYum-Agent-<version>-macOS.dmg`.
 2. Open the DMG.
 3. Drag **YumYum.app** to **Applications**.
 4. Launch **YumYum.app** once. If macOS blocks it, acknowledge or close the warning.
@@ -38,17 +38,17 @@ Button names and warning text can vary by macOS version. macOS may also request 
 
 ### Optional: verify the SHA-256 checksum (recommended)
 
-Download both `YumYum-Agent-0.1.1-macOS.dmg` and `YumYum-Agent-0.1.1-macOS.dmg.sha256` to **Downloads**, or place both files in the same folder. If they are in Downloads, run:
+Download both `YumYum-Agent-<version>-macOS.dmg` and `YumYum-Agent-<version>-macOS.dmg.sha256` to **Downloads**, or place both files in the same folder. If they are in Downloads, run:
 
 ```sh
-cd ~/Downloads && shasum -a 256 -c YumYum-Agent-0.1.1-macOS.dmg.sha256
+cd ~/Downloads && shasum -a 256 -c YumYum-Agent-<version>-macOS.dmg.sha256
 ```
 
 Local developers can explicitly create and verify an unsigned DMG:
 
 ```sh
 ./scripts/package-release.sh --unsigned
-./scripts/test-release.sh .build/release/YumYum-Agent-0.1.1-macOS.dmg
+./scripts/test-release.sh .build/release/YumYum-Agent-<version>-macOS.dmg
 ```
 
 ## Build and run from source
