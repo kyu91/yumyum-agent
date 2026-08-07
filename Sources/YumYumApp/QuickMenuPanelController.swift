@@ -689,12 +689,12 @@ final class ChatPanelController: NSObject {
     }
 
     @discardableResult
-    func feedText(_ text: String, reduceMotion: Bool) -> Bool {
-        let didStart = session.feedText(text, reduceMotion: reduceMotion)
-        if didStart {
-            refreshAgentStateAfterFailure()
+    func stageAttachments(_ attachments: [ChatDraftAttachment]) -> Bool {
+        guard !attachments.isEmpty, !session.isRestarting else { return false }
+        for attachment in attachments {
+            session.addAttachment(attachment)
         }
-        return didStart
+        return true
     }
 
     func retryLastSend() {
@@ -859,11 +859,9 @@ final class ChatPanelController: NSObject {
                 self.activeFilePanel = nil
                 self.renderCurrentState()
                 guard response == .OK, let urls = openPanel?.urls else { return }
-                for url in urls {
-                    self.session.addAttachment(
-                        ChatDraftAttachment(url: url, isTemporary: false)
-                    )
-                }
+                self.stageAttachments(
+                    urls.map { ChatDraftAttachment(url: $0, isTemporary: false) }
+                )
                 self.viewController.focusComposer()
             }
         }

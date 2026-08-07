@@ -29,51 +29,6 @@ struct ChatBubbleStateTests {
     }
 
     @Test
-    func beginTextMealSendsTranscriptContextWithoutConsumingTheDraft() throws {
-        let attachment = ChatDraftAttachment(
-            url: URL(fileURLWithPath: "/private/tmp/draft.txt"),
-            isTemporary: false
-        )
-        var state = ChatBubbleState(
-            draftText: "keep this draft",
-            draftAttachments: [attachment],
-            messages: [
-                ChatMessage(role: .user, text: "previous question"),
-                ChatMessage(role: .assistant, text: "previous answer"),
-            ]
-        )
-
-        let submission = try state.beginTextMeal("  hello  ")
-
-        #expect(state.draftText == "keep this draft")
-        #expect(state.draftAttachments == [attachment])
-        #expect(submission.input.currentTurnText == "hello")
-        #expect(submission.input.text == "User: previous question\nAssistant: previous answer\nUser: hello")
-        #expect(state.messages.map(\.role) == [.user, .assistant, .user, .assistant])
-        #expect(state.messages[2].text == "hello")
-        #expect(state.messages[3].isLoading)
-    }
-
-    @Test
-    func beginTextMealRejectsBlankTextAndBusyPhases() throws {
-        var blank = ChatBubbleState()
-        #expect(throws: ChatBubbleStateError.blankDraft) {
-            try blank.beginTextMeal(" \n ")
-        }
-
-        var sending = ChatBubbleState(draftText: "busy")
-        _ = try sending.beginSend()
-        #expect(throws: ChatBubbleStateError.busy) {
-            try sending.beginTextMeal("next")
-        }
-
-        var capturing = ChatBubbleState(phase: .capturing)
-        #expect(throws: ChatBubbleStateError.busy) {
-            try capturing.beginTextMeal("next")
-        }
-    }
-
-    @Test
     func sendAddsUserThenLoadingAssistantAndCompletionPreservesOrderingWithoutVisiblePaths() throws {
         var state = ChatBubbleState()
         state.draftText = "이 문서를 요약해줘"
@@ -721,23 +676,19 @@ struct ChatBubbleSessionTests {
 
     @Test
     @MainActor
-    func immediateTextMealPreservesChatDraftAndSubmitsTheTextOnce() async {
-        let submitter = ControlledFeedSubmitter()
-        let session = ChatBubbleSession(submitter: submitter)
-        session.setDraftText("보존할 채팅 초안")
+    func removingATemporaryDraftAttachmentDeletesItsFile() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("YumYum-Capture-\(UUID().uuidString).png")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try Data("png".utf8).write(to: url)
+        let session = ChatBubbleSession(submitter: ControlledFeedSubmitter())
+        let attachment = ChatDraftAttachment(url: url, isTemporary: true)
+        session.addAttachment(attachment)
 
-        #expect(session.feedText("  clipboard text  ", reduceMotion: false))
-        #expect(!session.feedText("두 번째 요청", reduceMotion: false))
-        await submitter.waitForSubmissionCount(1)
+        session.removeAttachment(id: attachment.id)
 
-        let inputs = await submitter.inputs
-        #expect(inputs.count == 1)
-        #expect(inputs[0].currentTurnText == "clipboard text")
-        #expect(inputs[0].fileURLs.isEmpty)
-        #expect(session.state.draftText == "보존할 채팅 초안")
-
-        await submitter.succeed(at: 0, text: "처리 완료")
-        await session.waitForCurrentSend()
+        #expect(session.state.draftAttachments.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: url.path))
     }
 
     @Test

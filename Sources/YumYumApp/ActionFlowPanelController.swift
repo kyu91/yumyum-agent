@@ -247,24 +247,35 @@ final class QuickMenuPanelController: NSObject {
 
     @discardableResult
     func feedFromClipboard(_ pasteboard: NSPasteboard = .general) -> Bool {
-        guard presentationEnabled, !chatController.isSending else {
+        guard presentationEnabled,
+              !chatController.isSending,
+              captureTask == nil,
+              fileGeneration == nil else {
             return false
         }
 
         let urls = FloatingPetHostingView<YumYumPetView>.fileURLs(from: pasteboard)
         if !urls.isEmpty {
-            return feedDroppedFiles(urls)
+            guard let validated = try? FeedValidator().validate(
+                FeedInput(fileURLs: urls)
+            ), chatController.stageAttachments(
+                validated.attachments.map {
+                    ChatDraftAttachment(url: $0.url, isTemporary: false)
+                }
+            ) else {
+                return false
+            }
+            return presentChatForStagedDraft()
         }
 
         if let url = Self.writeTemporaryPNG(from: pasteboard) {
-            let didStart = chatController.feedAttachments(
-                [ChatDraftAttachment(url: url, isTemporary: true)],
-                reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-            )
-            if !didStart {
+            guard chatController.stageAttachments([
+                ChatDraftAttachment(url: url, isTemporary: true),
+            ]) else {
                 try? FileManager.default.removeItem(at: url)
+                return false
             }
-            return didStart
+            return presentChatForStagedDraft()
         }
 
         guard let text = pasteboard.string(forType: .string)?
@@ -272,10 +283,16 @@ final class QuickMenuPanelController: NSObject {
             !text.isEmpty else {
             return false
         }
-        return chatController.feedText(
-            text,
-            reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        )
+        let existing = chatController.state.draftText
+        chatController.setDraftText(existing.isEmpty ? text : existing + "\n" + text)
+        return presentChatForStagedDraft()
+    }
+
+    @discardableResult
+    private func presentChatForStagedDraft() -> Bool {
+        flow.showChat()
+        showChat(scrollToLatest: false)
+        return true
     }
 
     private static func writeTemporaryPNG(from pasteboard: NSPasteboard) -> URL? {
@@ -434,6 +451,10 @@ final class QuickMenuPanelController: NSObject {
         hideAuxiliaryBubblesForCapture()
     }
 
+    var chatStateForTesting: ChatBubbleState {
+        chatController.state
+    }
+
     var chatPanelForTesting: QuickMenuPanel {
         chatController.panel
     }
@@ -452,10 +473,10 @@ final class QuickMenuPanelController: NSObject {
                 || canFeed && !isCheckingAgents && !chatController.isSending else {
             return
         }
+        perform(flow.select(action, generation: UUID()))
         if action == .feedClipboard {
             _ = feedFromClipboard()
         }
-        perform(flow.select(action, generation: UUID()))
     }
 
     private func perform(_ effects: [ActionFlowEffect]) {

@@ -402,7 +402,7 @@ final class PetPresentationModel: ObservableObject {
 
     var accessibilityHint: String {
         AppText.localized(
-            "왼쪽 클릭하면 클립보드를 먹입니다. 오른쪽 클릭하면 빠른 메뉴를 엽니다. 드래그하여 이동할 수 있습니다.",
+            "왼쪽 클릭하면 클립보드를 채팅 입력창에 붙입니다. 오른쪽 클릭하면 빠른 메뉴를 엽니다. 드래그하여 이동할 수 있습니다.",
             language: language
         )
     }

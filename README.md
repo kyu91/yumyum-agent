@@ -8,7 +8,7 @@ YumYum Agent is a Swift/AppKit macOS app that lets you “feed” a selected scr
 
 ## Features
 
-- One validated flow for clipboard feeding, screen captures, file selection, Finder drops, and chat input
+- One validated flow for staging the clipboard into chat drafts, screen captures, file selection, Finder drops, and chat input
 - Streaming responses, transcript continuity, cancellation and retry, with Reduce Motion and VoiceOver support
 - CLI discovery and revalidation using exact executable paths and local `--version`/`--help` contracts
 - App-owned `SOUL.md` response customization subordinate to safety and privacy policies
@@ -80,7 +80,7 @@ swift test \
 1. Install a supported CLI and complete its own sign-in flow.
 2. Open **Settings → Agent**, choose an agent to connect, then use **Find and register**. YumYum checks safe default locations, verifies its local command contract, and selects it as the default when ready. If it is not found, use **Install guide**; use **Choose directly** only when the executable is elsewhere. Codex must be signed in before it can become the default.
 3. If needed, grant Screen Recording, Input Monitoring, or Accessibility permission in macOS Settings.
-4. Right-click the pet or press `Control+Option+Space` to open the action bubble; left-click the pet to instantly feed the clipboard, preferring files, then an image, then text. Keyboard and VoiceOver users can use **Feed from Clipboard** in the action bubble.
+4. Right-click the pet or press `Control+Option+Space` to open the action bubble; left-click the pet to stage the clipboard into the chat draft, preferring files, then an image, then text, and open the chat panel. Add any instruction, then press Return to send the staged clipboard content and instruction together. Keyboard and VoiceOver users can use **Add Clipboard to Chat** in the action bubble.
 
 Cancellation, denied permission, empty input, invalid attachments, and no agent selection never send a request. Each file is limited to 20 MB; folders, symlinks, aliases, unsupported formats, and known credential files are rejected.
 
@@ -124,7 +124,7 @@ The default English product reference is the [product specification](docs/produc
 
 ## Manual pet interaction verification
 
-- Confirm left-drag still moves the pet without feeding the clipboard, while right-click never moves the window; right-click opens the action bubble and left-click feeds the clipboard.
+- Confirm left-drag still moves the pet without staging the clipboard, while right-click never moves the window; right-click opens the action bubble and left-click stages the clipboard into the chat draft without sending until Return.
 
 ## Manual agent setup verification
 

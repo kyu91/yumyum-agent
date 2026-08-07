@@ -20,7 +20,7 @@ struct ActionFlowPolicyTests {
             "파일 찾기",
             "채팅 열기",
             "설정",
-            "클립보드에서 먹이기",
+            "클립보드를 채팅에 담기",
         ])
         #expect(ActionBubbleAction.allCases.map(\.symbolName) == [
             "camera.viewfinder",
@@ -128,6 +128,14 @@ struct ActionFlowPolicyTests {
         #expect(flow.surface == .chat)
         #expect(flow.hideChat() == [.hideChat, .showPet])
         #expect(flow.surface == .petOnly)
+    }
+
+    @Test
+    func showChatMovesTheSurfaceToChat() {
+        var flow = ActionFlowStateMachine()
+        flow.showChat()
+
+        #expect(flow.surface == .chat)
     }
 
     @Test

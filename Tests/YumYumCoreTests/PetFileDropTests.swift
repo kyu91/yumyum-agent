@@ -46,9 +46,9 @@ struct PetFileDropTests {
 
         controller.applyLanguage(.english)
         #expect(model.accessibilityLabel == "YumYum Agent floating pet")
-        #expect(model.accessibilityHint == "Left-click to feed the clipboard. Right-click to open the quick menu. Drag to move.")
+        #expect(model.accessibilityHint == "Left-click to add the clipboard to the chat draft. Right-click to open the quick menu. Drag to move.")
         #expect(controller.panel.contentView?.accessibilityLabel() == "YumYum Agent floating pet")
-        #expect(controller.panel.contentView?.accessibilityHelp() == "Left-click to feed the clipboard. Right-click to open the quick menu. Drag to move.")
+        #expect(controller.panel.contentView?.accessibilityHelp() == "Left-click to add the clipboard to the chat draft. Right-click to open the quick menu. Drag to move.")
         controller.applyLanguage(.korean)
 
         #expect(controller.presentationModel === model)
@@ -56,9 +56,9 @@ struct PetFileDropTests {
         #expect(model.chewFrame == .mouthClosedChew)
         #expect(model.isFileDropTarget)
         #expect(model.accessibilityLabel == "YumYum Agent 플로팅 펫")
-        #expect(model.accessibilityHint == "왼쪽 클릭하면 클립보드를 먹입니다. 오른쪽 클릭하면 빠른 메뉴를 엽니다. 드래그하여 이동할 수 있습니다.")
+        #expect(model.accessibilityHint == "왼쪽 클릭하면 클립보드를 채팅 입력창에 붙입니다. 오른쪽 클릭하면 빠른 메뉴를 엽니다. 드래그하여 이동할 수 있습니다.")
         #expect(controller.panel.contentView?.accessibilityLabel() == "YumYum Agent 플로팅 펫")
-        #expect(controller.panel.contentView?.accessibilityHelp() == "왼쪽 클릭하면 클립보드를 먹입니다. 오른쪽 클릭하면 빠른 메뉴를 엽니다. 드래그하여 이동할 수 있습니다.")
+        #expect(controller.panel.contentView?.accessibilityHelp() == "왼쪽 클릭하면 클립보드를 채팅 입력창에 붙입니다. 오른쪽 클릭하면 빠른 메뉴를 엽니다. 드래그하여 이동할 수 있습니다.")
     }
 
     @Test
