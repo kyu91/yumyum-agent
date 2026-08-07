@@ -35,4 +35,4 @@ jobs:
           test -x ".build/YumYum.app/Contents/MacOS/YumYum"
           test -x ".build/YumYum.app/Contents/Resources/yumyum-process-fixture"
           /usr/bin/cmp AppBundle/Info.plist ".build/YumYum.app/Contents/Info.plist"
-          test "$(/usr/bin/find ".build/YumYum.app/Contents" -type f | LC_ALL=C /usr/bin/sort | /usr/bin/wc -l | /usr/bin/tr -d ' ')" = 6
+          test "$(/usr/bin/find ".build/YumYum.app/Contents" -type f | LC_ALL=C /usr/bin/sort | /usr/bin/wc -l | /usr/bin/tr -d ' ')" = 10
