@@ -128,7 +128,8 @@ struct HermesACPProtocolTests {
                         kind: .pdf,
                         byteCount: 42
                     ),
-                ]
+                ],
+                responseLanguage: .korean
             ),
             onEvent: { events.append($0) }
         )
@@ -155,8 +156,10 @@ struct HermesACPProtocolTests {
         #expect((firstBlocks[0]["text"] as? String)?.contains("# YumYum Soul") == true)
         let secondPrompt = try #require(sent[3]["params"] as? [String: Any])
         let secondBlocks = try #require(secondPrompt["prompt"] as? [[String: Any]])
-        #expect(secondBlocks[0]["text"] as? String == "둘째 질문")
-        #expect((secondBlocks[0]["text"] as? String)?.contains("# YumYum Soul") == false)
+        let secondText = secondBlocks[0]["text"] as? String
+        #expect(secondText?.hasPrefix("둘째 질문") == true)
+        #expect(secondText?.contains("Always respond in Korean") == true)
+        #expect(secondText?.contains("# YumYum Soul") == false)
         #expect(secondBlocks[1]["uri"] as? String == "file:///selected/follow-up.pdf")
     }
 

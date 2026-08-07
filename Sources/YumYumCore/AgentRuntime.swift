@@ -32,19 +32,22 @@ public struct PromptRequest: Equatable, Sendable {
     public let currentTurnText: String?
     public let attachments: [PromptAttachment]
     public let soulMarkdown: String?
+    public let responseLanguage: AppLanguage?
 
     public init(
         id: UUID = UUID(),
         text: String,
         currentTurnText: String? = nil,
         attachments: [PromptAttachment] = [],
-        soulMarkdown: String? = nil
+        soulMarkdown: String? = nil,
+        responseLanguage: AppLanguage? = nil
     ) {
         self.id = id
         self.text = text
         self.currentTurnText = currentTurnText
         self.attachments = attachments
         self.soulMarkdown = soulMarkdown
+        self.responseLanguage = responseLanguage
     }
 }
 
@@ -236,7 +239,7 @@ public struct AgentRuntime: Sendable {
         try await requireCodexAuthentication(ifNeeded: installation)
         do {
             return try await connector.send(
-                await requestWithSoul(request),
+                await preparedRequest(request),
                 executableURL: URL(fileURLWithPath: path).standardizedFileURL
             )
         } catch {
@@ -260,7 +263,7 @@ public struct AgentRuntime: Sendable {
                     }
                     try await requireCodexAuthentication(ifNeeded: installation)
                     let events = connector.sendEvents(
-                        await requestWithSoul(request),
+                        await preparedRequest(request),
                         executableURL: URL(fileURLWithPath: path).standardizedFileURL
                     )
                     do {
@@ -291,14 +294,14 @@ public struct AgentRuntime: Sendable {
         }
     }
 
-    private func requestWithSoul(_ request: PromptRequest) async -> PromptRequest {
-        guard let profile = await soulStore?.load() else { return request }
-        return PromptRequest(
+    private func preparedRequest(_ request: PromptRequest) async -> PromptRequest {
+        PromptRequest(
             id: request.id,
             text: request.text,
             currentTurnText: request.currentTurnText,
             attachments: request.attachments,
-            soulMarkdown: profile.promptMarkdown
+            soulMarkdown: await soulStore?.load().promptMarkdown ?? request.soulMarkdown,
+            responseLanguage: AppText.language
         )
     }
 
@@ -569,6 +572,11 @@ public struct ClaudeCodeConnector: AgentConnecting, Sendable {
     }
 }
 
+private func responseLanguageDirective(for language: AppLanguage?) -> String? {
+    guard language == .korean else { return nil }
+    return "Always respond in Korean, regardless of the language of this request or its attachments."
+}
+
 func promptText(
     for request: PromptRequest,
     text: String? = nil,
@@ -577,13 +585,14 @@ func promptText(
     let trimmed = (text ?? request.text)
         .trimmingCharacters(in: .whitespacesAndNewlines)
     var prompt = trimmed.isEmpty ? "Analyze the selected attachments." : trimmed
-    guard !visibleAttachments.isEmpty else {
-        return prompt
+    if !visibleAttachments.isEmpty {
+        prompt += "\n\nThese are paths to local attachments explicitly selected by the user. Use only these paths as input:"
+        for attachment in visibleAttachments {
+            prompt += "\n- \(attachment.url.path)"
+        }
     }
-
-    prompt += "\n\nThese are paths to local attachments explicitly selected by the user. Use only these paths as input:"
-    for attachment in visibleAttachments {
-        prompt += "\n- \(attachment.url.path)"
+    if let directive = responseLanguageDirective(for: request.responseLanguage) {
+        prompt += "\n\n\(directive)"
     }
     return prompt
 }

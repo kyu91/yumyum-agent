@@ -32,6 +32,116 @@ struct AgentConnectorTests {
         #expect(request.soulMarkdown?.contains("## Response Style") == true)
         #expect(request.soulMarkdown?.contains("context needed to act") == true)
         #expect(request.attachments.isEmpty)
+        #expect(request.responseLanguage != nil)
+    }
+
+    @Test
+    func koreanResponseLanguageAppendsDirectiveToFirstAndResumedPrompts() throws {
+        let attachment = PromptAttachment(
+            url: URL(fileURLWithPath: "/selected/report.pdf"),
+            kind: .pdf,
+            byteCount: 42
+        )
+        let request = PromptRequest(
+            text: "hello",
+            attachments: [attachment],
+            soulMarkdown: "some soul",
+            responseLanguage: .korean
+        )
+        let directive = "respond in Korean"
+        let firstPrompt = firstSessionPromptText(
+            for: request,
+            visibleAttachments: request.attachments
+        )
+        let directiveRange = try #require(firstPrompt.range(of: directive))
+        let soulRange = try #require(firstPrompt.range(of: "some soul"))
+        let attachmentRange = try #require(firstPrompt.range(of: attachment.url.path))
+
+        #expect(firstPrompt.contains(directive))
+        #expect(firstPrompt.components(separatedBy: directive).count - 1 == 1)
+        #expect(directiveRange.lowerBound > soulRange.lowerBound)
+        #expect(directiveRange.lowerBound > attachmentRange.lowerBound)
+
+        let resumedPrompt = promptText(
+            for: request,
+            text: request.currentTurnText,
+            visibleAttachments: request.attachments
+        )
+        #expect(resumedPrompt.contains(directive))
+    }
+
+    @Test
+    func englishResponseLanguageLeavesPromptTextUnchanged() {
+        let attachment = PromptAttachment(
+            url: URL(fileURLWithPath: "/selected/report.pdf"),
+            kind: .pdf,
+            byteCount: 42
+        )
+        let english = PromptRequest(
+            text: "hello",
+            attachments: [attachment],
+            soulMarkdown: "some soul",
+            responseLanguage: .english
+        )
+        let nilLanguage = PromptRequest(
+            text: "hello",
+            attachments: [attachment],
+            soulMarkdown: "some soul",
+            responseLanguage: nil
+        )
+        let beforeChange = PromptRequest(
+            text: "hello",
+            attachments: [attachment],
+            soulMarkdown: "some soul"
+        )
+        let englishPrompt = promptText(
+            for: english,
+            visibleAttachments: english.attachments
+        )
+        let nilPrompt = promptText(
+            for: nilLanguage,
+            visibleAttachments: nilLanguage.attachments
+        )
+        let beforeChangePrompt = promptText(
+            for: beforeChange,
+            visibleAttachments: beforeChange.attachments
+        )
+
+        #expect(!englishPrompt.contains("Korean"))
+        #expect(!nilPrompt.contains("Korean"))
+        #expect(englishPrompt == nilPrompt)
+        #expect(nilPrompt == beforeChangePrompt)
+    }
+
+    @Test
+    func runtimeAttachesCurrentLanguageOnEverySendIncludingMidSessionSwitch() async throws {
+        let previousLanguage = AppText.language
+        defer { AppText.setLanguage(previousLanguage) }
+        let connector = RuntimeConnector(definitionID: .openCode)
+        let runtime = AgentRuntime(
+            selection: RuntimeSelection(installation: AgentInstallation(
+                definitionID: .openCode,
+                path: "/selected/opencode",
+                version: "1",
+                runtimeContract: .openCodeRun,
+                availability: .available
+            )),
+            connectors: [connector],
+            soulStore: nil
+        )
+        let request = PromptRequest(text: "hello", soulMarkdown: "request soul")
+
+        AppText.setLanguage(.korean)
+        _ = try await runtime.send(request)
+        AppText.setLanguage(.english)
+        _ = try await runtime.send(request)
+
+        let requests = await connector.requests
+        #expect(requests.count == 2)
+        #expect(requests[0].responseLanguage == .korean)
+        #expect(requests[1].responseLanguage == .english)
+        #expect(requests[0].soulMarkdown == "request soul")
+        #expect(requests[1].soulMarkdown == "request soul")
     }
 
     @Test
@@ -107,7 +217,15 @@ struct AgentConnectorTests {
 
         #expect(response == PromptResponse(text: "OpenCode response"))
         #expect(await selection.validationCount == 2)
-        #expect(await openCode.requests == [request])
+        let expectedRequest = PromptRequest(
+            id: request.id,
+            text: request.text,
+            currentTurnText: request.currentTurnText,
+            attachments: request.attachments,
+            soulMarkdown: request.soulMarkdown,
+            responseLanguage: AppText.language
+        )
+        #expect(await openCode.requests == [expectedRequest])
         #expect(await openCode.executablePaths == ["/selected/opencode"])
         #expect(await codex.requests.isEmpty)
     }

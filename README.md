@@ -118,12 +118,13 @@ The default English product reference is the [product specification](docs/produc
 - In **General**, confirm `settings-language-picker` exposes `English` and `한국어`.
 - Switch languages while settings, Soul drafts, agent state, chat, attachments, and panels are populated; labels must update without relaunch and state or scroll position must not reset.
 - In **Soul**, confirm `soul-response-style` exposes Urgent/Normal/Relaxed in English and 급함/보통/느긋함 in Korean, defaults to Normal, and VoiceOver explains that it changes response directness, context, and detail rather than processing speed.
+- Switch to Korean mid-conversation and send a follow-up without resetting the session; confirm the agent's reply comes back in Korean. Switch back to English and confirm the next reply is English.
 - Quit and relaunch to confirm the explicit language choice persists.
 - With no stored choice, verify Korean is selected only when the first resolved macOS preferred language is Korean; all other cases use English.
 
 ## Manual agent setup verification
 
-- With no supported executable in a safe location, **Agent** shows `agent-setup-card` with **Install guide**, an agent picker, **Find and register**, and **Rescan**.
+- **Agent** always shows `agent-setup-card` at the top with an agent picker, **Find and register**, and **Install guide**, so more agents can be registered even after one is already selected; **Hidden agents** appears there too whenever a previously removed agent is available to restore.
 - Each agent row shows its **Install guide**, including available installations.
 - Finding a valid supported agent verifies it locally and selects it as the default; Codex remains unselected until its ChatGPT sign-in succeeds.
 - Removing an agent hides it from YumYum without deleting its executable; restore it from the **Hidden agents** menu or by finding and registering it again.

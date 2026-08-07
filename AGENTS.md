@@ -53,7 +53,7 @@ File selection and capture are combined with `FeedInput`. `FeedValidator` only a
 
 The response arrives in the UI as a snapshot/delta/completed stream from `PromptResponseEvent`. `ChatBubbleState` updates the transcript and the current streaming response, while `AssistantMarkdownRenderer` renders ongoing incomplete Markdown and completed Markdown differently. User display errors prevent path, token, and raw stderr exposure by passing through `UserFacingErrorRedactor`.
 
-`SoulProfileStore` owns the normalized plaintext `~/Library/Application Support/YumYum/SOUL.md`. `AgentRuntime` injects Soul only into the first prompt of a new logical session; a session reset waits for the latest Soul draft to save. Do not add external Soul imports, hooks, command syntax, or secret content.
+`SoulProfileStore` owns the normalized plaintext `~/Library/Application Support/YumYum/SOUL.md`. `AgentRuntime` injects Soul only into the first prompt of a new logical session, while the response-language directive is attached freshly on every send so a live language switch applies to the next first or resumed prompt; a session reset waits for the latest Soul draft to save. Do not add external Soul imports, hooks, command syntax, or secret content.
 
 ### Agent discovery, selection, execution
 

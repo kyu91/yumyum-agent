@@ -551,17 +551,11 @@ private struct YumYumContentView: View {
                         .controlSize(.small)
                 }
 
-                if needsAgentSetup {
-                    agentSetupCard
-                } else {
-                    ForEach(viewModel.agentSnapshot.installations) { installation in
-                        agentRow(installation)
-                        Divider()
-                    }
-                }
+                agentSetupCard
 
-                if !viewModel.agentSnapshot.hiddenDefinitionIDs.isEmpty {
-                    hiddenAgentsMenu
+                ForEach(viewModel.agentSnapshot.installations) { installation in
+                    agentRow(installation)
+                    Divider()
                 }
 
                 Text(AppText.localized(
@@ -577,41 +571,33 @@ private struct YumYumContentView: View {
         }
     }
 
-    private var needsAgentSetup: Bool {
-        !viewModel.isDiscoveringAgents
-            && viewModel.agentSnapshot.installations.allSatisfy { $0.path == nil }
-            && !viewModel.agentSnapshot.installations.contains {
-                $0.availability == .available
-            }
-    }
-
     private var agentSetupCard: some View {
         VStack(alignment: .leading, spacing: 8) {
             Label(
                 AppText.localized(
-                    english: "No supported agent found yet",
-                    korean: "아직 사용할 수 있는 에이전트를 찾지 못했습니다"
+                    english: "Register your locally installed agent",
+                    korean: "로컬에 설치된 에이전트를 등록해 주세요"
                 ),
                 systemImage: "pawprint.fill"
             )
             .font(.callout.weight(.semibold))
 
             Text(AppText.localized(
-                english: "Choose an agent and find it in safe default locations to register it. If it is elsewhere, choose its executable directly.",
-                korean: "연결할 에이전트를 선택해 안전한 기본 설치 위치에서 찾아 등록하세요. 다른 위치에 설치했다면 실행 파일을 직접 선택하세요."
+                english: "Choose an agent and find it in safe default locations to register it.",
+                korean: "연결할 에이전트를 선택해 안전한 기본 설치 위치에서 찾아 등록하세요."
             ))
             .font(.caption)
             .foregroundStyle(.secondary)
 
             HStack {
-                installationGuideMenu
                 agentRegistrationControls
-                Button(AppText.localized("다시 검색"), systemImage: "arrow.clockwise") {
-                    refreshAgents()
+                if !viewModel.agentSnapshot.hiddenDefinitionIDs.isEmpty {
+                    hiddenAgentsMenu
                 }
-                .disabled(viewModel.isDiscoveringAgents || agentExecutablePanel != nil)
+                installationGuideMenu
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
         .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
         .accessibilityIdentifier("agent-setup-card")
@@ -824,27 +810,16 @@ private struct YumYumContentView: View {
                 korean: "연결할 에이전트"
             ))
 
-            Button(
-                AppText.localized(english: "Find and register", korean: "찾아 등록"),
-                systemImage: "magnifyingglass"
-            ) {
+            Button {
                 findAndRegisterAgent(agentToRegister)
-            }
-            .disabled(viewModel.isDiscoveringAgents || agentExecutablePanel != nil)
-
-            Menu {
-                Button(AppText.localized(
-                    english: "Choose executable directly",
-                    korean: "실행 파일 직접 선택"
-                )) {
-                    chooseAgentExecutable(for: agentToRegister)
-                }
             } label: {
-                Label(
-                    AppText.localized(english: "Choose directly", korean: "직접 선택"),
-                    systemImage: "folder"
-                )
+                HStack(spacing: 4) {
+                    Image(systemName: "magnifyingglass")
+                    Text(AppText.localized(english: "Find and register", korean: "찾고 등록하기"))
+                }
+                .fixedSize()
             }
+            .buttonStyle(.bordered)
             .disabled(viewModel.isDiscoveringAgents || agentExecutablePanel != nil)
         }
     }

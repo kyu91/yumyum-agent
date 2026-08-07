@@ -85,7 +85,7 @@ public actor HermesACPProtocolClient {
                 "prompt": promptBlocks(
                     for: request,
                     text: isResumingSession
-                        ? request.currentTurnText ?? request.text
+                        ? promptText(for: request, text: request.currentTurnText ?? request.text)
                         : firstSessionPromptText(for: request)
                 ),
             ]
