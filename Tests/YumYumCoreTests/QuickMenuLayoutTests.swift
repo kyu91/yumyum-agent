@@ -156,7 +156,7 @@ struct QuickMenuLayoutTests {
     func alignsTheMenuFromThePetsSideOfItsSelectedDisplay() {
         let layout = QuickMenuLayout()
         let display = CGRect(x: 100, y: 25, width: 1_200, height: 800)
-        let panelSize = CGSize(width: 248, height: 216)
+        let panelSize = CGSize(width: 248, height: 268)
 
         let left = layout.placement(
             petFrame: CGRect(x: 120, y: 100, width: 96, height: 96),
@@ -189,7 +189,7 @@ struct QuickMenuLayoutTests {
         let layout = QuickMenuLayout()
         let primary = CGRect(x: 0, y: 25, width: 1_440, height: 875)
         let secondary = CGRect(x: -1_728, y: -80, width: 1_728, height: 1_080)
-        let panelSize = CGSize(width: 248, height: 216)
+        let panelSize = CGSize(width: 248, height: 268)
 
         let left = layout.placement(
             petFrame: CGRect(x: -1_710, y: 200, width: 96, height: 96),

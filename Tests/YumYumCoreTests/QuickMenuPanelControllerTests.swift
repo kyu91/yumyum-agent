@@ -242,6 +242,24 @@ struct QuickMenuPanelControllerTests {
             + 0.0722 * linear(rgb.blueComponent)
     }
 
+    @MainActor
+    private func pasteboard(_ objects: [NSPasteboardWriting]) -> NSPasteboard {
+        let pasteboard = NSPasteboard(name: .init(UUID().uuidString))
+        pasteboard.clearContents()
+        pasteboard.writeObjects(objects)
+        return pasteboard
+    }
+
+    @MainActor
+    private func imageForPasteboard() -> NSImage {
+        let image = NSImage(size: CGSize(width: 4, height: 4))
+        image.lockFocus()
+        NSColor.systemBlue.setFill()
+        NSRect(x: 0, y: 0, width: 4, height: 4).fill()
+        image.unlockFocus()
+        return image
+    }
+
     @Test
     @MainActor
     func chatHeaderNewSessionActionIsLocalizedAccessibleAndDisabledWhileBusy() throws {
@@ -318,7 +336,7 @@ struct QuickMenuPanelControllerTests {
 
         #expect(action.backgroundColor == NSColor.clear.cgColor)
         let actionButtons = buttons(in: controller.actionPanel.contentView)
-        #expect(actionButtons.count == 4)
+        #expect(actionButtons.count == 5)
         #expect(actionButtons.allSatisfy {
             $0.layer?.backgroundColor == AppTheme.light.palette.surface.cgColor
                 && $0.layer?.borderColor == AppTheme.light.palette.border.cgColor
@@ -361,7 +379,7 @@ struct QuickMenuPanelControllerTests {
         actionButtons.forEach { $0.layoutSubtreeIfNeeded() }
         let stack = try #require(flattened(root).compactMap { $0 as? NSStackView }.first)
 
-        #expect(QuickMenuPanelController.actionPanelSize == CGSize(width: 248, height: 216))
+        #expect(QuickMenuPanelController.actionPanelSize == CGSize(width: 248, height: 268))
         #expect(root.layer?.backgroundColor == NSColor.clear.cgColor)
         #expect(actionButtons.map(\.title) == ActionBubbleAction.allCases.map {
             $0.title(language: .english)
@@ -721,6 +739,166 @@ struct QuickMenuPanelControllerTests {
         #expect(!request.text.contains(file.path))
 
         await sender.completeRequest(at: 0)
+    }
+
+    @Test
+    @MainActor
+    func clipboardFeedPrefersFilesThenImageThenTextOnAPasteboardHoldingAllThree() async throws {
+        _ = NSApplication.shared
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("clipboard.txt")
+        try Data("clipboard".utf8).write(to: file)
+
+        let sender = ControlledPromptSender()
+        let pet = FloatingPetWindowController {}
+        let controller = QuickMenuPanelController(
+            petController: pet,
+            viewModel: YumYumAppViewModel(fixtureProbe: UnusedFixtureProbe()),
+            workflow: FeedWorkflow(sender: sender, feedback: SilentFeedFeedback()),
+            openSettings: {}
+        )
+        defer { controller.prepareForTermination() }
+
+        #expect(controller.feedFromClipboard(pasteboard([
+            file as NSURL,
+            imageForPasteboard(),
+            "  clipboard text  " as NSString,
+        ])))
+        try #require(await sender.waitForRequestCount(1))
+        let fileRequest = try #require(await sender.requests.first)
+        #expect(fileRequest.attachments.map(\.url) == [file])
+        #expect(!fileRequest.text.contains(file.path))
+        await sender.completeRequest(at: 0)
+        await controller.waitForChatSendForTesting()
+
+        #expect(controller.feedFromClipboard(pasteboard([
+            imageForPasteboard(),
+            "  image text  " as NSString,
+        ])))
+        try #require(await sender.waitForRequestCount(2))
+        let imageRequests = await sender.requests
+        let imageRequest = try #require(imageRequests.dropFirst().first)
+        #expect(imageRequest.attachments.count == 1)
+        #expect(imageRequest.attachments[0].kind == .image)
+        #expect(imageRequest.attachments[0].url.lastPathComponent.hasPrefix(CaptureTemporaryFileCleanup.filenamePrefix))
+        #expect(!imageRequest.text.contains("image text"))
+        await sender.completeRequest(at: 1)
+        await controller.waitForChatSendForTesting()
+
+        #expect(controller.feedFromClipboard(pasteboard([
+            "  text only  " as NSString,
+        ])))
+        try #require(await sender.waitForRequestCount(3))
+        let textRequests = await sender.requests
+        let textRequest = try #require(textRequests.dropFirst(2).first)
+        #expect(textRequest.attachments.isEmpty)
+        #expect(textRequest.currentTurnText == "text only")
+        await sender.completeRequest(at: 2)
+    }
+
+    @Test
+    @MainActor
+    func clipboardFeedRejectsInvalidFilesWithoutFallingBackToPathText() async throws {
+        _ = NSApplication.shared
+        let invalid = FileManager.default.temporaryDirectory
+            .appendingPathComponent("clipboard.zip")
+        try Data("invalid".utf8).write(to: invalid)
+        defer { try? FileManager.default.removeItem(at: invalid) }
+        let sender = ControlledPromptSender()
+        let pet = FloatingPetWindowController {}
+        let controller = QuickMenuPanelController(
+            petController: pet,
+            viewModel: YumYumAppViewModel(fixtureProbe: UnusedFixtureProbe()),
+            workflow: FeedWorkflow(sender: sender, feedback: SilentFeedFeedback()),
+            openSettings: {}
+        )
+        defer { controller.prepareForTermination() }
+        let pasteboard = pasteboard([invalid as NSURL])
+        pasteboard.setString(invalid.path, forType: .string)
+
+        #expect(!controller.feedFromClipboard(pasteboard))
+        #expect(await sender.requestCount == 0)
+        #expect(!(await sender.requests).contains { $0.text.contains(invalid.path) })
+    }
+
+    @Test
+    @MainActor
+    func emptyAndUnsupportedClipboardProducesNoRequestOrStateChange() async throws {
+        _ = NSApplication.shared
+        let sender = ControlledPromptSender()
+        let pet = FloatingPetWindowController {}
+        let controller = QuickMenuPanelController(
+            petController: pet,
+            viewModel: YumYumAppViewModel(fixtureProbe: UnusedFixtureProbe()),
+            workflow: FeedWorkflow(sender: sender, feedback: SilentFeedFeedback()),
+            openSettings: {}
+        )
+        defer { controller.prepareForTermination() }
+        let wasVisible = controller.isVisible
+
+        let empty = NSPasteboard(name: .init(UUID().uuidString))
+        empty.clearContents()
+        #expect(!controller.feedFromClipboard(empty))
+        #expect(controller.isVisible == wasVisible)
+
+        let unsupported = NSPasteboard(name: .init(UUID().uuidString))
+        unsupported.clearContents()
+        unsupported.setData(Data("unsupported".utf8), forType: NSPasteboard.PasteboardType("com.yumyum.unsupported"))
+        #expect(!controller.feedFromClipboard(unsupported))
+        #expect(controller.isVisible == wasVisible)
+        #expect(await sender.requestCount == 0)
+        #expect(pet.presentationModel.chewFrame == .resting)
+    }
+
+    @Test
+    @MainActor
+    func clipboardFeedIsRejectedWhileASendIsInFlight() async throws {
+        _ = NSApplication.shared
+        let sender = ControlledPromptSender()
+        let pet = FloatingPetWindowController {}
+        let controller = QuickMenuPanelController(
+            petController: pet,
+            viewModel: YumYumAppViewModel(fixtureProbe: UnusedFixtureProbe()),
+            workflow: FeedWorkflow(sender: sender, feedback: SilentFeedFeedback()),
+            openSettings: {}
+        )
+        defer { controller.prepareForTermination() }
+        let board = pasteboard(["first" as NSString])
+
+        #expect(controller.feedFromClipboard(board))
+        try #require(await sender.waitForRequestCount(1))
+        #expect(!controller.feedFromClipboard(pasteboard(["second" as NSString])))
+        #expect(await sender.requestCount == 1)
+        await sender.completeRequest(at: 0)
+    }
+
+    @Test
+    @MainActor
+    func clipboardImageTemporaryPNGIsRemovedAfterSubmit() async throws {
+        _ = NSApplication.shared
+        let sender = ControlledPromptSender()
+        let pet = FloatingPetWindowController {}
+        let controller = QuickMenuPanelController(
+            petController: pet,
+            viewModel: YumYumAppViewModel(fixtureProbe: UnusedFixtureProbe()),
+            workflow: FeedWorkflow(sender: sender, feedback: SilentFeedFeedback()),
+            openSettings: {}
+        )
+        defer { controller.prepareForTermination() }
+
+        #expect(controller.feedFromClipboard(pasteboard([imageForPasteboard()])))
+        try #require(await sender.waitForRequestCount(1))
+        let request = try #require(await sender.requests.first)
+        let url = try #require(request.attachments.first?.url)
+        #expect(url.lastPathComponent.hasPrefix(CaptureTemporaryFileCleanup.filenamePrefix))
+        #expect(FileManager.default.fileExists(atPath: url.path))
+
+        await sender.completeRequest(at: 0)
+        await controller.waitForChatSendForTesting()
+        #expect(!FileManager.default.fileExists(atPath: url.path))
     }
 
     @Test

@@ -7,23 +7,27 @@ import Testing
 struct ActionFlowPolicyTests {
     @Test
     func actionBubbleHasExactlyTheApprovedOrderedRows() {
+        #expect(ActionBubbleAction.allCases.count == 5)
         #expect(ActionBubbleAction.allCases == [
             .capture,
             .findFile,
             .openChat,
             .settings,
+            .feedClipboard,
         ])
         #expect(ActionBubbleAction.allCases.map(\.title) == [
             "캡처하기",
             "파일 찾기",
             "채팅 열기",
             "설정",
+            "클립보드에서 먹이기",
         ])
         #expect(ActionBubbleAction.allCases.map(\.symbolName) == [
             "camera.viewfinder",
             "folder",
             "bubble.left.and.bubble.right",
             "gearshape",
+            "doc.on.clipboard",
         ])
     }
 
@@ -146,6 +150,14 @@ struct ActionFlowPolicyTests {
             .openSettings,
         ])
         #expect(settingsFlow.surface == .petOnly)
+
+        var clipboardFlow = ActionFlowStateMachine()
+        _ = clipboardFlow.openActionBubble()
+        #expect(clipboardFlow.select(.feedClipboard) == [
+            .hideActionBubble,
+            .showPet,
+        ])
+        #expect(clipboardFlow.surface == .petOnly)
     }
 
     @Test

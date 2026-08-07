@@ -46,9 +46,9 @@ struct PetFileDropTests {
 
         controller.applyLanguage(.english)
         #expect(model.accessibilityLabel == "YumYum Agent floating pet")
-        #expect(model.accessibilityHint == "Click to open the quick menu. Drag to move.")
+        #expect(model.accessibilityHint == "Left-click to feed the clipboard. Right-click to open the quick menu. Drag to move.")
         #expect(controller.panel.contentView?.accessibilityLabel() == "YumYum Agent floating pet")
-        #expect(controller.panel.contentView?.accessibilityHelp() == "Click to open the quick menu. Drag to move.")
+        #expect(controller.panel.contentView?.accessibilityHelp() == "Left-click to feed the clipboard. Right-click to open the quick menu. Drag to move.")
         controller.applyLanguage(.korean)
 
         #expect(controller.presentationModel === model)
@@ -56,9 +56,9 @@ struct PetFileDropTests {
         #expect(model.chewFrame == .mouthClosedChew)
         #expect(model.isFileDropTarget)
         #expect(model.accessibilityLabel == "YumYum Agent 플로팅 펫")
-        #expect(model.accessibilityHint == "클릭하면 빠른 메뉴를 엽니다. 드래그하여 이동할 수 있습니다.")
+        #expect(model.accessibilityHint == "왼쪽 클릭하면 클립보드를 먹입니다. 오른쪽 클릭하면 빠른 메뉴를 엽니다. 드래그하여 이동할 수 있습니다.")
         #expect(controller.panel.contentView?.accessibilityLabel() == "YumYum Agent 플로팅 펫")
-        #expect(controller.panel.contentView?.accessibilityHelp() == "클릭하면 빠른 메뉴를 엽니다. 드래그하여 이동할 수 있습니다.")
+        #expect(controller.panel.contentView?.accessibilityHelp() == "왼쪽 클릭하면 클립보드를 먹입니다. 오른쪽 클릭하면 빠른 메뉴를 엽니다. 드래그하여 이동할 수 있습니다.")
     }
 
     @Test
@@ -227,7 +227,7 @@ struct PetFileDropTests {
         let model = PetPresentationModel()
         let view = FloatingPetHostingView(
             rootView: YumYumPetView(presentationModel: model, onClick: {}),
-            onClick: {}
+            onOpenActionBubble: {}
         )
         var performed: [[URL]] = []
         view.canAcceptFileDrop = { $0 == [first, second] }
@@ -272,7 +272,7 @@ struct PetFileDropTests {
         let model = PetPresentationModel()
         let view = FloatingPetHostingView(
             rootView: YumYumPetView(presentationModel: model, onClick: {}),
-            onClick: {}
+            onOpenActionBubble: {}
         )
         view.canAcceptFileDrop = { $0 == [file] }
         let draggingInfo = StubDraggingInfo(fileURLs: [file])
@@ -307,7 +307,7 @@ struct PetFileDropTests {
         model.chewFrame = .reducedMotion
         let view = FloatingPetHostingView(
             rootView: YumYumPetView(presentationModel: model, onClick: {}),
-            onClick: {}
+            onOpenActionBubble: {}
         )
         view.canAcceptFileDrop = { _ in false }
         let invalidFile = StubDraggingInfo(fileURLs: [file])
@@ -325,7 +325,80 @@ struct PetFileDropTests {
         #expect(model.chewFrame == .reducedMotion)
         #expect(view.accessibilityLabel()?.contains("/private/tmp") != true)
     }
+
+    @Test
+    @MainActor
+    func leftClickFeedsTheClipboardAndRightClickOpensTheActionBubble() {
+        _ = NSApplication.shared
+        var feedCount = 0
+        var openCount = 0
+        let model = PetPresentationModel()
+        let view = FloatingPetHostingView(
+            rootView: YumYumPetView(presentationModel: model, onClick: { openCount += 1 }),
+            onFeedFromClipboard: { feedCount += 1 },
+            onOpenActionBubble: { openCount += 1 }
+        )
+
+        view.mouseDown(with: mouseEvent(.leftMouseDown))
+        view.mouseUp(with: mouseEvent(.leftMouseUp))
+        view.rightMouseDown(with: mouseEvent(.rightMouseDown))
+        view.rightMouseUp(with: mouseEvent(.rightMouseUp))
+
+        #expect(feedCount == 1)
+        #expect(openCount == 1)
+    }
+
+    @Test
+    @MainActor
+    func rightClickDoesNotDisturbLeftButtonDragState() {
+        _ = NSApplication.shared
+        var feedCount = 0
+        var dragEndCount = 0
+        let model = PetPresentationModel()
+        let view = FloatingPetHostingView(
+            rootView: YumYumPetView(presentationModel: model, onClick: {}),
+            onFeedFromClipboard: { feedCount += 1 },
+            onOpenActionBubble: {}
+        )
+        view.onDragEnded = { dragEndCount += 1 }
+
+        view.mouseDown(with: mouseEvent(.leftMouseDown))
+        view.rightMouseDown(with: mouseEvent(.rightMouseDown))
+        view.rightMouseUp(with: mouseEvent(.rightMouseUp))
+        view.mouseUp(with: mouseEvent(.leftMouseUp))
+
+        #expect(feedCount == 1)
+        #expect(dragEndCount == 0)
+    }
+
+    @Test
+    @MainActor
+    func petAccessibilityActionStillOpensTheActionBubble() {
+        var openCount = 0
+        let pet = YumYumPetView(
+            presentationModel: PetPresentationModel(),
+            onClick: { openCount += 1 }
+        )
+
+        pet.onClick()
+
+        #expect(openCount == 1)
+    }
 }
+}
+
+private func mouseEvent(_ type: NSEvent.EventType) -> NSEvent {
+    NSEvent.mouseEvent(
+        with: type,
+        location: .zero,
+        modifierFlags: [],
+        timestamp: 0,
+        windowNumber: 0,
+        context: nil,
+        eventNumber: 0,
+        clickCount: 1,
+        pressure: 0
+    )!
 }
 
 private struct StubFileMetadataProvider: FileMetadataProviding {

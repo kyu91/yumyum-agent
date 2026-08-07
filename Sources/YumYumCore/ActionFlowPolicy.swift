@@ -6,6 +6,7 @@ public enum ActionBubbleAction: Int, CaseIterable, Equatable, Sendable {
     case findFile
     case openChat
     case settings
+    case feedClipboard
 
     public var title: String {
         title(language: AppText.language)
@@ -17,6 +18,7 @@ public enum ActionBubbleAction: Int, CaseIterable, Equatable, Sendable {
         case .findFile: AppText.localized(english: "Choose Files", korean: "파일 찾기", language: language)
         case .openChat: AppText.localized(english: "Open Chat", korean: "채팅 열기", language: language)
         case .settings: AppText.localized(english: "Settings", korean: "설정", language: language)
+        case .feedClipboard: AppText.localized(english: "Feed from Clipboard", korean: "클립보드에서 먹이기", language: language)
         }
     }
 
@@ -28,6 +30,7 @@ public enum ActionBubbleAction: Int, CaseIterable, Equatable, Sendable {
         case .findFile: "folder"
         case .openChat: "bubble.left.and.bubble.right"
         case .settings: "gearshape"
+        case .feedClipboard: "doc.on.clipboard"
         }
     }
 }
@@ -196,6 +199,9 @@ public struct ActionFlowStateMachine: Equatable, Sendable {
         case .settings:
             surface = .petOnly
             return [.hideActionBubble, .showPet, .openSettings]
+        case .feedClipboard:
+            surface = .petOnly
+            return [.hideActionBubble, .showPet]
         }
     }
 

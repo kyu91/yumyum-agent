@@ -134,6 +134,29 @@ public final class ChatBubbleSession: ObservableObject {
     }
 
     @discardableResult
+    public func feedText(_ text: String, reduceMotion: Bool) -> Bool {
+        guard activeSubmission == nil, !isRestarting else {
+            return false
+        }
+        let submission: ChatSubmission
+        do {
+            submission = try state.beginTextMeal(text)
+        } catch ChatBubbleStateError.busy {
+            return false
+        } catch {
+            state.setFailure(UserFacingErrorRedactor.message(for: error))
+            return false
+        }
+        state.discardExcludedUserMessages()
+        if let failedSubmission {
+            removeTemporaryFiles(for: failedSubmission)
+        }
+        failedSubmission = nil
+        start(submission, reduceMotion: reduceMotion)
+        return true
+    }
+
+    @discardableResult
     public func retry(reduceMotion: Bool) -> Bool {
         guard activeSubmission == nil, !isRestarting,
               let previous = failedSubmission else {

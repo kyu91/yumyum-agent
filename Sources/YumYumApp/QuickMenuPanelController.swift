@@ -688,6 +688,15 @@ final class ChatPanelController: NSObject {
         return didStart
     }
 
+    @discardableResult
+    func feedText(_ text: String, reduceMotion: Bool) -> Bool {
+        let didStart = session.feedText(text, reduceMotion: reduceMotion)
+        if didStart {
+            refreshAgentStateAfterFailure()
+        }
+        return didStart
+    }
+
     func retryLastSend() {
         retrySend()
     }

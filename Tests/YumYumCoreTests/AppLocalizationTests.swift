@@ -41,10 +41,10 @@ struct AppLocalizationTests {
             AppText.localized($0, language: .english).firstMatch(of: korean) == nil
         })
         #expect(ActionBubbleAction.allCases.map { $0.title(language: .english) } == [
-            "Capture", "Choose Files", "Open Chat", "Settings",
+            "Capture", "Choose Files", "Open Chat", "Settings", "Feed from Clipboard",
         ])
         #expect(ActionBubbleAction.allCases.map { $0.title(language: .korean) } == [
-            "캡처하기", "파일 찾기", "채팅 열기", "설정",
+            "캡처하기", "파일 찾기", "채팅 열기", "설정", "클립보드에서 먹이기",
         ])
     }
 

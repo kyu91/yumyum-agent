@@ -37,7 +37,11 @@ final class YumYumAppDelegate: NSObject, NSApplicationDelegate, ObservableObject
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let controller = FloatingPetWindowController { [weak self] in
+        let controller = FloatingPetWindowController(
+            onFeedFromClipboard: { [weak self] in
+                self?.quickMenuController?.feedFromClipboard()
+            }
+        ) { [weak self] in
             self?.toggleQuickMenu()
         }
         petWindowController = controller
@@ -224,7 +228,10 @@ final class FloatingPetWindowController: NSObject {
     private let layout = FloatingPetLayout()
     private let hostingView: FloatingPetHostingView<YumYumPetView>
 
-    init(onClick: @escaping @MainActor () -> Void) {
+    init(
+        onFeedFromClipboard: @escaping @MainActor () -> Void = {},
+        onOpenActionBubble: @escaping @MainActor () -> Void
+    ) {
         let screen = Self.screen(containing: NSEvent.mouseLocation)
             ?? NSScreen.main
             ?? NSScreen.screens.first
@@ -241,9 +248,10 @@ final class FloatingPetWindowController: NSObject {
         hostingView = FloatingPetHostingView(
             rootView: YumYumPetView(
                 presentationModel: presentationModel,
-                onClick: onClick
+                onClick: onOpenActionBubble
             ),
-            onClick: onClick
+            onFeedFromClipboard: onFeedFromClipboard,
+            onOpenActionBubble: onOpenActionBubble
         )
 
         super.init()
@@ -394,7 +402,7 @@ final class PetPresentationModel: ObservableObject {
 
     var accessibilityHint: String {
         AppText.localized(
-            "클릭하면 빠른 메뉴를 엽니다. 드래그하여 이동할 수 있습니다.",
+            "왼쪽 클릭하면 클립보드를 먹입니다. 오른쪽 클릭하면 빠른 메뉴를 엽니다. 드래그하여 이동할 수 있습니다.",
             language: language
         )
     }
@@ -411,7 +419,8 @@ final class FloatingPetHostingView<Content: View>: NSHostingView<Content> {
     var canAcceptFileDrop: @MainActor ([URL]) -> Bool = { _ in false }
     var performFileDrop: @MainActor ([URL]) -> Bool = { _ in false }
 
-    private let onClick: @MainActor () -> Void
+    private let onOpenActionBubble: @MainActor () -> Void
+    private let onFeedFromClipboard: @MainActor () -> Void
     private var dropLifecycle = PetDropLifecycle()
     private var dropGeneration: UUID?
     private var dropPreviousChewFrame: PetChewFrame?
@@ -421,9 +430,11 @@ final class FloatingPetHostingView<Content: View>: NSHostingView<Content> {
 
     init(
         rootView: Content,
-        onClick: @escaping @MainActor () -> Void
+        onFeedFromClipboard: @escaping @MainActor () -> Void = {},
+        onOpenActionBubble: @escaping @MainActor () -> Void
     ) {
-        self.onClick = onClick
+        self.onFeedFromClipboard = onFeedFromClipboard
+        self.onOpenActionBubble = onOpenActionBubble
         super.init(rootView: rootView)
         registerForDraggedTypes([.fileURL])
     }
@@ -483,8 +494,14 @@ final class FloatingPetHostingView<Content: View>: NSHostingView<Content> {
         if didDrag {
             onDragEnded()
         } else {
-            onClick()
+            onFeedFromClipboard()
         }
+    }
+
+    override func rightMouseDown(with event: NSEvent) {}
+
+    override func rightMouseUp(with event: NSEvent) {
+        onOpenActionBubble()
     }
 
     override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {

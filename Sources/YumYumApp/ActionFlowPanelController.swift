@@ -6,7 +6,11 @@ import YumYumCore
 
 @MainActor
 final class QuickMenuPanelController: NSObject {
-    static let actionPanelSize = CGSize(width: 248, height: 216)
+    static let actionPanelSize = CGSize(
+        width: 248,
+        height: CGFloat(ActionBubbleAction.allCases.count * 44 + 16)
+            + CGFloat(max(ActionBubbleAction.allCases.count - 1, 0) * 8)
+    )
     static let thinkingPanelSize = CGSize(width: 112, height: 48)
 
     private let petController: FloatingPetWindowController
@@ -241,6 +245,59 @@ final class QuickMenuPanelController: NSObject {
         )
     }
 
+    @discardableResult
+    func feedFromClipboard(_ pasteboard: NSPasteboard = .general) -> Bool {
+        guard presentationEnabled, !chatController.isSending else {
+            return false
+        }
+
+        let urls = FloatingPetHostingView<YumYumPetView>.fileURLs(from: pasteboard)
+        if !urls.isEmpty {
+            return feedDroppedFiles(urls)
+        }
+
+        if let url = Self.writeTemporaryPNG(from: pasteboard) {
+            let didStart = chatController.feedAttachments(
+                [ChatDraftAttachment(url: url, isTemporary: true)],
+                reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+            )
+            if !didStart {
+                try? FileManager.default.removeItem(at: url)
+            }
+            return didStart
+        }
+
+        guard let text = pasteboard.string(forType: .string)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !text.isEmpty else {
+            return false
+        }
+        return chatController.feedText(
+            text,
+            reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        )
+    }
+
+    private static func writeTemporaryPNG(from pasteboard: NSPasteboard) -> URL? {
+        guard let image = NSImage(pasteboard: pasteboard),
+              let tiffRepresentation = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiffRepresentation),
+              let data = bitmap.representation(using: .png, properties: [:]) else {
+            return nil
+        }
+
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "\(CaptureTemporaryFileCleanup.filenamePrefix)\(UUID().uuidString).png"
+        )
+        do {
+            try data.write(to: url, options: .atomic)
+            return url
+        } catch {
+            try? FileManager.default.removeItem(at: url)
+            return nil
+        }
+    }
+
     func show() {
         guard presentationEnabled,
               captureTask == nil,
@@ -381,6 +438,10 @@ final class QuickMenuPanelController: NSObject {
         chatController.panel
     }
 
+    func waitForChatSendForTesting() async {
+        await chatController.waitForSendForTesting()
+    }
+
     func updateActionFrameForTesting(petFrame: CGRect, visibleFrames: [CGRect]) {
         updateActionFrame(petFrame: petFrame, visibleFrames: visibleFrames)
     }
@@ -390,6 +451,9 @@ final class QuickMenuPanelController: NSObject {
         guard action != .capture && action != .findFile
                 || canFeed && !isCheckingAgents && !chatController.isSending else {
             return
+        }
+        if action == .feedClipboard {
+            _ = feedFromClipboard()
         }
         perform(flow.select(action, generation: UUID()))
     }

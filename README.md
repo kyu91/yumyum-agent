@@ -8,7 +8,7 @@ YumYum Agent is a Swift/AppKit macOS app that lets you “feed” a selected scr
 
 ## Features
 
-- One validated flow for screen captures, file selection, Finder drops, and chat input
+- One validated flow for clipboard feeding, screen captures, file selection, Finder drops, and chat input
 - Streaming responses, transcript continuity, cancellation and retry, with Reduce Motion and VoiceOver support
 - CLI discovery and revalidation using exact executable paths and local `--version`/`--help` contracts
 - App-owned `SOUL.md` response customization subordinate to safety and privacy policies
@@ -80,7 +80,7 @@ swift test \
 1. Install a supported CLI and complete its own sign-in flow.
 2. Open **Settings → Agent**, choose an agent to connect, then use **Find and register**. YumYum checks safe default locations, verifies its local command contract, and selects it as the default when ready. If it is not found, use **Install guide**; use **Choose directly** only when the executable is elsewhere. Codex must be signed in before it can become the default.
 3. If needed, grant Screen Recording, Input Monitoring, or Accessibility permission in macOS Settings.
-4. Click the pet or press `Control+Option+Space` to capture, choose files, or chat.
+4. Right-click the pet or press `Control+Option+Space` to open the action bubble; left-click the pet to instantly feed the clipboard, preferring files, then an image, then text. Keyboard and VoiceOver users can use **Feed from Clipboard** in the action bubble.
 
 Cancellation, denied permission, empty input, invalid attachments, and no agent selection never send a request. Each file is limited to 20 MB; folders, symlinks, aliases, unsupported formats, and known credential files are rejected.
 
@@ -121,6 +121,10 @@ The default English product reference is the [product specification](docs/produc
 - Switch to Korean mid-conversation and send a follow-up without resetting the session; confirm the agent's reply comes back in Korean. Switch back to English and confirm the next reply is English.
 - Quit and relaunch to confirm the explicit language choice persists.
 - With no stored choice, verify Korean is selected only when the first resolved macOS preferred language is Korean; all other cases use English.
+
+## Manual pet interaction verification
+
+- Confirm left-drag still moves the pet without feeding the clipboard, while right-click never moves the window; right-click opens the action bubble and left-click feeds the clipboard.
 
 ## Manual agent setup verification
 

@@ -227,6 +227,34 @@ public struct ChatBubbleState: Sendable {
         return ChatSubmission(id: id, input: input)
     }
 
+    public mutating func beginTextMeal(
+        _ text: String,
+        id: UUID = UUID()
+    ) throws -> ChatSubmission {
+        if case .sending = phase {
+            throw ChatBubbleStateError.busy
+        }
+        if case .capturing = phase {
+            throw ChatBubbleStateError.busy
+        }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw ChatBubbleStateError.blankDraft
+        }
+
+        let input = FeedInput(
+            text: conversationText(currentUserText: trimmed),
+            currentTurnText: trimmed,
+            cleanupTemporaryFilesAfterSubmit: false
+        )
+        messages.append(ChatMessage(role: .user, text: trimmed))
+        messages.append(
+            ChatMessage(role: .assistant, text: "", isLoading: true)
+        )
+        phase = .sending(id)
+        return ChatSubmission(id: id, input: input)
+    }
+
     public mutating func appendAssistantDelta(
         _ delta: String,
         submissionID: UUID

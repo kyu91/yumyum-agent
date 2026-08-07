@@ -252,7 +252,7 @@ public enum AppText {
         "캡처": "Capture",
         "캡처나 파일을 첨부하고 메시지를 보내면 대화가 여기에 쌓입니다.": "Attach a capture or file and send a message to start a conversation.",
         "캡처할 디스플레이를 찾지 못했습니다.": "No display is available for capture.",
-        "클릭하면 빠른 메뉴를 엽니다. 드래그하여 이동할 수 있습니다.": "Click to open the quick menu. Drag to move.",
+        "왼쪽 클릭하면 클립보드를 먹입니다. 오른쪽 클릭하면 빠른 메뉴를 엽니다. 드래그하여 이동할 수 있습니다.": "Left-click to feed the clipboard. Right-click to open the quick menu. Drag to move.",
         "테마": "Theme",
         "파일 첨부": "Attach Files",
         "파일": "Files",
