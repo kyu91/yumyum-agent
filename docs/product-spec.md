@@ -37,7 +37,7 @@ YumYum Agent is a native macOS floating pet that sends user-selected screen regi
 
 ### Quick capture
 
-1. The user clicks the pet or presses `Control+Option+Space` and chooses **Capture**.
+1. The user right-clicks the pet and chooses **Capture**.
 2. YumYum Agent hides its surfaces and shows selection overlays on all displays.
 3. The user drags a rectangle at least 8 pt wide and high, or cancels.
 4. A successful selection becomes a temporary PNG and is sent immediately as one input after validation and preview motion.

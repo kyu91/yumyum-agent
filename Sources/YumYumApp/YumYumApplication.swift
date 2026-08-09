@@ -907,20 +907,6 @@ private struct YumYumContentView: View {
         GroupBox {
             VStack(alignment: .leading, spacing: 10) {
                 Picker(
-                    AppText.localized("빠른 메뉴 전역 단축키"),
-                    selection: Binding(
-                        get: { appDelegate.shortcutChoice },
-                        set: { appDelegate.setShortcutChoice($0) }
-                    )
-                ) {
-                    ForEach(GlobalShortcutChoice.allCases) { choice in
-                        Text(choice.displayName).tag(choice)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .accessibilityHint(AppText.localized("포커스를 강제로 가져오지 않고 펫 옆 빠른 메뉴를 엽니다"))
-
-                Picker(
                     AppText.localized("클립보드 먹이기 전역 단축키"),
                     selection: Binding(
                         get: { appDelegate.clipboardFeedShortcutChoice },

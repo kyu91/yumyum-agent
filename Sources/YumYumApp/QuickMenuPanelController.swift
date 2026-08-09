@@ -273,47 +273,6 @@ enum AssistantMarkdownRenderer {
     }
 }
 
-enum GlobalShortcutChoice: String, CaseIterable, Identifiable {
-    case controlOptionSpace
-    case commandShiftSpace
-    case controlOptionReturn
-
-    static let defaultsKey = "YumYum.GlobalShortcut"
-
-    var id: String { rawValue }
-
-    var displayName: String {
-        switch self {
-        case .controlOptionSpace: "⌃⌥Space"
-        case .commandShiftSpace: "⇧⌘Space"
-        case .controlOptionReturn: "⌃⌥Return"
-        }
-    }
-
-    var keyCode: UInt16 {
-        switch self {
-        case .controlOptionSpace, .commandShiftSpace: 49
-        case .controlOptionReturn: 36
-        }
-    }
-
-    var modifiers: NSEvent.ModifierFlags {
-        switch self {
-        case .controlOptionSpace, .controlOptionReturn: [.control, .option]
-        case .commandShiftSpace: [.command, .shift]
-        }
-    }
-
-    static func load(defaults: UserDefaults = .standard) -> GlobalShortcutChoice {
-        defaults.string(forKey: defaultsKey).flatMap(Self.init(rawValue:))
-            ?? .controlOptionSpace
-    }
-
-    func save(defaults: UserDefaults = .standard) {
-        defaults.set(rawValue, forKey: Self.defaultsKey)
-    }
-}
-
 enum ClipboardFeedShortcutChoice: String, CaseIterable, Identifiable {
     case optionS
     case controlOptionS

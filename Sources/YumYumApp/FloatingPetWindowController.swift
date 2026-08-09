@@ -6,7 +6,6 @@ import YumYumCore
 @MainActor
 final class YumYumAppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     @Published private(set) var petVisibility = FloatingPetVisibilityPolicy()
-    @Published private(set) var shortcutChoice: GlobalShortcutChoice
     @Published private(set) var clipboardFeedShortcutChoice: ClipboardFeedShortcutChoice
     @Published private(set) var currentTheme: AppTheme
     @Published private(set) var currentLanguage: AppLanguage
@@ -15,7 +14,6 @@ final class YumYumAppDelegate: NSObject, NSApplicationDelegate, ObservableObject
 
     private var petWindowController: FloatingPetWindowController?
     private var quickMenuController: QuickMenuPanelController?
-    private var shortcutController: GlobalShortcutController?
     private var clipboardFeedShortcutController: GlobalShortcutController?
     private var feedFeedback: AppFeedFeedback?
     private weak var viewModel: YumYumAppViewModel?
@@ -28,7 +26,6 @@ final class YumYumAppDelegate: NSObject, NSApplicationDelegate, ObservableObject
 
     override init() {
         LegacyPreferencesMigration.migrate()
-        shortcutChoice = GlobalShortcutChoice.load()
         clipboardFeedShortcutChoice = ClipboardFeedShortcutChoice.load()
         currentTheme = AppTheme.load()
         let languageStore = AppLanguageStore()
@@ -58,7 +55,6 @@ final class YumYumAppDelegate: NSObject, NSApplicationDelegate, ObservableObject
     func applicationWillTerminate(_ notification: Notification) {
         NotificationCenter.default.removeObserver(self)
         quickMenuController?.prepareForTermination()
-        shortcutController = nil
         clipboardFeedShortcutController = nil
         Task { @MainActor [weak self] in
             await self?.shutdown()
@@ -88,7 +84,6 @@ final class YumYumAppDelegate: NSObject, NSApplicationDelegate, ObservableObject
             return
         }
         quickMenuController?.prepareForTermination()
-        shortcutController = nil
         clipboardFeedShortcutController = nil
         let viewModel = viewModel
         let task = Task { @MainActor in
@@ -147,27 +142,12 @@ final class YumYumAppDelegate: NSObject, NSApplicationDelegate, ObservableObject
         feedback.quickMenuController = quickMenuController
         self.feedFeedback = feedback
         self.quickMenuController = quickMenuController
-        shortcutController = GlobalShortcutController(
-            keyCode: shortcutChoice.keyCode,
-            modifiers: shortcutChoice.modifiers
-        ) { [weak self] in
-            self?.showQuickMenu()
-        }
         clipboardFeedShortcutController = GlobalShortcutController(
             keyCode: clipboardFeedShortcutChoice.keyCode,
             modifiers: clipboardFeedShortcutChoice.modifiers
         ) { [weak self] in
             self?.quickMenuController?.toggleStagedDraftBubble()
         }
-    }
-
-    func setShortcutChoice(_ choice: GlobalShortcutChoice) {
-        shortcutChoice = choice
-        choice.save()
-        shortcutController?.update(
-            keyCode: choice.keyCode,
-            modifiers: choice.modifiers
-        )
     }
 
     func setClipboardFeedShortcutChoice(_ choice: ClipboardFeedShortcutChoice) {
