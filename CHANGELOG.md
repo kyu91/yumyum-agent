@@ -4,6 +4,12 @@ All notable changes to this project will be documented here.
 
 ## [Unreleased]
 
+## [0.5.0]
+
+- Add a configurable global shortcut (default `Option+S`) that feeds the pet from the clipboard, same as left-click.
+- Fix Return not sending a staged draft that has an attachment but no typed text.
+- Remove the separate quick-menu global shortcut; right-click on the pet is now the only way to open the action bubble.
+
 ## [0.4.0]
 
 - Make agent chat replies follow the app's language setting instead of only the UI chrome.
