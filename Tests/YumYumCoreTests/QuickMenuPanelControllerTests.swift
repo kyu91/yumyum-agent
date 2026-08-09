@@ -757,6 +757,54 @@ struct QuickMenuPanelControllerTests {
 
     @Test
     @MainActor
+    func imageOnlyClipboardDraftSendsOnReturnExactlyOnce() async throws {
+        _ = NSApplication.shared
+        let sender = ControlledPromptSender()
+        let pet = FloatingPetWindowController {}
+        let controller = QuickMenuPanelController(
+            petController: pet,
+            viewModel: YumYumAppViewModel(fixtureProbe: UnusedFixtureProbe()),
+            workflow: FeedWorkflow(sender: sender, feedback: SilentFeedFeedback()),
+            openSettings: {}
+        )
+        defer { controller.prepareForTermination() }
+
+        #expect(controller.feedFromClipboard(pasteboard([imageForPasteboard()])))
+        #expect(controller.responsePanel.isVisible)
+        #expect(controller.chatStateForTesting.draftText.isEmpty)
+        let composer = try #require(textFields(in: controller.responsePanel.contentView).first {
+            $0.accessibilityLabel() == "인라인 채팅 메시지"
+        })
+        let fieldEditor = try #require(composer.currentEditor())
+        #expect(composer.window?.firstResponder === fieldEditor)
+
+        let firstResponder = try #require(composer.window?.firstResponder)
+        _ = firstResponder.tryToPerform(
+            #selector(NSResponder.insertNewline(_:)),
+            with: nil
+        )
+        try #require(await sender.waitForRequestCount(1))
+        #expect(await sender.requestCount == 1)
+
+        let request = try #require(await sender.requests.first)
+        let attachment = try #require(request.attachments.first)
+        #expect(request.attachments.count == 1)
+        #expect(attachment.kind == .image)
+        #expect(request.currentTurnText == "")
+        #expect(!request.text.contains(attachment.url.path))
+
+        _ = fieldEditor.tryToPerform(
+            #selector(NSResponder.insertNewline(_:)),
+            with: nil
+        )
+        #expect(await sender.requestCount == 1)
+
+        await sender.completeRequest(at: 0)
+        await controller.waitForChatSendForTesting()
+    }
+
+    @Test
+    @MainActor
     func clipboardStagingPrefersFilesOverImageAndText() async throws {
         _ = NSApplication.shared
         let directory = FileManager.default.temporaryDirectory

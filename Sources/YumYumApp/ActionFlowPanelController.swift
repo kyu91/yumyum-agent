@@ -1014,6 +1014,7 @@ final class ResponseBubblePanel: NSPanel {
 
     func beginInput() {
         acceptsKeyInput = true
+        NSApplication.shared.activate(ignoringOtherApps: true)
         makeKeyAndOrderFront(nil)
     }
 

@@ -314,6 +314,46 @@ enum GlobalShortcutChoice: String, CaseIterable, Identifiable {
     }
 }
 
+enum ClipboardFeedShortcutChoice: String, CaseIterable, Identifiable {
+    case optionS
+    case controlOptionS
+    case controlOptionV
+
+    static let defaultsKey = "YumYum.ClipboardFeedShortcut"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .optionS: "⌥S"
+        case .controlOptionS: "⌃⌥S"
+        case .controlOptionV: "⌃⌥V"
+        }
+    }
+
+    var keyCode: UInt16 {
+        switch self {
+        case .optionS, .controlOptionS: 1
+        case .controlOptionV: 9
+        }
+    }
+
+    var modifiers: NSEvent.ModifierFlags {
+        switch self {
+        case .optionS: [.option]
+        case .controlOptionS, .controlOptionV: [.control, .option]
+        }
+    }
+
+    static func load(defaults: UserDefaults = .standard) -> ClipboardFeedShortcutChoice {
+        defaults.string(forKey: defaultsKey).flatMap(Self.init(rawValue:)) ?? .optionS
+    }
+
+    func save(defaults: UserDefaults = .standard) {
+        defaults.set(rawValue, forKey: Self.defaultsKey)
+    }
+}
+
 enum AppTheme: String, CaseIterable, Identifiable {
     static let defaultsKey = "YumYum.appTheme"
 
@@ -409,19 +449,26 @@ struct AppThemePalette {
 
 @MainActor
 final class GlobalShortcutController {
-    private var choice: GlobalShortcutChoice
+    private var keyCode: UInt16
+    private var modifiers: NSEvent.ModifierFlags
     private let action: @MainActor () -> Void
     private var globalMonitor: EventMonitorToken?
     private var localMonitor: EventMonitorToken?
 
-    init(choice: GlobalShortcutChoice, action: @escaping @MainActor () -> Void) {
-        self.choice = choice
+    init(
+        keyCode: UInt16,
+        modifiers: NSEvent.ModifierFlags,
+        action: @escaping @MainActor () -> Void
+    ) {
+        self.keyCode = keyCode
+        self.modifiers = modifiers
         self.action = action
         installMonitors()
     }
 
-    func update(choice: GlobalShortcutChoice) {
-        self.choice = choice
+    func update(keyCode: UInt16, modifiers: NSEvent.ModifierFlags) {
+        self.keyCode = keyCode
+        self.modifiers = modifiers
     }
 
     private func installMonitors() {
@@ -441,11 +488,11 @@ final class GlobalShortcutController {
     }
 
     private func matches(_ event: NSEvent) -> Bool {
-        guard !event.isARepeat, event.keyCode == choice.keyCode else {
+        guard !event.isARepeat, event.keyCode == keyCode else {
             return false
         }
         return event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-            == choice.modifiers
+            == modifiers
     }
 }
 

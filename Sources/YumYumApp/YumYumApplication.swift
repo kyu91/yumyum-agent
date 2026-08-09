@@ -920,13 +920,27 @@ private struct YumYumContentView: View {
                 .pickerStyle(.segmented)
                 .accessibilityHint(AppText.localized("포커스를 강제로 가져오지 않고 펫 옆 빠른 메뉴를 엽니다"))
 
+                Picker(
+                    AppText.localized("클립보드 먹이기 전역 단축키"),
+                    selection: Binding(
+                        get: { appDelegate.clipboardFeedShortcutChoice },
+                        set: { appDelegate.setClipboardFeedShortcutChoice($0) }
+                    )
+                ) {
+                    ForEach(ClipboardFeedShortcutChoice.allCases) { choice in
+                        Text(choice.displayName).tag(choice)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .accessibilityHint(AppText.localized("클립보드를 채팅 초안에 담고 입력창을 엽니다"))
+
                 Button(AppText.localized("빠른 메뉴 지금 열기")) {
                     appDelegate.showQuickMenu()
                 }
             }
             .padding(.top, 4)
         } label: {
-            mascotSectionLabel(AppText.localized("빠른 메뉴"), symbol: "keyboard")
+            mascotSectionLabel(AppText.localized("단축키"), symbol: "keyboard")
         }
     }
 
