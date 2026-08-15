@@ -245,7 +245,9 @@ private struct YumYumContentView: View {
             await viewModel.refreshAgents(trigger: .appStart)
             await viewModel.loadSoul()
             soulProfile = viewModel.soulProfile
-            FirstLaunchOnboarding.presentOnce { showsPermissionOnboarding = true }
+            showsPermissionOnboarding = !PermissionOnboardingView(
+                theme: appDelegate.currentTheme
+            ).allRequiredPermissionsGranted
         }
         .onDisappear {
             connectionTask?.cancel()

@@ -106,6 +106,10 @@ struct PermissionOnboardingView: View {
         accessibilityGranted = isAccessibilityGranted()
         inputMonitoringGranted = isInputMonitoringGranted()
     }
+
+    var allRequiredPermissionsGranted: Bool {
+        isScreenRecordingGranted() && isAccessibilityGranted() && isInputMonitoringGranted()
+    }
 }
 
 private func promptForAccessibilityAccess() -> Bool {
