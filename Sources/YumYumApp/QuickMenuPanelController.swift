@@ -273,43 +273,69 @@ enum AssistantMarkdownRenderer {
     }
 }
 
-enum ClipboardFeedShortcutChoice: String, CaseIterable, Identifiable {
-    case optionS
-    case controlOptionS
-    case controlOptionV
-
+struct ClipboardFeedShortcut: Equatable, Sendable {
     static let defaultsKey = "YumYum.ClipboardFeedShortcut"
+    static let `default` = ClipboardFeedShortcut(keyCode: 1, modifiers: [.option], character: "S")
 
-    var id: String { rawValue }
+    let keyCode: UInt16
+    let modifiers: NSEvent.ModifierFlags
+    let character: String
 
     var displayName: String {
-        switch self {
-        case .optionS: "⌥S"
-        case .controlOptionS: "⌃⌥S"
-        case .controlOptionV: "⌃⌥V"
-        }
+        [
+            modifiers.contains(.control) ? "⌃" : nil,
+            modifiers.contains(.option) ? "⌥" : nil,
+            modifiers.contains(.shift) ? "⇧" : nil,
+            modifiers.contains(.command) ? "⌘" : nil,
+        ].compactMap { $0 }.joined() + character
     }
 
-    var keyCode: UInt16 {
-        switch self {
-        case .optionS, .controlOptionS: 1
-        case .controlOptionV: 9
+    static func recorded(from event: NSEvent) -> ClipboardFeedShortcut? {
+        let flags = event.modifierFlags.intersection([.command, .control, .option, .shift])
+        guard !flags.intersection([.command, .control, .option]).isEmpty else {
+            return nil
         }
+        let typed = event.charactersIgnoringModifiers ?? ""
+        guard !typed.isEmpty else { return nil }
+        let character = typed.trimmingCharacters(in: .whitespaces).isEmpty
+            ? "␣"
+            : typed.uppercased()
+        return ClipboardFeedShortcut(
+            keyCode: event.keyCode,
+            modifiers: flags,
+            character: character
+        )
     }
 
-    var modifiers: NSEvent.ModifierFlags {
-        switch self {
-        case .optionS: [.option]
-        case .controlOptionS, .controlOptionV: [.control, .option]
+    static func load(defaults: UserDefaults = .standard) -> ClipboardFeedShortcut {
+        guard let stored = defaults.string(forKey: defaultsKey) else { return .default }
+        switch stored {
+        case "optionS": return .default
+        case "controlOptionS":
+            return ClipboardFeedShortcut(keyCode: 1, modifiers: [.control, .option], character: "S")
+        case "controlOptionV":
+            return ClipboardFeedShortcut(keyCode: 9, modifiers: [.control, .option], character: "V")
+        default:
+            let parts = stored.split(separator: ":", maxSplits: 2, omittingEmptySubsequences: false)
+            guard parts.count == 3,
+                  let rawModifiers = UInt(parts[0]),
+                  let keyCode = UInt16(parts[1]),
+                  !parts[2].isEmpty else {
+                return .default
+            }
+            return ClipboardFeedShortcut(
+                keyCode: keyCode,
+                modifiers: NSEvent.ModifierFlags(rawValue: rawModifiers),
+                character: String(parts[2])
+            )
         }
-    }
-
-    static func load(defaults: UserDefaults = .standard) -> ClipboardFeedShortcutChoice {
-        defaults.string(forKey: defaultsKey).flatMap(Self.init(rawValue:)) ?? .optionS
     }
 
     func save(defaults: UserDefaults = .standard) {
-        defaults.set(rawValue, forKey: Self.defaultsKey)
+        defaults.set(
+            "\(modifiers.rawValue):\(keyCode):\(character)",
+            forKey: Self.defaultsKey
+        )
     }
 }
 
@@ -413,6 +439,7 @@ final class GlobalShortcutController {
     private let action: @MainActor () -> Void
     private var globalMonitor: EventMonitorToken?
     private var localMonitor: EventMonitorToken?
+    var isPaused = false
 
     init(
         keyCode: UInt16,
@@ -447,15 +474,19 @@ final class GlobalShortcutController {
     }
 
     private func matches(_ event: NSEvent) -> Bool {
-        guard !event.isARepeat, event.keyCode == keyCode else {
+        guard !isPaused, !event.isARepeat, event.keyCode == keyCode else {
             return false
         }
-        return event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        return event.modifierFlags.intersection([.command, .control, .option, .shift])
             == modifiers
     }
+
+#if DEBUG
+    func matchesForTesting(_ event: NSEvent) -> Bool { matches(event) }
+#endif
 }
 
-private final class EventMonitorToken: @unchecked Sendable {
+final class EventMonitorToken: @unchecked Sendable {
     let value: Any
 
     init(_ value: Any) {
@@ -1724,7 +1755,7 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
 }
 
 @MainActor
-private final class ChatMessageRowView: NSStackView {
+final class ChatMessageRowView: NSStackView {
     private let bubble = NSView()
     private let spacer = NSView()
     private var messageContent: NSView?
@@ -1860,7 +1891,7 @@ private final class ChatMessageRowView: NSStackView {
     }
 }
 
-private final class FlippedDocumentView: NSView {
+final class FlippedDocumentView: NSView {
     override var isFlipped: Bool { true }
 }
 

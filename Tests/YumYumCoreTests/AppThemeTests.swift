@@ -432,25 +432,16 @@ struct AppThemeTests {
 
         controller.applyTheme(.light)
 
-        let inline = try #require(descendants(of: controller.view, as: NSView.self).first {
-            $0.identifier?.rawValue == "response-inline-action-surface"
-        })
         let detail = try #require(descendants(of: controller.view, as: NSView.self).first {
             $0.identifier?.rawValue == "response-detail-action-surface"
         })
         #expect(controller.view.layer?.backgroundColor == NSColor.clear.cgColor)
-        #expect(layerBackgroundColors(in: inline).contains(
-            AppTheme.light.palette.primaryAction.cgColor
-        ))
         #expect(layerBackgroundColors(in: detail).contains(
             AppTheme.light.palette.secondaryAction.cgColor
         ))
         #expect(scroll.contentView.bounds.origin == origin)
 
         controller.applyTheme(.dark)
-        #expect(layerBackgroundColors(in: inline).contains(
-            AppTheme.dark.palette.primaryAction.cgColor
-        ))
         #expect(layerBackgroundColors(in: detail).contains(
             AppTheme.dark.palette.secondaryAction.cgColor
         ))

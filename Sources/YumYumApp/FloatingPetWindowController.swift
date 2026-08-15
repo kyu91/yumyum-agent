@@ -6,7 +6,7 @@ import YumYumCore
 @MainActor
 final class YumYumAppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     @Published private(set) var petVisibility = FloatingPetVisibilityPolicy()
-    @Published private(set) var clipboardFeedShortcutChoice: ClipboardFeedShortcutChoice
+    @Published private(set) var clipboardFeedShortcut: ClipboardFeedShortcut
     @Published private(set) var currentTheme: AppTheme
     @Published private(set) var currentLanguage: AppLanguage
 
@@ -26,7 +26,7 @@ final class YumYumAppDelegate: NSObject, NSApplicationDelegate, ObservableObject
 
     override init() {
         LegacyPreferencesMigration.migrate()
-        clipboardFeedShortcutChoice = ClipboardFeedShortcutChoice.load()
+        clipboardFeedShortcut = ClipboardFeedShortcut.load()
         currentTheme = AppTheme.load()
         let languageStore = AppLanguageStore()
         let language = languageStore.load()
@@ -143,20 +143,24 @@ final class YumYumAppDelegate: NSObject, NSApplicationDelegate, ObservableObject
         self.feedFeedback = feedback
         self.quickMenuController = quickMenuController
         clipboardFeedShortcutController = GlobalShortcutController(
-            keyCode: clipboardFeedShortcutChoice.keyCode,
-            modifiers: clipboardFeedShortcutChoice.modifiers
+            keyCode: clipboardFeedShortcut.keyCode,
+            modifiers: clipboardFeedShortcut.modifiers
         ) { [weak self] in
             self?.quickMenuController?.toggleStagedDraftBubble()
         }
     }
 
-    func setClipboardFeedShortcutChoice(_ choice: ClipboardFeedShortcutChoice) {
-        clipboardFeedShortcutChoice = choice
-        choice.save()
+    func setClipboardFeedShortcut(_ shortcut: ClipboardFeedShortcut) {
+        clipboardFeedShortcut = shortcut
+        shortcut.save()
         clipboardFeedShortcutController?.update(
-            keyCode: choice.keyCode,
-            modifiers: choice.modifiers
+            keyCode: shortcut.keyCode,
+            modifiers: shortcut.modifiers
         )
+    }
+
+    func setShortcutRecording(_ isRecording: Bool) {
+        clipboardFeedShortcutController?.isPaused = isRecording
     }
 
     func setTheme(_ theme: AppTheme) {

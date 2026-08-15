@@ -109,6 +109,7 @@ The default English product reference is the [product specification](docs/produc
 
 - Current connectors are analysis-only. External-change UI and execution wiring are not implemented.
 - Local builds and **Unsigned Preview** DMGs are not signed or notarized. No App Store build or automatic updates are provided.
+- Because the local `.app` bundle is unsigned/ad-hoc-signed, macOS re-keys TCC grants on every rebuild; re-grant Input Monitoring, Accessibility, and Screen Recording after each `./scripts/build-app.sh` run.
 - Real model responses depend on the external CLI installation, sign-in, network, and provider state.
 - Screen capture supports rectangular selection only. The global shortcut may require macOS privacy permission.
 - Regular `YumYum-Capture-*` files left by abnormal termination are cleaned up at the next app launch on a best-effort basis.
@@ -125,7 +126,8 @@ The default English product reference is the [product specification](docs/produc
 ## Manual pet interaction verification
 
 - Confirm left-drag still moves the pet without staging the clipboard, while right-click never moves the window; right-click opens the action bubble and left-click shows the compact response bubble with the clipboard staged in the chat draft without sending until Return. Staged images show a thumbnail with a remove control. Clicking the pet again while the bubble is open hides it without touching the draft; clicking once more reopens it showing the same staged content instead of reading the clipboard again.
-- With another app frontmost, copy an image, press the clipboard-feed shortcut, confirm the response bubble opens focused, and press Return to send the message.
+- In **System Settings → Privacy & Security**, grant both Accessibility and Input Monitoring, relaunch the app, then with another app frontmost copy an image, press the clipboard-feed shortcut, confirm the response bubble opens focused, and press Return to send the message.
+- Send two follow-ups from the compact bubble; confirm every turn stacks and scrolls inside it, closing and reopening preserves the transcript, and **New Session** in the detailed chat window clears it.
 
 ## Manual agent setup verification
 

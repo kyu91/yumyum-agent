@@ -129,10 +129,11 @@ private struct YumYumMenu: View {
     @ObservedObject var appDelegate: YumYumAppDelegate
 
     var body: some View {
-        Button(AppText.localized("YumYum Agent 열기")) {
+        Button(AppText.localized("설정…")) {
             NSApplication.shared.activate(ignoringOtherApps: true)
             openWindow(id: "main")
         }
+        .keyboardShortcut(",", modifiers: .command)
 
         Toggle(
             AppText.localized("플로팅 펫 보이기"),
@@ -198,6 +199,7 @@ private struct YumYumContentView: View {
     @State private var confirmsSoulReset = false
     @State private var confirmsCodexLogin = false
     @State private var codexLoginApproval: CodexLoginApprovalRequest?
+    @State private var showsPermissionOnboarding = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -243,6 +245,7 @@ private struct YumYumContentView: View {
             await viewModel.refreshAgents(trigger: .appStart)
             await viewModel.loadSoul()
             soulProfile = viewModel.soulProfile
+            FirstLaunchOnboarding.presentOnce { showsPermissionOnboarding = true }
         }
         .onDisappear {
             connectionTask?.cancel()
@@ -285,6 +288,9 @@ private struct YumYumContentView: View {
             }
         } message: {
             Text(codexConfirmationMessage)
+        }
+        .sheet(isPresented: $showsPermissionOnboarding) {
+            PermissionOnboardingView(theme: appDelegate.currentTheme)
         }
     }
 
@@ -906,22 +912,29 @@ private struct YumYumContentView: View {
     private var shortcutSection: some View {
         GroupBox {
             VStack(alignment: .leading, spacing: 10) {
-                Picker(
-                    AppText.localized("클립보드 먹이기 전역 단축키"),
-                    selection: Binding(
-                        get: { appDelegate.clipboardFeedShortcutChoice },
-                        set: { appDelegate.setClipboardFeedShortcutChoice($0) }
+                HStack {
+                    Text(AppText.localized("클립보드 먹이기 전역 단축키"))
+                    Spacer()
+                    ShortcutRecorderField(
+                        shortcut: appDelegate.clipboardFeedShortcut,
+                        onBeginRecording: { appDelegate.setShortcutRecording(true) },
+                        onEndRecording: { appDelegate.setShortcutRecording(false) },
+                        onRecord: { appDelegate.setClipboardFeedShortcut($0) }
                     )
-                ) {
-                    ForEach(ClipboardFeedShortcutChoice.allCases) { choice in
-                        Text(choice.displayName).tag(choice)
+                    .frame(width: 132, height: 24)
+                    Button(AppText.localized("기본값")) {
+                        appDelegate.setClipboardFeedShortcut(.default)
                     }
                 }
-                .pickerStyle(.segmented)
-                .accessibilityHint(AppText.localized("클립보드를 채팅 초안에 담고 입력창을 엽니다"))
+                Text(AppText.localized("⌃ ⌥ ⌘ 중 하나 이상을 포함한 조합만 등록할 수 있습니다. Esc로 취소합니다."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 Button(AppText.localized("빠른 메뉴 지금 열기")) {
                     appDelegate.showQuickMenu()
+                }
+                Button(AppText.localized("권한 확인")) {
+                    showsPermissionOnboarding = true
                 }
             }
             .padding(.top, 4)

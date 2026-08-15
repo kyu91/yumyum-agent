@@ -33,6 +33,8 @@ final class QuickMenuPanelController: NSObject {
     private var captureGeneration: UUID?
     private var captureShouldRestorePet = false
     private var fileGeneration: UUID?
+    private var outsideClickMonitor: EventMonitorToken?
+    private var lastFedClipboard: String?
     private var activeOpenPanel: NSOpenPanel?
     private var animationPanel: NSPanel?
     private var thinkingTask: Task<Void, Never>?
@@ -108,6 +110,9 @@ final class QuickMenuPanelController: NSObject {
         thinkingPanel.contentViewController = thinkingViewController
         Self.configure(responsePanel, level: .floating, title: AppText.localized("YumYum Agent 답변"))
         responsePanel.contentViewController = responseViewController
+        responseViewController.onClose = { [weak self] in
+            self?.closeResponseBubble()
+        }
         responseViewController.onOpenChat = { [weak self] in
             self?.openChatFromResponse()
         }
@@ -126,9 +131,6 @@ final class QuickMenuPanelController: NSObject {
         }
         responseViewController.onRemoveAttachment = { [weak self] id in
             self?.chatController.removeAttachment(id: id)
-        }
-        responseViewController.onPreferredSizeChanged = { [weak self] in
-            self?.updateResponseFrame()
         }
         chatController.onStateChanged = { [weak self] state in
             self?.responseViewController.renderChat(state)
@@ -169,6 +171,11 @@ final class QuickMenuPanelController: NSObject {
                 self?.feedDroppedFiles(urls) == true
             }
         )
+        outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown]
+        ) { [weak self] _ in
+            Task { @MainActor in self?.closeResponseBubble() }
+        }.map(EventMonitorToken.init)
     }
 
     deinit {
@@ -257,7 +264,7 @@ final class QuickMenuPanelController: NSObject {
     }
 
     @discardableResult
-    func feedFromClipboard(_ pasteboard: NSPasteboard = .general) -> Bool {
+    private func stageFromClipboard(_ pasteboard: NSPasteboard = .general) -> Bool {
         guard presentationEnabled,
               !chatController.isSending,
               captureTask == nil,
@@ -293,11 +300,17 @@ final class QuickMenuPanelController: NSObject {
         return presentStagedDraftBubble()
     }
 
+    @discardableResult
+    func feedFromClipboard(_ pasteboard: NSPasteboard = .general) -> Bool {
+        guard stageFromClipboard(pasteboard) else { return false }
+        lastFedClipboard = Self.clipboardToken(pasteboard)
+        return true
+    }
+
     func toggleStagedDraftBubble(_ pasteboard: NSPasteboard = .general) {
         guard presentationEnabled else { return }
         if responsePanel.isVisible {
-            responsePanel.orderOut(nil)
-            flow.returnToPet()
+            closeResponseBubble()
             return
         }
         let hasPendingDraft = !chatController.state.draftAttachments.isEmpty
@@ -305,14 +318,19 @@ final class QuickMenuPanelController: NSObject {
                 .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         if hasPendingDraft {
             presentStagedDraftBubble()
+        } else if Self.clipboardToken(pasteboard) != lastFedClipboard,
+                  feedFromClipboard(pasteboard) {
+            return
         } else {
-            feedFromClipboard(pasteboard)
+            presentStagedDraftBubble(content: Self.emptyDraftContent())
         }
     }
 
     @discardableResult
-    private func presentStagedDraftBubble() -> Bool {
-        showResponse(Self.stagedDraftContent())
+    private func presentStagedDraftBubble(
+        content: PetResponseContent = QuickMenuPanelController.stagedDraftContent()
+    ) -> Bool {
+        showResponse(content)
         if responsePanel.isVisible {
             responseViewController.beginInlineCompose()
         }
@@ -324,6 +342,17 @@ final class QuickMenuPanelController: NSObject {
             english: "Staged for chat. Add an instruction and press Return.",
             korean: "채팅 초안에 담았어요. 지침을 입력하고 Return을 누르세요."
         ))
+    }
+
+    private static func emptyDraftContent() -> PetResponseContent {
+        PetResponsePolicy.content(for: AppText.localized(
+            english: "Type a message and press Return.",
+            korean: "메시지를 입력하고 Return을 누르세요."
+        ))
+    }
+
+    private static func clipboardToken(_ pasteboard: NSPasteboard) -> String {
+        "\(pasteboard.name.rawValue)#\(pasteboard.changeCount)"
     }
 
     private static func writeTemporaryPNG(from pasteboard: NSPasteboard) -> URL? {
@@ -595,6 +624,12 @@ final class QuickMenuPanelController: NSObject {
         responsePanel.orderOut(nil)
         stopThinking()
         removeAnimationPreview()
+        flow.returnToPet()
+    }
+
+    private func closeResponseBubble() {
+        guard responsePanel.isVisible else { return }
+        responsePanel.orderOut(nil)
         flow.returnToPet()
     }
 
@@ -1423,6 +1458,7 @@ final class ThinkingBubbleViewController: NSViewController {
 
 @MainActor
 final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate {
+    private static let autoScrollThreshold: CGFloat = 24
     private static let panelWidth: CGFloat = 360
     private static let bodyWidth: CGFloat = 312
     private static let minBodyHeight: CGFloat = 44
@@ -1435,17 +1471,27 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
     private static let attachmentRowHeight: CGFloat = 36
     private static let attachmentThumbnailSize: CGFloat = 28
 
+    var onClose: (() -> Void)?
     var onOpenChat: (() -> Void)?
     var onRetry: (() -> Void)?
     var onDraftChanged: ((String) -> Void)?
     var onSend: (() -> Void)?
     var onRequestInput: (() -> Void)?
     var onRemoveAttachment: ((UUID) -> Void)?
-    var onPreferredSizeChanged: (() -> Void)?
 
-    private let label = NSTextField(wrappingLabelWithString: "")
+    private let transcriptStack = NSStackView()
+    private let statusLabel = NSTextField(wrappingLabelWithString: "")
     private let responseScroll = NSScrollView()
-    private let inlineToggleButton = ResponseActionButton(title: AppText.localized("채팅 입력하기"))
+    private let closeButton = NSButton(
+        image: NSImage(
+            systemSymbolName: "xmark.circle.fill",
+            accessibilityDescription: AppText.localized("닫기")
+        )!.withSymbolConfiguration(
+            NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
+        )!,
+        target: nil,
+        action: nil
+    )
     private let openChatButton = ResponseActionButton(title: AppText.localized("채팅창 상세"))
     private let retryButton = NSButton(title: AppText.localized("재시도"), target: nil, action: nil)
     private let retryRow = NSStackView()
@@ -1454,13 +1500,11 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
     private let attachmentStack = NSStackView()
     private let inlineStack = NSStackView()
     private let bodySurface = ResponseSurfaceView(identifier: "response-body-surface")
-    private let inlineActionSurface = ResponseSurfaceView(identifier: "response-inline-action-surface")
     private let composerSurface = ResponseSurfaceView(identifier: "response-inline-composer-surface")
     private let detailActionSurface = ResponseSurfaceView(identifier: "response-detail-action-surface")
     private var responseHeightConstraint: NSLayoutConstraint?
     private var composerHeightConstraint: NSLayoutConstraint?
     private var surfaceStack: NSStackView?
-    private var isInlineExpanded = false
     private var content = PetResponseContent(
         fullText: "",
         displayText: "",
@@ -1469,6 +1513,7 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
     )
     private var chatState = ChatBubbleState()
     private var renderedAttachments: [ChatDraftAttachment] = []
+    private var renderedMessages: [ChatMessage] = []
     private var theme = AppTheme.dark
     private var language = AppText.language
 
@@ -1487,15 +1532,11 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
         )
     }
 
-    private var measuredTextHeight: CGFloat {
-        ceil(renderedText.boundingRect(
-            with: CGSize(width: Self.bodyWidth, height: .greatestFiniteMagnitude),
-            options: [.usesLineFragmentOrigin, .usesFontLeading]
-        ).height) + 2
+    private var measuredTranscriptHeight: CGFloat {
+        transcriptStack.fittingSize.height
     }
 
     private var composerSurfaceHeight: CGFloat {
-        guard isInlineExpanded else { return 0 }
         let attachmentHeight = attachmentStack.isHidden
             ? 0
             : Self.attachmentRowHeight + inlineStack.spacing
@@ -1503,10 +1544,7 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
     }
 
     private var chromeHeight: CGFloat {
-        let fixed = Self.actionHeight * 2 + Self.stackSpacing * 2
-        return isInlineExpanded
-            ? fixed + composerSurfaceHeight + Self.stackSpacing
-            : fixed
+        Self.actionHeight + Self.stackSpacing * 2 + composerSurfaceHeight
     }
 
     private var retryHeight: CGFloat {
@@ -1519,7 +1557,7 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
             max(
                 Self.minBodyHeight + Self.bodyInsets + chromeHeight + retryHeight
                     + Self.surfaceInset * 2,
-                measuredTextHeight + Self.bodyInsets + chromeHeight + retryHeight
+                    measuredTranscriptHeight + Self.bodyInsets + chromeHeight + retryHeight
                     + Self.surfaceInset * 2
             )
         )
@@ -1538,19 +1576,28 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
         root.wantsLayer = true
         root.layer?.backgroundColor = NSColor.clear.cgColor
         bodySurface.content.onClick = { [weak self] in self?.onOpenChat?() }
+        composerSurface.content.onClick = { [weak self] in self?.beginInlineCompose() }
         bodySurface.setAccessibilityElement(true)
         bodySurface.setAccessibilityRole(.group)
         bodySurface.setAccessibilityHelp(AppText.localized("누르면 전체 채팅을 엽니다."))
 
-        label.font = .systemFont(ofSize: 13.5)
-        label.maximumNumberOfLines = 0
-        label.lineBreakMode = .byWordWrapping
-        label.setContentCompressionResistancePriority(.required, for: .vertical)
+        transcriptStack.orientation = .vertical
+        transcriptStack.alignment = .leading
+        transcriptStack.spacing = 8
+        transcriptStack.edgeInsets = NSEdgeInsets(top: 2, left: 0, bottom: 2, right: 0)
+        transcriptStack.translatesAutoresizingMaskIntoConstraints = false
+        transcriptStack.setAccessibilityElement(true)
+        transcriptStack.setAccessibilityRole(.list)
+        transcriptStack.setAccessibilityLabel(AppText.localized("대화 내용"))
 
-        let document = ResponseDocumentView()
+        statusLabel.font = .systemFont(ofSize: 13.5)
+        statusLabel.maximumNumberOfLines = 0
+        statusLabel.lineBreakMode = .byWordWrapping
+        statusLabel.setContentCompressionResistancePriority(.required, for: .vertical)
+
+        let document = FlippedDocumentView()
         document.translatesAutoresizingMaskIntoConstraints = false
-        label.translatesAutoresizingMaskIntoConstraints = false
-        document.addSubview(label)
+        document.addSubview(transcriptStack)
         responseScroll.documentView = document
         responseScroll.hasVerticalScroller = true
         responseScroll.autohidesScrollers = true
@@ -1561,21 +1608,23 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
         )
         NSLayoutConstraint.activate([
             document.leadingAnchor.constraint(equalTo: responseScroll.contentView.leadingAnchor),
-            document.trailingAnchor.constraint(equalTo: responseScroll.contentView.trailingAnchor),
             document.topAnchor.constraint(equalTo: responseScroll.contentView.topAnchor),
-            document.widthAnchor.constraint(equalTo: responseScroll.contentView.widthAnchor),
-            label.leadingAnchor.constraint(equalTo: document.leadingAnchor),
-            label.trailingAnchor.constraint(equalTo: document.trailingAnchor),
-            label.topAnchor.constraint(equalTo: document.topAnchor),
-            label.bottomAnchor.constraint(equalTo: document.bottomAnchor),
+            document.widthAnchor.constraint(equalToConstant: Self.bodyWidth),
+            transcriptStack.leadingAnchor.constraint(equalTo: document.leadingAnchor),
+            transcriptStack.trailingAnchor.constraint(equalTo: document.trailingAnchor),
+            transcriptStack.topAnchor.constraint(equalTo: document.topAnchor),
+            transcriptStack.bottomAnchor.constraint(equalTo: document.bottomAnchor),
         ])
 
+        closeButton.target = self
+        closeButton.action = #selector(closePressed)
+        closeButton.isBordered = false
+        closeButton.contentTintColor = .secondaryLabelColor
+        closeButton.setAccessibilityLabel(AppText.localized("답변 말풍선 닫기"))
+        closeButton.translatesAutoresizingMaskIntoConstraints = false
         openChatButton.target = self
         openChatButton.action = #selector(openChatPressed)
         openChatButton.setAccessibilityLabel(AppText.localized("전체 답변을 채팅에서 열기"))
-        inlineToggleButton.target = self
-        inlineToggleButton.action = #selector(toggleInline)
-        inlineToggleButton.setAccessibilityLabel(AppText.localized("응답 말풍선에서 채팅 입력하기"))
         retryButton.target = self
         retryButton.action = #selector(retryPressed)
         retryButton.bezelStyle = .rounded
@@ -1623,11 +1672,9 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
             responseScroll.widthAnchor.constraint(equalTo: bodyStack.widthAnchor),
             retryRow.widthAnchor.constraint(equalTo: bodyStack.widthAnchor),
         ])
-        inlineActionSurface.content.addSubview(inlineToggleButton)
         composerSurface.content.addSubview(inlineStack)
         detailActionSurface.content.addSubview(openChatButton)
         for (child, surface) in [
-            (inlineToggleButton, inlineActionSurface),
             (inlineStack, composerSurface),
             (openChatButton, detailActionSurface),
         ] {
@@ -1643,7 +1690,6 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
         let stack = NSStackView(views: [
             bodySurface,
             composerSurface,
-            inlineActionSurface,
             detailActionSurface,
         ])
         stack.orientation = .vertical
@@ -1651,18 +1697,21 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
         stack.spacing = Self.stackSpacing
         stack.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(stack)
+        root.addSubview(closeButton)
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: Self.surfaceInset),
             stack.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -Self.surfaceInset),
             stack.topAnchor.constraint(equalTo: root.topAnchor, constant: Self.surfaceInset),
             stack.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -Self.surfaceInset),
             bodySurface.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            inlineActionSurface.widthAnchor.constraint(equalToConstant: 164),
             composerSurface.widthAnchor.constraint(equalTo: stack.widthAnchor),
             detailActionSurface.widthAnchor.constraint(equalToConstant: 164),
-            inlineActionSurface.heightAnchor.constraint(equalToConstant: Self.actionHeight),
             detailActionSurface.heightAnchor.constraint(equalToConstant: Self.actionHeight),
             composer.heightAnchor.constraint(equalToConstant: 28),
+            closeButton.topAnchor.constraint(equalTo: bodySurface.topAnchor, constant: 6),
+            closeButton.trailingAnchor.constraint(equalTo: bodySurface.trailingAnchor, constant: -6),
+            closeButton.widthAnchor.constraint(equalToConstant: 16),
+            closeButton.heightAnchor.constraint(equalToConstant: 16),
         ])
         let composerHeight = composerSurface.heightAnchor.constraint(
             equalToConstant: composerSurfaceHeight
@@ -1689,21 +1738,18 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
         for surface in [bodySurface, composerSurface] {
             surface.applyTheme(theme, color: theme.palette.surface, opaque: opaqueSurface)
         }
-        inlineActionSurface.applyTheme(
-            theme,
-            color: theme.palette.primaryAction,
-            opaque: true
-        )
         detailActionSurface.applyTheme(
             theme,
             color: theme.palette.secondaryAction,
             opaque: true
         )
-        inlineToggleButton.contentTintColor = .white
         openChatButton.contentTintColor = theme == .light ? theme.palette.text : .white
         renderedAttachments = []
         renderChat(chatState)
         render(content, resetScroll: false)
+        transcriptStack.arrangedSubviews
+            .compactMap { $0 as? ChatMessageRowView }
+            .forEach { $0.applyTheme(theme) }
         responseScroll.contentView.scroll(to: scrollOrigin)
         responseScroll.reflectScrolledClipView(responseScroll.contentView)
     }
@@ -1711,20 +1757,17 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
     func render(_ content: PetResponseContent, resetScroll: Bool = true) {
         self.content = content
         guard isViewLoaded else { return }
-        label.attributedStringValue = renderedText
+        statusLabel.attributedStringValue = renderedText
+        statusLabel.textColor = content.isError ? theme.palette.error : theme.palette.text
         openChatButton.isHidden = false
         retryButton.isHidden = !content.showsRetry
         retryRow.isHidden = !content.showsRetry
-        inlineToggleButton.isHidden = false
-        composerSurface.isHidden = !isInlineExpanded
+        rebuildTranscript()
+        renderedMessages = chatState.messages
         updateLayout()
-        responseScroll.hasVerticalScroller = measuredTextHeight > visibleTextHeight
+        responseScroll.hasVerticalScroller = measuredTranscriptHeight > visibleTextHeight
         if resetScroll {
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                self.responseScroll.contentView.scroll(to: .zero)
-                self.responseScroll.reflectScrolledClipView(self.responseScroll.contentView)
-            }
+            finishTranscriptUpdate(autoScroll: true)
         }
         bodySurface.setAccessibilityRole(
             content.showsOpenChat || content.showsRetry ? .group : .button
@@ -1737,6 +1780,7 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
         bodySurface.setAccessibilityValue(content.displayText(language: language))
     }
 
+    @objc private func closePressed() { onClose?() }
     @objc private func openChatPressed() { onOpenChat?() }
     @objc private func retryPressed() { onRetry?() }
 
@@ -1755,7 +1799,65 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
             || !attachments.isEmpty
         composer.isEnabled = !state.isSending
         sendButton.isEnabled = hasDraft && !state.isSending
+        let shouldAutoScroll = isNearTranscriptBottom
+        responseScroll.hasVerticalScroller = measuredTranscriptHeight > visibleTextHeight
+        guard state.messages != renderedMessages else {
+            updateLayout()
+            return
+        }
+        rebuildTranscript()
+        renderedMessages = state.messages
         updateLayout()
+        finishTranscriptUpdate(autoScroll: shouldAutoScroll)
+    }
+
+    private var showsStatusLabel: Bool {
+        content.isError || chatState.messages.isEmpty
+    }
+
+    private var isNearTranscriptBottom: Bool {
+        guard let document = responseScroll.documentView else { return true }
+        let distance = document.bounds.maxY - responseScroll.contentView.bounds.maxY
+        return distance <= Self.autoScrollThreshold
+    }
+
+    private func finishTranscriptUpdate(autoScroll: Bool) {
+        view.layoutSubtreeIfNeeded()
+        guard autoScroll else { return }
+        scrollToLatest()
+    }
+
+    private func scrollToLatest() {
+        guard let document = responseScroll.documentView else { return }
+        responseScroll.contentView.scroll(
+            to: CGPoint(
+                x: 0,
+                y: max(0, document.bounds.height - responseScroll.contentView.bounds.height)
+            )
+        )
+        responseScroll.reflectScrolledClipView(responseScroll.contentView)
+    }
+
+    private func rebuildTranscript() {
+        transcriptStack.arrangedSubviews.forEach {
+            transcriptStack.removeArrangedSubview($0)
+            $0.removeFromSuperview()
+        }
+        for message in chatState.messages {
+            let row = ChatMessageRowView(
+                message: message,
+                isStreaming: message.isLoading,
+                theme: theme,
+                loadingText: AppText.localized("응답 생성 중")
+            )
+            transcriptStack.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: transcriptStack.widthAnchor, constant: -8).isActive = true
+        }
+        if showsStatusLabel {
+            transcriptStack.addArrangedSubview(statusLabel)
+            statusLabel.widthAnchor.constraint(equalTo: transcriptStack.widthAnchor, constant: -8).isActive = true
+        }
+        transcriptStack.layoutSubtreeIfNeeded()
     }
 
     private func rebuildAttachments(_ attachments: [ChatDraftAttachment]) {
@@ -1831,10 +1933,10 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
 
     func fitPanelHeight(_ height: CGFloat) {
         composerHeightConstraint?.constant = composerSurfaceHeight
-        let surfaceCount: CGFloat = isInlineExpanded ? 4 : 3
+        let surfaceCount: CGFloat = 3
         let gapCount = surfaceCount - 1
         let fixedHeight = Self.surfaceInset * 2 + Self.bodyInsets + retryHeight
-            + Self.actionHeight * 2 + composerSurfaceHeight
+            + Self.actionHeight + composerSurfaceHeight
         let spacing = min(Self.stackSpacing, max(0, (height - fixedHeight) / gapCount))
         surfaceStack?.spacing = spacing
         responseHeightConstraint?.constant = max(
@@ -1845,20 +1947,20 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
     }
 
     func resetActionInteractionState() {
-        inlineToggleButton.resetInteractionState()
         openChatButton.resetInteractionState()
     }
 
     func applyLanguage(_ language: AppLanguage = AppText.language) {
         self.language = language
-        inlineToggleButton.title = AppText.localized(english: "Reply", korean: "채팅 입력하기", language: language)
+        closeButton.image = NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: AppText.localized("닫기", language: language))?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold))
+        closeButton.setAccessibilityLabel(AppText.localized("답변 말풍선 닫기", language: language))
         openChatButton.title = AppText.localized(english: "Open Chat", korean: "채팅창 상세", language: language)
         retryButton.title = AppText.localized(english: "Retry", korean: "재시도", language: language)
         sendButton.title = AppText.localized(english: "Send", korean: "전송", language: language)
         composer.placeholderString = AppText.localized(english: "Message", korean: "메시지 입력", language: language)
         bodySurface.setAccessibilityHelp(AppText.localized("누르면 전체 채팅을 엽니다.", language: language))
         openChatButton.setAccessibilityLabel(AppText.localized("전체 답변을 채팅에서 열기", language: language))
-        inlineToggleButton.setAccessibilityLabel(AppText.localized("응답 말풍선에서 채팅 입력하기", language: language))
         retryButton.setAccessibilityLabel(AppText.localized("마지막 입력 재시도", language: language))
         composer.setAccessibilityLabel(AppText.localized("인라인 채팅 메시지", language: language))
         composer.setAccessibilityHelp(AppText.localized("Return을 눌러 전송합니다", language: language))
@@ -1868,6 +1970,9 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
         render(content, resetScroll: false)
         renderedAttachments = []
         renderChat(chatState)
+        transcriptStack.arrangedSubviews
+            .compactMap { $0 as? ChatMessageRowView }
+            .forEach { $0.applyLanguage(language) }
         responseScroll.contentView.scroll(to: scrollOrigin)
         responseScroll.reflectScrolledClipView(responseScroll.contentView)
     }
@@ -1903,28 +2008,8 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
     }
 
     func beginInlineCompose() {
-        guard isInlineExpanded else {
-            toggleInline()
-            return
-        }
         onRequestInput?()
         view.window?.makeFirstResponder(composer)
-    }
-
-    @objc
-    private func toggleInline() {
-        if isInlineExpanded {
-            view.window?.makeFirstResponder(inlineToggleButton)
-        }
-        isInlineExpanded.toggle()
-        inlineToggleButton.state = isInlineExpanded ? .on : .off
-        composerSurface.isHidden = !isInlineExpanded
-        updateLayout()
-        onPreferredSizeChanged?()
-        if isInlineExpanded {
-            onRequestInput?()
-            view.window?.makeFirstResponder(composer)
-        }
     }
 
     @objc
@@ -1933,10 +2018,6 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
         guard sendButton.isEnabled else { return }
         onSend?()
     }
-}
-
-private final class ResponseDocumentView: NSView {
-    override var isFlipped: Bool { true }
 }
 
 private final class ResponseActionButton: NSButton {

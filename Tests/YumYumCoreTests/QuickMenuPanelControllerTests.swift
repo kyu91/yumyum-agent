@@ -6,6 +6,121 @@ import YumYumCore
 extension AppGlobalStateTests {
 @Suite
 struct QuickMenuPanelControllerTests {
+    @Test
+    @MainActor
+    func globalShortcutMatchesDespiteCapsLockAndFunctionFlags() throws {
+        _ = NSApplication.shared
+        let controller = GlobalShortcutController(
+            keyCode: 1,
+            modifiers: [.option]
+        ) {}
+        let event = try keyEvent(
+            modifierFlags: [.option, .capsLock, .function],
+            keyCode: 1
+        )
+
+        #expect(controller.matchesForTesting(event))
+    }
+
+    @Test
+    @MainActor
+    func pausedGlobalShortcutIgnoresItsOwnCombination() throws {
+        _ = NSApplication.shared
+        let controller = GlobalShortcutController(
+            keyCode: 1,
+            modifiers: [.option]
+        ) {}
+        controller.isPaused = true
+        let event = try keyEvent(modifierFlags: [.option], keyCode: 1)
+
+        #expect(!controller.matchesForTesting(event))
+    }
+
+    @Test
+    @MainActor
+    func recordedShortcutRejectsBareAndShiftOnlyCombinations() throws {
+        _ = NSApplication.shared
+        let bare = try keyEvent(modifierFlags: [], keyCode: 1)
+        let shift = try keyEvent(modifierFlags: [.shift], keyCode: 1)
+        let empty = try keyEvent(
+            modifierFlags: [.option],
+            characters: "",
+            charactersIgnoringModifiers: "",
+            keyCode: 1
+        )
+        let valid = try keyEvent(
+            modifierFlags: [.control, .option, .capsLock],
+            characters: "s",
+            charactersIgnoringModifiers: "s",
+            keyCode: 1
+        )
+
+        #expect(ClipboardFeedShortcut.recorded(from: bare) == nil)
+        #expect(ClipboardFeedShortcut.recorded(from: shift) == nil)
+        #expect(ClipboardFeedShortcut.recorded(from: empty) == nil)
+        let recorded = try #require(ClipboardFeedShortcut.recorded(from: valid))
+        #expect(recorded.character == "S")
+        #expect(recorded.modifiers == [.control, .option])
+        #expect(recorded.displayName == "⌃⌥S")
+    }
+
+    @Test
+    func customShortcutRoundTripsThroughDefaults() throws {
+        let suite = try makeDefaults()
+        defer { suite.remove() }
+        let shortcut = ClipboardFeedShortcut(
+            keyCode: 9,
+            modifiers: [.command, .shift],
+            character: ":"
+        )
+
+        shortcut.save(defaults: suite.defaults)
+
+        #expect(ClipboardFeedShortcut.load(defaults: suite.defaults) == shortcut)
+    }
+
+    @Test
+    func legacyShortcutRawValuesMigrateToTheirKeyCodes() throws {
+        let suite = try makeDefaults()
+        defer { suite.remove() }
+
+        suite.defaults.set("optionS", forKey: ClipboardFeedShortcut.defaultsKey)
+        #expect(ClipboardFeedShortcut.load(defaults: suite.defaults) == .default)
+        suite.defaults.set("controlOptionS", forKey: ClipboardFeedShortcut.defaultsKey)
+        #expect(ClipboardFeedShortcut.load(defaults: suite.defaults) == ClipboardFeedShortcut(
+            keyCode: 1,
+            modifiers: [.control, .option],
+            character: "S"
+        ))
+        suite.defaults.set("controlOptionV", forKey: ClipboardFeedShortcut.defaultsKey)
+        #expect(ClipboardFeedShortcut.load(defaults: suite.defaults) == ClipboardFeedShortcut(
+            keyCode: 9,
+            modifiers: [.control, .option],
+            character: "V"
+        ))
+    }
+
+    @Test
+    @MainActor
+    func settingAShortcutUpdatesTheInstalledMonitor() throws {
+        _ = NSApplication.shared
+        let controller = GlobalShortcutController(
+            keyCode: ClipboardFeedShortcut.default.keyCode,
+            modifiers: ClipboardFeedShortcut.default.modifiers
+        ) {}
+        let oldEvent = try keyEvent(modifierFlags: [.option], keyCode: 1)
+        let newEvent = try keyEvent(
+            modifierFlags: [.control, .option],
+            keyCode: 9
+        )
+        let newShortcut = try #require(ClipboardFeedShortcut.recorded(from: newEvent))
+
+        controller.update(keyCode: newShortcut.keyCode, modifiers: newShortcut.modifiers)
+
+        #expect(!controller.matchesForTesting(oldEvent))
+        #expect(controller.matchesForTesting(newEvent))
+    }
+
     @Test(arguments: AppTheme.allCases)
     func actionRowColorsAreOpaqueDistinctAndReadable(theme: AppTheme) throws {
         let normal = ActionRowAppearance.resolve(theme: theme)
@@ -251,6 +366,43 @@ struct QuickMenuPanelControllerTests {
     }
 
     @MainActor
+    private func keyEvent(
+        modifierFlags: NSEvent.ModifierFlags,
+        characters: String = "s",
+        charactersIgnoringModifiers: String? = "s",
+        keyCode: UInt16
+    ) throws -> NSEvent {
+        try #require(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: modifierFlags,
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: characters,
+            charactersIgnoringModifiers: charactersIgnoringModifiers ?? "",
+            isARepeat: false,
+            keyCode: keyCode
+        ))
+    }
+
+    private func makeDefaults() throws -> DefaultsSuite {
+        let name = "QuickMenuPanelControllerTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defaults.removePersistentDomain(forName: name)
+        return DefaultsSuite(name: name, defaults: defaults)
+    }
+
+    private struct DefaultsSuite {
+        let name: String
+        let defaults: UserDefaults
+
+        func remove() {
+            defaults.removePersistentDomain(forName: name)
+        }
+    }
+
+    @MainActor
     private func imageForPasteboard() -> NSImage {
         let image = NSImage(size: CGSize(width: 4, height: 4))
         image.lockFocus()
@@ -346,9 +498,6 @@ struct QuickMenuPanelControllerTests {
             NSColor(calibratedWhite: 1, alpha: 1).cgColor
         ))
         #expect(layerBackgroundColors(in: controller.responsePanel.contentView).contains(
-            AppTheme.light.palette.primaryAction.cgColor
-        ))
-        #expect(layerBackgroundColors(in: controller.responsePanel.contentView).contains(
             AppTheme.light.palette.secondaryAction.cgColor
         ))
     }
@@ -420,7 +569,7 @@ struct QuickMenuPanelControllerTests {
 
     @Test
     @MainActor
-    func responseUsesFourIndependentVerticalSurfacesOnATransparentRoot() throws {
+    func responseUsesThreeIndependentVerticalSurfacesOnATransparentRoot() throws {
         _ = NSApplication.shared
         let controller = ResponseBubbleViewController()
         _ = controller.view
@@ -431,7 +580,6 @@ struct QuickMenuPanelControllerTests {
         let identifiers = [
             "response-body-surface",
             "response-inline-composer-surface",
-            "response-inline-action-surface",
             "response-detail-action-surface",
         ]
         let surfaces = try identifiers.map { identifier in
@@ -441,18 +589,160 @@ struct QuickMenuPanelControllerTests {
         }
 
         #expect(controller.view.layer?.backgroundColor == NSColor.clear.cgColor)
-        #expect(surfaces[1].isHidden)
-        #expect(surfaces[0].frame.minY > surfaces[2].frame.maxY)
-        #expect(surfaces[2].frame.minY > surfaces[3].frame.maxY)
-        #expect(abs(surfaces[0].frame.minY - surfaces[2].frame.maxY - 8) < 0.5)
-        #expect(abs(surfaces[2].frame.minY - surfaces[3].frame.maxY - 8) < 0.5)
-        #expect(!surfaces[0].frame.intersects(surfaces[2].frame))
-        #expect(!surfaces[2].frame.intersects(surfaces[3].frame))
+        #expect(!surfaces[1].isHidden)
+        #expect(surfaces[0].frame.minY > surfaces[1].frame.maxY)
+        #expect(surfaces[1].frame.minY > surfaces[2].frame.maxY)
+        #expect(abs(surfaces[0].frame.minY - surfaces[1].frame.maxY - 8) < 0.5)
+        #expect(abs(surfaces[1].frame.minY - surfaces[2].frame.maxY - 8) < 0.5)
+        #expect(!surfaces[0].frame.intersects(surfaces[1].frame))
+        #expect(!surfaces[1].frame.intersects(surfaces[2].frame))
     }
 
     @Test
     @MainActor
-    func responseExpansionKeepsActionsEqualAndComposerOrderedAccessibleAndFocused() throws {
+    func responseBubbleShowsEveryTurnNotJustTheLatest() throws {
+        _ = NSApplication.shared
+        let controller = ResponseBubbleViewController()
+        _ = controller.view
+        let messages = [
+            ChatMessage(role: .user, text: "첫 질문"),
+            ChatMessage(role: .assistant, text: "첫 답변"),
+            ChatMessage(role: .user, text: "두 번째 질문"),
+            ChatMessage(role: .assistant, text: "두 번째 답변"),
+        ]
+
+        controller.renderChat(ChatBubbleState(messages: messages))
+        controller.render(PetResponsePolicy.content(for: "두 번째 답변"))
+        controller.view.layoutSubtreeIfNeeded()
+
+        let values = textFields(in: controller.view).map(\.stringValue)
+        #expect(messages.allSatisfy { values.contains($0.text) })
+        #expect(values.filter { $0 == "두 번째 답변" }.count == 1)
+    }
+
+    @Test
+    @MainActor
+    func responseBubbleScrollsWhenTheTranscriptExceedsTheMaximumHeight() throws {
+        _ = NSApplication.shared
+        let controller = ResponseBubbleViewController()
+        _ = controller.view
+        controller.renderChat(ChatBubbleState(messages: (0..<30).map {
+            ChatMessage(
+                role: $0.isMultiple(of: 2) ? .user : .assistant,
+                text: "긴 대화 메시지 \($0)"
+            )
+        }))
+        controller.render(PetResponsePolicy.content(for: "긴 대화 메시지 29"))
+        controller.view.frame.size = controller.preferredSize
+        controller.view.layoutSubtreeIfNeeded()
+
+        let scroll = try #require(scrollViews(in: controller.view).first)
+        let document = try #require(scroll.documentView)
+        #expect(controller.preferredSize.height == 310)
+        #expect(scroll.hasVerticalScroller)
+        #expect(document.frame.height > scroll.contentView.bounds.height)
+    }
+
+    @Test
+    @MainActor
+    func closingAndReopeningTheResponseBubblePreservesTheTranscript() async throws {
+        _ = NSApplication.shared
+        let sender = ControlledPromptSender()
+        let controller = QuickMenuPanelController(
+            petController: FloatingPetWindowController {},
+            viewModel: YumYumAppViewModel(fixtureProbe: UnusedFixtureProbe()),
+            workflow: FeedWorkflow(sender: sender, feedback: SilentFeedFeedback()),
+            openSettings: {}
+        )
+        defer { controller.prepareForTermination() }
+        let empty = NSPasteboard(name: .init(UUID().uuidString))
+        empty.clearContents()
+
+        controller.toggleStagedDraftBubble(empty)
+        let composer = try #require(textFields(in: controller.responsePanel.contentView).first {
+            $0.accessibilityLabel() == "인라인 채팅 메시지"
+        })
+        composer.stringValue = "첫 질문"
+        let returnAction = try #require(composer.action)
+        composer.sendAction(returnAction, to: composer.target)
+        try #require(await sender.waitForRequestCount(1))
+        await sender.completeRequest(at: 0)
+        await controller.waitForChatSendForTesting()
+
+        #expect(controller.chatStateForTesting.messages.count == 2)
+        controller.toggleStagedDraftBubble(empty)
+        try pressButton(accessibilityLabel: "답변 말풍선 닫기", in: controller.responsePanel.contentView)
+        #expect(!controller.responsePanel.isVisible)
+        controller.toggleStagedDraftBubble(empty)
+
+        #expect(textFields(in: controller.responsePanel.contentView).contains {
+            $0.stringValue == "첫 질문"
+        })
+        #expect(textFields(in: controller.responsePanel.contentView).contains {
+            $0.stringValue == "완료"
+        })
+    }
+
+    @Test
+    @MainActor
+    func newSessionResetStillClearsTheCompactTranscript() async throws {
+        _ = NSApplication.shared
+        let sender = ControlledPromptSender()
+        let controller = ChatPanelController(
+            petController: FloatingPetWindowController {},
+            viewModel: YumYumAppViewModel(fixtureProbe: UnusedFixtureProbe()),
+            workflow: FeedWorkflow(sender: sender, feedback: SilentFeedFeedback()),
+            resetAgentSession: { true }
+        )
+        controller.setDraftText("첫 질문")
+        #expect(controller.sendDraftFromResponse())
+        try #require(await sender.waitForRequestCount(1))
+        await sender.completeRequest(at: 0)
+        await controller.waitForSendForTesting()
+        #expect(controller.state.messages.count == 2)
+
+        let view = try #require(controller.panel.contentView)
+        try pressButton(titled: "새 세션", in: view)
+        await controller.waitForRestartForTesting()
+
+        #expect(controller.state.messages.isEmpty)
+        let resetState = controller.state
+        let response = ResponseBubbleViewController()
+        _ = response.view
+        response.render(PetResponsePolicy.content(for: "메시지를 입력하고 Return을 누르세요."))
+        response.renderChat(resetState)
+
+        #expect(textFields(in: response.view).contains {
+            $0.stringValue == "메시지를 입력하고 Return을 누르세요."
+        })
+        #expect(!textFields(in: response.view).contains {
+            $0.stringValue == "첫 질문" || $0.stringValue == "완료"
+        })
+    }
+
+    @Test
+    @MainActor
+    func responseBubbleErrorStillShowsItsMessageAlongsideThePriorTurns() throws {
+        _ = NSApplication.shared
+        let controller = ResponseBubbleViewController()
+        _ = controller.view
+        controller.renderChat(ChatBubbleState(messages: [
+            ChatMessage(role: .user, text: "질문"),
+            ChatMessage(role: .assistant, text: "이전 답변"),
+        ]))
+        let error = UserFacingErrorCategory.invalidFile.message
+        controller.render(PetResponsePolicy.error(message: error))
+
+        #expect(textFields(in: controller.view).contains { $0.stringValue == "질문" })
+        #expect(textFields(in: controller.view).contains { $0.stringValue == "이전 답변" })
+        #expect(textFields(in: controller.view).contains {
+            $0.stringValue == UserFacingErrorCategory.invalidFile.message
+        })
+    }
+
+    @Test
+    @MainActor
+    func responseKeepsComposerOrderedAccessibleAndFocused() throws {
         _ = NSApplication.shared
         let controller = ResponseBubbleViewController()
         let panel = ResponseBubblePanel(
@@ -468,81 +758,26 @@ struct QuickMenuPanelControllerTests {
         controller.view.frame.size = controller.preferredSize
         controller.view.layoutSubtreeIfNeeded()
 
-        let inline = try surface("response-inline-action-surface", in: controller.view)
         let composerSurface = try surface("response-inline-composer-surface", in: controller.view)
         let detail = try surface("response-detail-action-surface", in: controller.view)
-        let collapsedHeight = controller.preferredSize.height
         let scroll = try #require(scrollViews(in: controller.view).first)
         let composer = try #require(textFields(in: controller.view).first {
             $0.accessibilityLabel() == "인라인 채팅 메시지"
         })
 
-        #expect(inline.frame.size == detail.frame.size)
-        #expect(composerSurface.isHidden)
+        #expect(!composerSurface.isHidden)
         #expect(!composerSurface.isAccessibilityElement())
-        try pressButton(titled: "채팅 입력하기", in: controller.view)
+        controller.beginInlineCompose()
         controller.view.frame.size = controller.preferredSize
         controller.view.layoutSubtreeIfNeeded()
 
-        #expect(controller.preferredSize.height > collapsedHeight)
         #expect(!composerSurface.isHidden)
-        #expect(composerSurface.frame.minY > inline.frame.maxY)
-        #expect(inline.frame.minY > detail.frame.maxY)
-        #expect(index(of: composerSurface, in: controller.view)
-            < index(of: inline, in: controller.view))
+        #expect(composerSurface.frame.minY > detail.frame.maxY)
         #expect(composer.stringValue == "보존할 초안")
         #expect(panel.canBecomeKey)
         #expect(panel.firstResponder === composer.currentEditor())
-        #expect(scroll.documentView?.isDescendant(of: inline) == false)
         #expect(scroll.documentView?.isDescendant(of: composerSurface) == false)
         #expect(scroll.documentView?.isDescendant(of: detail) == false)
-    }
-
-    @Test
-    @MainActor
-    func collapsingInlineComposerMovesFocusBeforeReturnAndPreservesDraft() throws {
-        _ = NSApplication.shared
-        let controller = ResponseBubbleViewController()
-        let panel = ResponseBubblePanel(
-            contentRect: CGRect(x: 0, y: 0, width: 360, height: 140),
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered,
-            defer: false
-        )
-        panel.contentViewController = controller
-        controller.onRequestInput = { panel.beginInput() }
-        var sends = 0
-        controller.onSend = { sends += 1 }
-        controller.render(PetResponsePolicy.content(for: "완료"))
-        controller.renderChat(ChatBubbleState(draftText: "보존할 초안"))
-
-        try pressButton(titled: "채팅 입력하기", in: controller.view)
-        let composerSurface = try surface(
-            "response-inline-composer-surface",
-            in: controller.view
-        )
-        let composer = try #require(textFields(in: controller.view).first {
-            $0.accessibilityLabel() == "인라인 채팅 메시지"
-        })
-        let inline = try #require(buttons(in: controller.view).first {
-            $0.title == "채팅 입력하기"
-        })
-        #expect(panel.firstResponder === composer.currentEditor())
-
-        inline.performClick(nil)
-
-        #expect(composerSurface.isHidden)
-        #expect(!composerSurface.isAccessibilityElement())
-        #expect(panel.firstResponder === inline)
-        _ = panel.firstResponder?.tryToPerform(
-            #selector(NSResponder.insertNewline(_:)),
-            with: nil
-        )
-        #expect(sends == 0)
-
-        inline.performClick(nil)
-        #expect(composer.stringValue == "보존할 초안")
-        #expect(panel.firstResponder === composer.currentEditor())
     }
 
     @Test
@@ -589,13 +824,12 @@ struct QuickMenuPanelControllerTests {
 
     @Test
     @MainActor
-    func expandedComposerConstraintTracksDraftAttachmentsAndPreferredHeight() throws {
+    func composerConstraintTracksDraftAttachmentsAndPreferredHeight() throws {
         _ = NSApplication.shared
         let controller = ResponseBubbleViewController()
         _ = controller.view
         controller.render(PetResponsePolicy.content(for: "완료"))
         controller.renderChat(ChatBubbleState())
-        try pressButton(titled: "채팅 입력하기", in: controller.view)
         controller.view.frame.size = controller.preferredSize
         controller.view.layoutSubtreeIfNeeded()
 
@@ -626,7 +860,7 @@ struct QuickMenuPanelControllerTests {
 
     @Test
     @MainActor
-    func constrainedExpandedErrorWithAttachmentKeepsEverySurfaceInsideNegativeOriginPanel() throws {
+    func constrainedErrorWithAttachmentKeepsEverySurfaceInsideNegativeOriginPanel() throws {
         _ = NSApplication.shared
         let controller = ResponseBubbleViewController()
         _ = controller.view
@@ -641,16 +875,20 @@ struct QuickMenuPanelControllerTests {
                 ]
             )
         )
-        try pressButton(titled: "채팅 입력하기", in: controller.view)
         controller.fitPanelHeight(220)
         controller.view.frame = CGRect(x: -720, y: -360, width: 360, height: 220)
         controller.view.layoutSubtreeIfNeeded()
 
+        let surfaceIDs = Set([
+            "response-body-surface",
+            "response-inline-composer-surface",
+            "response-detail-action-surface",
+        ])
         let visibleSurfaces = flattened(controller.view).filter {
-            $0.identifier?.rawValue.hasPrefix("response-") == true && !$0.isHidden
+            surfaceIDs.contains($0.identifier?.rawValue ?? "") && !$0.isHidden
         }
         let localBounds = controller.view.bounds
-        #expect(visibleSurfaces.count == 4)
+        #expect(visibleSurfaces.count == 3)
         #expect(visibleSurfaces.allSatisfy { $0.frame.height > 0 })
         #expect(visibleSurfaces.allSatisfy {
             $0.frame.minY >= localBounds.minY && $0.frame.maxY <= localBounds.maxY
@@ -679,7 +917,7 @@ struct QuickMenuPanelControllerTests {
         panel.contentViewController = controller
         controller.render(PetResponsePolicy.content(for: "완료"))
         let actions = buttons(in: controller.view).filter {
-            $0.title == "채팅 입력하기" || $0.title == "채팅창 상세"
+            $0.title == "채팅창 상세"
         }
         let event = try #require(NSEvent.mouseEvent(
             with: .mouseMoved,
@@ -967,6 +1205,134 @@ struct QuickMenuPanelControllerTests {
         #expect(controller.responsePanel.isVisible)
         #expect(controller.chatStateForTesting.draftText == "clipboard text")
         #expect(await sender.requestCount == 0)
+    }
+
+    @Test
+    @MainActor
+    func togglingAfterSendWithUnchangedClipboardDoesNotRestage() async throws {
+        _ = NSApplication.shared
+        let sender = ControlledPromptSender()
+        let pet = FloatingPetWindowController {}
+        let controller = QuickMenuPanelController(
+            petController: pet,
+            viewModel: YumYumAppViewModel(fixtureProbe: UnusedFixtureProbe()),
+            workflow: FeedWorkflow(sender: sender, feedback: SilentFeedFeedback()),
+            openSettings: {}
+        )
+        defer { controller.prepareForTermination() }
+        let board = pasteboard(["clipboard text" as NSString])
+
+        controller.toggleStagedDraftBubble(board)
+        let composer = try #require(textFields(in: controller.responsePanel.contentView).first {
+            $0.accessibilityLabel() == "인라인 채팅 메시지"
+        })
+        composer.stringValue = "send this"
+        let returnAction = try #require(composer.action)
+        composer.sendAction(returnAction, to: composer.target)
+        try #require(await sender.waitForRequestCount(1))
+        await sender.completeRequest(at: 0)
+        await controller.waitForChatSendForTesting()
+
+        controller.toggleStagedDraftBubble(board)
+
+        #expect(controller.responsePanel.isVisible)
+        #expect(controller.chatStateForTesting.draftText.isEmpty)
+        #expect(textFields(in: controller.responsePanel.contentView).first {
+            $0.accessibilityLabel() == "인라인 채팅 메시지"
+        }?.stringValue == "")
+        #expect(await sender.requestCount == 1)
+    }
+
+    @Test
+    @MainActor
+    func togglingAfterSendWithNewClipboardStagesNewContent() async throws {
+        _ = NSApplication.shared
+        let sender = ControlledPromptSender()
+        let pet = FloatingPetWindowController {}
+        let controller = QuickMenuPanelController(
+            petController: pet,
+            viewModel: YumYumAppViewModel(fixtureProbe: UnusedFixtureProbe()),
+            workflow: FeedWorkflow(sender: sender, feedback: SilentFeedFeedback()),
+            openSettings: {}
+        )
+        defer { controller.prepareForTermination() }
+        let board = pasteboard(["first text" as NSString])
+
+        controller.toggleStagedDraftBubble(board)
+        let composer = try #require(textFields(in: controller.responsePanel.contentView).first {
+            $0.accessibilityLabel() == "인라인 채팅 메시지"
+        })
+        composer.stringValue = "send this"
+        let returnAction = try #require(composer.action)
+        composer.sendAction(returnAction, to: composer.target)
+        try #require(await sender.waitForRequestCount(1))
+        await sender.completeRequest(at: 0)
+        await controller.waitForChatSendForTesting()
+
+        board.clearContents()
+        #expect(board.writeObjects(["new text" as NSString]))
+        controller.toggleStagedDraftBubble(board)
+
+        #expect(controller.responsePanel.isVisible)
+        #expect(controller.chatStateForTesting.draftText == "new text")
+    }
+
+    @Test
+    @MainActor
+    func toggleWithNoPendingDraftAndNoNewClipboardOpensEmptyComposer() throws {
+        _ = NSApplication.shared
+        let pet = FloatingPetWindowController {}
+        let controller = QuickMenuPanelController(
+            petController: pet,
+            viewModel: YumYumAppViewModel(fixtureProbe: UnusedFixtureProbe()),
+            workflow: FeedWorkflow(
+                sender: ControlledPromptSender(),
+                feedback: SilentFeedFeedback()
+            ),
+            openSettings: {}
+        )
+        defer { controller.prepareForTermination() }
+        let empty = NSPasteboard(name: .init(UUID().uuidString))
+        empty.clearContents()
+
+        controller.toggleStagedDraftBubble(empty)
+
+        let composer = try #require(textFields(in: controller.responsePanel.contentView).first {
+            $0.accessibilityLabel() == "인라인 채팅 메시지"
+        })
+        #expect(controller.responsePanel.isVisible)
+        #expect(composer.stringValue.isEmpty)
+        #expect(composer.window?.firstResponder === composer.currentEditor())
+    }
+
+    @Test
+    @MainActor
+    func responseCloseButtonHidesBubbleAndRestoresPet() throws {
+        _ = NSApplication.shared
+        let pet = FloatingPetWindowController {}
+        let controller = QuickMenuPanelController(
+            petController: pet,
+            viewModel: YumYumAppViewModel(fixtureProbe: UnusedFixtureProbe()),
+            workflow: FeedWorkflow(
+                sender: ControlledPromptSender(),
+                feedback: SilentFeedFeedback()
+            ),
+            openSettings: {}
+        )
+        defer { controller.prepareForTermination() }
+        controller.applyFeedStatus(
+            FeedStatusUpdate(generation: UUID(), status: .completed("완료"))
+        )
+
+        #expect(controller.responsePanel.isVisible)
+        try pressButton(
+            accessibilityLabel: "답변 말풍선 닫기",
+            in: controller.responsePanel.contentView
+        )
+
+        #expect(!controller.responsePanel.isVisible)
+        #expect(pet.isVisible)
+        #expect(pet.presentationModel.chewFrame == .resting)
     }
 
     @Test
@@ -1265,12 +1631,9 @@ struct QuickMenuPanelControllerTests {
         responseController.render(PetResponsePolicy.content(for: "완료"))
         responseController.renderChat(chatController.state)
         let view = try #require(responsePanel.contentView)
-        let initialButtons = buttons(in: view).filter { !$0.isHidden }
-        let inline = try #require(initialButtons.first { $0.title == "채팅 입력하기" })
-        let detail = try #require(initialButtons.first { $0.title == "채팅창 상세" })
-        #expect(index(of: inline, in: view) < index(of: detail, in: view))
-
-        inline.performClick(nil)
+        let detail = try #require(buttons(in: view).first { $0.title == "채팅창 상세" })
+        #expect(!detail.isHidden)
+        responseController.beginInlineCompose()
         let composer = try #require(textFields(in: view).first {
             $0.accessibilityLabel() == "인라인 채팅 메시지"
         })
@@ -1404,19 +1767,17 @@ struct QuickMenuPanelControllerTests {
         )
         #expect(!panel.canBecomeKey)
 
-        try pressButton(titled: "채팅 입력하기", in: panel.contentView)
+        #expect(controller.feedFromClipboard(pasteboard(["초안" as NSString])))
         #expect(panel.canBecomeKey)
         panel.resignKey()
         #expect(!panel.canBecomeKey)
 
-        try pressButton(titled: "채팅 입력하기", in: panel.contentView)
         try pressButton(titled: "채팅창 상세", in: panel.contentView)
         #expect(!panel.canBecomeKey)
 
         controller.applyFeedStatus(
             FeedStatusUpdate(generation: UUID(), status: .completed("다시"))
         )
-        try pressButton(titled: "채팅 입력하기", in: panel.contentView)
         controller.prepareResponseForCaptureForTesting()
         #expect(!panel.canBecomeKey)
     }
@@ -1525,7 +1886,7 @@ struct QuickMenuPanelControllerTests {
             status: .failed(UserFacingErrorCategory.invalidFile.message(language: .english))
         ))
         controller.applyLanguage(.english)
-        try pressButton(titled: "Reply", in: controller.responsePanel.contentView)
+        #expect(controller.feedFromClipboard(pasteboard(["staged" as NSString])))
         let composer = try #require(textFields(in: controller.responsePanel.contentView).first {
             $0.accessibilityLabel() == "Inline chat message"
         })
@@ -1549,11 +1910,13 @@ struct QuickMenuPanelControllerTests {
 
     @Test
     @MainActor
-    func expandedAttachmentChromeFitsItsArrangedSubviews() throws {
+    func attachmentChromeFitsItsArrangedSubviews() throws {
         _ = NSApplication.shared
         let controller = ResponseBubbleViewController()
         _ = controller.view
         controller.render(PetResponsePolicy.content(for: "완료"))
+        controller.renderChat(ChatBubbleState())
+        let plainHeight = controller.preferredSize.height
         controller.renderChat(
             ChatBubbleState(
                 draftAttachments: [
@@ -1564,18 +1927,16 @@ struct QuickMenuPanelControllerTests {
                 ]
             )
         )
-        let collapsedHeight = controller.preferredSize.height
-        try pressButton(titled: "채팅 입력하기", in: controller.view)
         controller.view.frame.size = controller.preferredSize
         controller.view.layoutSubtreeIfNeeded()
 
-        #expect(controller.preferredSize.height >= collapsedHeight + 48)
+        #expect(controller.preferredSize.height > plainHeight)
         #expect(!controller.view.hasAmbiguousLayout)
     }
 
     @Test
     @MainActor
-    func responseLanguageRefreshPreservesContentDraftAttachmentsExpansionAndScroll() throws {
+    func responseLanguageRefreshPreservesContentDraftAttachmentsAndScroll() throws {
         _ = NSApplication.shared
         let controller = ResponseBubbleViewController()
         _ = controller.view
@@ -1592,7 +1953,6 @@ struct QuickMenuPanelControllerTests {
                 ),
             ]
         ))
-        try pressButton(titled: "Reply", in: controller.view)
         controller.responseScrollOriginForTesting = CGPoint(x: 0, y: 4)
 
         controller.applyLanguage(.korean)
