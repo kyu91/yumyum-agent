@@ -92,6 +92,7 @@ Cancellation, denied permission, empty input, invalid attachments, and no agent 
 | OpenCode | `opencode run --pure --format json` |
 | Codex | `codex exec`, read-only sandbox, untrusted approval |
 | Claude Code | Structured print execution, plan permission mode |
+| Gemini | `gemini --acp` |
 
 These names are trademarks used only to describe compatibility. YumYum Agent is independent of these vendors and does not claim sponsorship or endorsement. Each CLI owns its sign-in, network requests, model-provider processing, and results.
 

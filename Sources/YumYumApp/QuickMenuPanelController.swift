@@ -590,6 +590,7 @@ final class ChatPanelController: NSObject {
         panel.onCancel = { [weak self] in self?.hide() }
 
         viewController.onClose = { [weak self] in self?.hide() }
+        viewController.onOpenSettings = { [weak self] in self?.openSettings() }
         viewController.onRestartSession = { [weak self] in self?.restartSession() }
         viewController.onCapture = { [weak self] in self?.captureScreen() }
         viewController.onChooseFiles = { [weak self] in self?.chooseFiles() }
@@ -994,6 +995,7 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
     private static let autoScrollThreshold: CGFloat = 24
 
     var onClose: (() -> Void)?
+    var onOpenSettings: (() -> Void)?
     var onRestartSession: (() -> Void)?
     var onCapture: (() -> Void)?
     var onChooseFiles: (() -> Void)?
@@ -1021,6 +1023,7 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
     private let retryButton = NSButton(title: AppText.localized("재시도"), target: nil, action: nil)
     private let cancelButton = NSButton(title: AppText.localized("취소"), target: nil, action: nil)
     private var closeButton: NSButton?
+    private var settingsButton: NSButton?
     private var lastAnnouncedStatus = ""
     private var statusIsError = false
     private var renderedMessages: [ChatMessage] = []
@@ -1068,6 +1071,23 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
         closeButton.contentTintColor = .secondaryLabelColor
         closeButton.setAccessibilityLabel(AppText.localized("대화 말풍선 닫기"))
         self.closeButton = closeButton
+        let settingsButton = NSButton(
+            image: NSImage(
+                systemSymbolName: "gearshape",
+                accessibilityDescription: AppText.localized(english: "Settings", korean: "설정")
+            )!,
+            target: self,
+            action: #selector(settingsPressed)
+        )
+        settingsButton.isBordered = false
+        settingsButton.contentTintColor = .secondaryLabelColor
+        settingsButton.setAccessibilityLabel(
+            AppText.localized(english: "Open settings", korean: "설정 열기")
+        )
+        settingsButton.setAccessibilityHelp(
+            AppText.localized(english: "Opens the app's Settings window", korean: "앱의 설정 창을 엽니다")
+        )
+        self.settingsButton = settingsButton
         restartButton.target = self
         restartButton.action = #selector(restartSessionPressed)
         restartButton.bezelStyle = .inline
@@ -1077,6 +1097,7 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
         header.addArrangedSubview(title)
         header.addArrangedSubview(NSView())
         header.addArrangedSubview(restartButton)
+        header.addArrangedSubview(settingsButton)
         header.addArrangedSubview(closeButton)
         header.orientation = .horizontal
         header.alignment = .centerY
@@ -1387,6 +1408,16 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
         self.language = language
         closeButton?.image = NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: AppText.localized("닫기", language: language))
         closeButton?.setAccessibilityLabel(AppText.localized("대화 말풍선 닫기", language: language))
+        settingsButton?.image = NSImage(
+            systemSymbolName: "gearshape",
+            accessibilityDescription: AppText.localized(english: "Settings", korean: "설정", language: language)
+        )
+        settingsButton?.setAccessibilityLabel(
+            AppText.localized(english: "Open settings", korean: "설정 열기", language: language)
+        )
+        settingsButton?.setAccessibilityHelp(
+            AppText.localized(english: "Opens the app's Settings window", korean: "앱의 설정 창을 엽니다", language: language)
+        )
         restartButton.title = AppText.localized(english: "New Session", korean: "새 세션", language: language)
         restartButton.setAccessibilityLabel(AppText.localized(english: "New chat session", korean: "새 대화 세션", language: language))
         restartButton.setAccessibilityHelp(AppText.localized(english: "Clears the conversation and applies the current Soul to the next request", korean: "대화 내용을 지우고 현재 Soul을 다음 요청에 적용합니다", language: language))
@@ -1731,6 +1762,7 @@ final class QuickMenuViewController: NSViewController, NSTextFieldDelegate {
     }
 
     @objc private func closePressed() { onClose?() }
+    @objc private func settingsPressed() { onOpenSettings?() }
     @objc private func restartSessionPressed() { onRestartSession?() }
     @objc private func capturePressed() { onCapture?() }
     @objc private func filePressed() { onChooseFiles?() }

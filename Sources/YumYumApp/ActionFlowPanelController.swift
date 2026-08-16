@@ -65,7 +65,8 @@ final class QuickMenuPanelController: NSObject {
         chatController = ChatPanelController(
             petController: petController,
             viewModel: viewModel,
-            workflow: workflow
+            workflow: workflow,
+            openSettings: openSettings
         )
         actionPanel = ActionBubblePanel(
             contentRect: CGRect(origin: .zero, size: Self.actionPanelSize),
@@ -115,6 +116,9 @@ final class QuickMenuPanelController: NSObject {
         }
         responseViewController.onOpenChat = { [weak self] in
             self?.openChatFromResponse()
+        }
+        responseViewController.onOpenSettings = { [weak self] in
+            self?.openSettings()
         }
         responseViewController.onRetry = { [weak self] in
             self?.retryFromResponse()
@@ -1459,6 +1463,7 @@ final class ThinkingBubbleViewController: NSViewController {
 @MainActor
 final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate {
     private static let autoScrollThreshold: CGFloat = 24
+    private static let bubbleHeaderHeight: CGFloat = 20
     private static let panelWidth: CGFloat = 360
     private static let bodyWidth: CGFloat = 312
     private static let minBodyHeight: CGFloat = 44
@@ -1473,6 +1478,7 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
 
     var onClose: (() -> Void)?
     var onOpenChat: (() -> Void)?
+    var onOpenSettings: (() -> Void)?
     var onRetry: (() -> Void)?
     var onDraftChanged: ((String) -> Void)?
     var onSend: (() -> Void)?
@@ -1493,6 +1499,16 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
         action: nil
     )
     private let openChatButton = ResponseActionButton(title: AppText.localized("채팅창 상세"))
+    private let settingsButton = NSButton(
+        image: NSImage(
+            systemSymbolName: "gearshape.circle.fill",
+            accessibilityDescription: AppText.localized(english: "Settings", korean: "설정")
+        )!.withSymbolConfiguration(
+            NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
+        )!,
+        target: nil,
+        action: nil
+    )
     private let retryButton = NSButton(title: AppText.localized("재시도"), target: nil, action: nil)
     private let retryRow = NSStackView()
     private let composer = NSTextField()
@@ -1555,9 +1571,9 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
         min(
             Self.maxPanelHeight,
             max(
-                Self.minBodyHeight + Self.bodyInsets + chromeHeight + retryHeight
+                Self.minBodyHeight + Self.bubbleHeaderHeight + Self.bodyInsets + chromeHeight + retryHeight
                     + Self.surfaceInset * 2,
-                    measuredTranscriptHeight + Self.bodyInsets + chromeHeight + retryHeight
+                    measuredTranscriptHeight + Self.bubbleHeaderHeight + Self.bodyInsets + chromeHeight + retryHeight
                     + Self.surfaceInset * 2
             )
         )
@@ -1566,7 +1582,7 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
     private var visibleTextHeight: CGFloat {
         max(
             Self.minBodyHeight,
-            preferredPanelHeight - Self.bodyInsets - chromeHeight - retryHeight
+            preferredPanelHeight - Self.bubbleHeaderHeight - Self.bodyInsets - chromeHeight - retryHeight
                 - Self.surfaceInset * 2
         )
     }
@@ -1621,10 +1637,17 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
         closeButton.isBordered = false
         closeButton.contentTintColor = .secondaryLabelColor
         closeButton.setAccessibilityLabel(AppText.localized("답변 말풍선 닫기"))
-        closeButton.translatesAutoresizingMaskIntoConstraints = false
         openChatButton.target = self
         openChatButton.action = #selector(openChatPressed)
         openChatButton.setAccessibilityLabel(AppText.localized("전체 답변을 채팅에서 열기"))
+        settingsButton.target = self
+        settingsButton.action = #selector(settingsPressed)
+        settingsButton.isBordered = false
+        settingsButton.contentTintColor = .secondaryLabelColor
+        settingsButton.setAccessibilityLabel(AppText.localized(
+            english: "Open settings",
+            korean: "설정 열기"
+        ))
         retryButton.target = self
         retryButton.action = #selector(retryPressed)
         retryButton.bezelStyle = .rounded
@@ -1659,7 +1682,12 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
         retryRow.setViews([NSView(), retryButton], in: .leading)
         retryRow.orientation = .horizontal
         retryRow.heightAnchor.constraint(equalToConstant: Self.actionHeight).isActive = true
-        let bodyStack = NSStackView(views: [responseScroll, retryRow])
+        let bubbleHeaderRow = NSStackView(views: [NSView(), settingsButton, closeButton])
+        bubbleHeaderRow.orientation = .horizontal
+        bubbleHeaderRow.alignment = .centerY
+        bubbleHeaderRow.spacing = 6
+        bubbleHeaderRow.heightAnchor.constraint(equalToConstant: Self.bubbleHeaderHeight).isActive = true
+        let bodyStack = NSStackView(views: [bubbleHeaderRow, responseScroll, retryRow])
         bodyStack.orientation = .vertical
         bodyStack.spacing = 0
         bodyStack.translatesAutoresizingMaskIntoConstraints = false
@@ -1669,6 +1697,7 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
             bodyStack.trailingAnchor.constraint(equalTo: bodySurface.content.trailingAnchor, constant: -16),
             bodyStack.topAnchor.constraint(equalTo: bodySurface.content.topAnchor, constant: 14),
             bodyStack.bottomAnchor.constraint(equalTo: bodySurface.content.bottomAnchor, constant: -14),
+            bubbleHeaderRow.widthAnchor.constraint(equalTo: bodyStack.widthAnchor),
             responseScroll.widthAnchor.constraint(equalTo: bodyStack.widthAnchor),
             retryRow.widthAnchor.constraint(equalTo: bodyStack.widthAnchor),
         ])
@@ -1697,7 +1726,6 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
         stack.spacing = Self.stackSpacing
         stack.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(stack)
-        root.addSubview(closeButton)
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: Self.surfaceInset),
             stack.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -Self.surfaceInset),
@@ -1705,13 +1733,10 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
             stack.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -Self.surfaceInset),
             bodySurface.widthAnchor.constraint(equalTo: stack.widthAnchor),
             composerSurface.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            detailActionSurface.widthAnchor.constraint(equalToConstant: 164),
+            detailActionSurface.widthAnchor.constraint(equalTo: stack.widthAnchor),
             detailActionSurface.heightAnchor.constraint(equalToConstant: Self.actionHeight),
+            openChatButton.heightAnchor.constraint(equalToConstant: Self.actionHeight - 8),
             composer.heightAnchor.constraint(equalToConstant: 28),
-            closeButton.topAnchor.constraint(equalTo: bodySurface.topAnchor, constant: 6),
-            closeButton.trailingAnchor.constraint(equalTo: bodySurface.trailingAnchor, constant: -6),
-            closeButton.widthAnchor.constraint(equalToConstant: 16),
-            closeButton.heightAnchor.constraint(equalToConstant: 16),
         ])
         let composerHeight = composerSurface.heightAnchor.constraint(
             equalToConstant: composerSurfaceHeight
@@ -1782,6 +1807,7 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
 
     @objc private func closePressed() { onClose?() }
     @objc private func openChatPressed() { onOpenChat?() }
+    @objc private func settingsPressed() { onOpenSettings?() }
     @objc private func retryPressed() { onRetry?() }
 
     func renderChat(_ state: ChatBubbleState) {
@@ -1935,7 +1961,7 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
         composerHeightConstraint?.constant = composerSurfaceHeight
         let surfaceCount: CGFloat = 3
         let gapCount = surfaceCount - 1
-        let fixedHeight = Self.surfaceInset * 2 + Self.bodyInsets + retryHeight
+        let fixedHeight = Self.surfaceInset * 2 + Self.bubbleHeaderHeight + Self.bodyInsets + retryHeight
             + Self.actionHeight + composerSurfaceHeight
         let spacing = min(Self.stackSpacing, max(0, (height - fixedHeight) / gapCount))
         surfaceStack?.spacing = spacing
@@ -1955,6 +1981,19 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
         closeButton.image = NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: AppText.localized("닫기", language: language))?
             .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold))
         closeButton.setAccessibilityLabel(AppText.localized("답변 말풍선 닫기", language: language))
+        settingsButton.image = NSImage(
+            systemSymbolName: "gearshape.circle.fill",
+            accessibilityDescription: AppText.localized(
+                english: "Settings",
+                korean: "설정",
+                language: language
+            )
+        )?.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold))
+        settingsButton.setAccessibilityLabel(AppText.localized(
+            english: "Open settings",
+            korean: "설정 열기",
+            language: language
+        ))
         openChatButton.title = AppText.localized(english: "Open Chat", korean: "채팅창 상세", language: language)
         retryButton.title = AppText.localized(english: "Retry", korean: "재시도", language: language)
         sendButton.title = AppText.localized(english: "Send", korean: "전송", language: language)

@@ -3,10 +3,16 @@ import Foundation
 public struct SelectedAgentReference: Codable, Equatable, Sendable {
     public let definitionID: AgentDefinitionID
     public let path: String
+    public let modelID: String?
 
-    public init(definitionID: AgentDefinitionID, path: String) {
+    public init(
+        definitionID: AgentDefinitionID,
+        path: String,
+        modelID: String? = nil
+    ) {
         self.definitionID = definitionID
         self.path = URL(fileURLWithPath: path).standardizedFileURL.path
+        self.modelID = modelID
     }
 }
 
@@ -19,6 +25,7 @@ public actor UserDefaultsAgentSelectionStore: AgentSelectionPersisting {
     private let defaults: UserDefaults
     private let definitionKey: String
     private let pathKey: String
+    private let modelKey: String
 
     public init(
         defaults: UserDefaults = .standard,
@@ -27,6 +34,7 @@ public actor UserDefaultsAgentSelectionStore: AgentSelectionPersisting {
         self.defaults = defaults
         definitionKey = "\(keyPrefix).definitionID"
         pathKey = "\(keyPrefix).path"
+        modelKey = "\(keyPrefix).modelID"
     }
 
     public func load() -> SelectedAgentReference? {
@@ -35,17 +43,27 @@ public actor UserDefaultsAgentSelectionStore: AgentSelectionPersisting {
               let path = defaults.string(forKey: pathKey) else {
             return nil
         }
-        return SelectedAgentReference(definitionID: definitionID, path: path)
+        return SelectedAgentReference(
+            definitionID: definitionID,
+            path: path,
+            modelID: definitionID == .hermes ? defaults.string(forKey: modelKey) : nil
+        )
     }
 
     public func save(_ reference: SelectedAgentReference?) {
         guard let reference else {
             defaults.removeObject(forKey: definitionKey)
             defaults.removeObject(forKey: pathKey)
+            defaults.removeObject(forKey: modelKey)
             return
         }
         defaults.set(reference.definitionID.rawValue, forKey: definitionKey)
         defaults.set(reference.path, forKey: pathKey)
+        if let modelID = reference.modelID {
+            defaults.set(modelID, forKey: modelKey)
+        } else {
+            defaults.removeObject(forKey: modelKey)
+        }
     }
 }
 
@@ -102,6 +120,7 @@ public struct AgentRegistrySnapshot: Equatable, Sendable {
     public let selection: AgentSelectionState
     public let explicitPaths: [AgentDefinitionID: String]
     public let hiddenDefinitionIDs: [AgentDefinitionID]
+    public let selectedModelID: String?
 
     public var selectedInstallation: AgentInstallation? {
         guard case let .selected(installation) = selection else {
@@ -130,12 +149,14 @@ public struct AgentRegistrySnapshot: Equatable, Sendable {
         installations: [AgentInstallation],
         selection: AgentSelectionState,
         explicitPaths: [AgentDefinitionID: String] = [:],
-        hiddenDefinitionIDs: [AgentDefinitionID] = []
+        hiddenDefinitionIDs: [AgentDefinitionID] = [],
+        selectedModelID: String? = nil
     ) {
         self.installations = installations
         self.selection = selection
         self.explicitPaths = explicitPaths
         self.hiddenDefinitionIDs = hiddenDefinitionIDs
+        self.selectedModelID = selectedModelID
     }
 }
 
@@ -158,6 +179,11 @@ public enum AgentSelectionError: Error, Equatable, LocalizedError, Sendable {
 
 public protocol AgentSelectionValidating: Sendable {
     func validatedSelection() async throws -> AgentInstallation
+    var selectedModelID: String? { get async }
+}
+
+public extension AgentSelectionValidating {
+    var selectedModelID: String? { nil }
 }
 
 public actor AgentRegistry: AgentSelectionValidating {
@@ -216,9 +242,14 @@ public actor AgentRegistry: AgentSelectionValidating {
     @discardableResult
     public func select(
         _ definitionID: AgentDefinitionID,
-        path: String
+        path: String,
+        modelID: String? = nil
     ) async throws -> AgentRegistrySnapshot {
-        let reference = SelectedAgentReference(definitionID: definitionID, path: path)
+        let reference = SelectedAgentReference(
+            definitionID: definitionID,
+            path: path,
+            modelID: definitionID == .hermes ? modelID : nil
+        )
         guard let installation = exactInstallation(for: reference),
               installation.availability == .available else {
             throw AgentSelectionError.unavailable(
@@ -282,7 +313,8 @@ public actor AgentRegistry: AgentSelectionValidating {
             if explicitPaths[installation.definitionID] == reference.path {
                 explicitPaths.removeValue(forKey: installation.definitionID)
             }
-            if selectedReference == reference {
+            if selectedReference?.definitionID == reference.definitionID,
+               selectedReference?.path == reference.path {
                 selectedReference = nil
                 selectionWasInvalidated = false
                 await persistence.save(nil)
@@ -317,6 +349,10 @@ public actor AgentRegistry: AgentSelectionValidating {
             throw AgentSelectionError.noSelection
         }
         return installation
+    }
+
+    public var selectedModelID: String? {
+        selectedReference?.modelID
     }
 
     public func currentSnapshot() -> AgentRegistrySnapshot {
@@ -379,7 +415,8 @@ public actor AgentRegistry: AgentSelectionValidating {
             installations: installations,
             selection: selection,
             explicitPaths: explicitPaths,
-            hiddenDefinitionIDs: hiddenDefinitionIDs
+            hiddenDefinitionIDs: hiddenDefinitionIDs,
+            selectedModelID: selectedReference?.modelID
         )
     }
 }

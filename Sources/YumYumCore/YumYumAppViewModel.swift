@@ -31,6 +31,13 @@ public enum SoulSaveState: Equatable, Sendable {
     case failed
 }
 
+public enum HermesModelsState: Equatable, Sendable {
+    case idle
+    case loading
+    case loaded
+    case failed(message: String)
+}
+
 public struct CodexLoginApprovalRequest: Equatable, Sendable {
     public enum Operation: Equatable, Sendable {
         case login
@@ -63,6 +70,8 @@ public final class YumYumAppViewModel: ObservableObject {
     @Published public var soulProfile = SoulProfile.empty
     @Published public private(set) var soulSaveState = SoulSaveState.idle
     @Published public private(set) var isSoulLoaded = false
+    @Published public private(set) var hermesModels: [HermesModel] = []
+    @Published public private(set) var hermesModelsState: HermesModelsState = .idle
 
     public let fixturePath: String
     public let agentRegistry: AgentRegistry
@@ -72,6 +81,8 @@ public final class YumYumAppViewModel: ObservableObject {
     private let fixtureProbe: any FixtureProbing
     private let connectionChecker: any HermesConnectionChecking
     private let codexLoginService: CodexLoginService
+    private let hermesConnector: ACPConnector?
+    private var hermesModelsSourcePath: String?
     private var codexLoginTask: Task<Void, Never>?
     private var codexStatusTask: Task<Bool, Error>?
     private var pendingCodexLoginApproval: CodexLoginApprovalRequest?
@@ -93,11 +104,22 @@ public final class YumYumAppViewModel: ObservableObject {
         self.soulStore = soulStore
         self.codexLoginService = codexLoginService
         let runtimeConnectors = connectors ?? [
-            HermesACPConnector(transport: ACPProcessTransport()),
+            ACPConnector(
+                definitionID: .hermes,
+                transport: ACPProcessTransport(arguments: ["acp"])
+            ),
+            // TODO(verify-before-ship): Re-verify ["--acp"] against the installed Gemini CLI version; it is doc-verified but not hands-on confirmed.
+            ACPConnector(
+                definitionID: .gemini,
+                transport: ACPProcessTransport(arguments: ["--acp"])
+            ),
             OpenCodeConnector(),
             CodexConnector(),
             ClaudeCodeConnector(),
         ]
+        hermesConnector = runtimeConnectors.first(where: {
+            $0.definitionID == .hermes
+        }) as? ACPConnector
         agentRuntime = AgentRuntime(
             selection: agentRegistry,
             connectors: runtimeConnectors,
@@ -188,7 +210,8 @@ public final class YumYumAppViewModel: ObservableObject {
 
     public func selectAgent(
         _ definitionID: AgentDefinitionID,
-        path: String
+        path: String,
+        modelID: String? = nil
     ) async throws {
         if definitionID == .codex {
             guard let installation = availableCodexInstallations.first(where: { $0.path == path }),
@@ -198,11 +221,79 @@ public final class YumYumAppViewModel: ObservableObject {
             }
             codexLoginState = .signedIn
         }
-        let snapshot = try await agentRegistry.select(definitionID, path: path)
-        if snapshot.selection != agentSnapshot.selection {
+        let snapshot = try await agentRegistry.select(
+            definitionID,
+            path: path,
+            modelID: modelID
+        )
+        if snapshot.selection != agentSnapshot.selection
+            || snapshot.selectedModelID != agentSnapshot.selectedModelID {
             await agentRuntime.reset()
         }
         agentSnapshot = snapshot
+        if definitionID == .hermes,
+           let selectedPath = snapshot.selectedInstallation?.path,
+           hermesModelsSourcePath != selectedPath {
+            hermesModels.removeAll()
+            hermesModelsSourcePath = nil
+            hermesModelsState = .idle
+            await refreshHermesModels()
+        }
+    }
+
+    public func refreshHermesModels(force: Bool = false) async {
+        guard hermesModelsState != .loading,
+              let installation = effectiveHermesInstallation,
+              let path = installation.path,
+              let hermesConnector else {
+            return
+        }
+
+        let sourcePath = URL(fileURLWithPath: path).standardizedFileURL.path
+        if hermesModelsSourcePath != sourcePath {
+            hermesModels.removeAll()
+            hermesModelsState = .idle
+        }
+        hermesModelsState = .loading
+        do {
+            let models = try await hermesConnector.models(
+                executableURL: URL(fileURLWithPath: sourcePath),
+                modelID: agentSnapshot.selectedModelID,
+                force: force
+            )
+            try Task.checkCancellation()
+            guard effectiveHermesInstallation?.path == sourcePath else {
+                hermesModels.removeAll()
+                hermesModelsSourcePath = nil
+                hermesModelsState = .idle
+                await refreshHermesModels()
+                return
+            }
+            if !models.isEmpty || hermesModels.isEmpty {
+                hermesModels = models
+            }
+            hermesModelsSourcePath = sourcePath
+            hermesModelsState = .loaded
+        } catch is CancellationError {
+            hermesModelsState = hermesModels.isEmpty ? .idle : .loaded
+        } catch ACPProtocolError.requestInFlight {
+            hermesModelsState = .idle
+        } catch {
+            hermesModelsState = .failed(
+                message: UserFacingErrorRedactor.message(for: error)
+            )
+        }
+    }
+
+    public var effectiveHermesInstallation: AgentInstallation? {
+        if let selected = agentSnapshot.selectedInstallation,
+           selected.definitionID == .hermes,
+           selected.availability == .available {
+            return selected
+        }
+        return agentSnapshot.installations.first {
+            $0.definitionID == .hermes && $0.availability == .available
+        }
     }
 
     public func shutdown() async {

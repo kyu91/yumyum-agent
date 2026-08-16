@@ -14,7 +14,7 @@ struct AgentDiscoveryTests {
         )
         defer { try? FileManager.default.removeItem(at: directory) }
 
-        for name in ["hermes", "opencode", "codex", "claude"] {
+        for name in ["hermes", "opencode", "codex", "claude", "gemini"] {
             let executable = directory.appendingPathComponent(name)
             try Data(name.utf8).write(to: executable)
             try FileManager.default.setAttributes(
@@ -35,7 +35,7 @@ struct AgentDiscoveryTests {
 
         #expect(
             installations.compactMap(\.availableDefinitionID)
-                == [.hermes, .openCode, .codex, .claudeCode]
+                == [.hermes, .openCode, .codex, .claudeCode, .gemini]
         )
         #expect(
             installations.compactMap(\.version)
@@ -44,11 +44,15 @@ struct AgentDiscoveryTests {
                     "OpenCode 1.18.5",
                     "codex-cli 0.144.6",
                     "2.1.211 (Claude Code)",
+                    "0.5.3",
                 ]
         )
 
         let invocations = await runner.invocations
-        #expect(invocations.count == 9)
+        #expect(invocations.count == 11)
+        #expect(invocations.filter {
+            $0.command.executableURL.lastPathComponent == "gemini"
+        }.map(\.command.arguments) == [["--version"], ["--help"]])
         for invocation in invocations {
             #expect(invocation.timeout == .seconds(2))
             #expect(invocation.command.outputByteLimit == 65_536)
@@ -62,6 +66,45 @@ struct AgentDiscoveryTests {
             )
         }
         #expect(!invocations.contains { $0.command.executableURL.path == "/bin/sh" })
+    }
+
+    @Test
+    func acceptsGeminiWithBareSemverWhenHelpContainsACP() async throws {
+        let executable = try makeExecutable(named: "gemini")
+        defer { try? FileManager.default.removeItem(at: executable.deletingLastPathComponent()) }
+        let discovery = AgentDiscovery(
+            knownExecutableDirectories: [],
+            processRunner: DiscoveryProcessRunner(
+                versionOutputOverrides: ["gemini": "0.5.3\n"]
+            )
+        )
+
+        let installation = await discovery.verify(.gemini, at: executable)
+
+        #expect(installation.availability == .available)
+    }
+
+    @Test
+    func rejectsGeminiWhenHelpDoesNotContainACP() async throws {
+        let executable = try makeExecutable(named: "gemini")
+        defer { try? FileManager.default.removeItem(at: executable.deletingLastPathComponent()) }
+        let runner = DiscoveryProcessRunner(
+            versionOutputOverrides: ["gemini": "0.5.3\n"],
+            omittingHelpFragment: "ACP"
+        )
+        let discovery = AgentDiscovery(
+            knownExecutableDirectories: [],
+            processRunner: runner
+        )
+
+        let installation = await discovery.verify(.gemini, at: executable)
+
+        #expect(installation.version == "0.5.3")
+        #expect(installation.availability != .available)
+        #expect(
+            await runner.invocations.map(\.command.arguments)
+                == [["--version"], ["--help"]]
+        )
     }
 
     @Test
@@ -108,6 +151,7 @@ struct AgentDiscoveryTests {
             (.claudeCode, "--include-partial-messages"),
             (.claudeCode, "--session-id"),
             (.claudeCode, "--resume"),
+            (.gemini, "ACP"),
         ]
 
         for (definitionID, missingFlag) in cases {
@@ -140,6 +184,22 @@ struct AgentDiscoveryTests {
     }
 }
 
+private func makeExecutable(named name: String) throws -> URL {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(
+        at: directory,
+        withIntermediateDirectories: true
+    )
+    let executable = directory.appendingPathComponent(name)
+    try Data(name.utf8).write(to: executable)
+    try FileManager.default.setAttributes(
+        [.posixPermissions: 0o755],
+        ofItemAtPath: executable.path
+    )
+    return executable
+}
+
 private actor DiscoveryProcessRunner: ProcessRunning {
     struct Invocation: Sendable {
         let command: ProcessCommand
@@ -147,9 +207,14 @@ private actor DiscoveryProcessRunner: ProcessRunning {
     }
 
     private let omittedHelpFragment: String?
+    private let versionOutputOverrides: [String: String]
     private(set) var invocations: [Invocation] = []
 
-    init(omittingHelpFragment: String? = nil) {
+    init(
+        versionOutputOverrides: [String: String] = [:],
+        omittingHelpFragment: String? = nil
+    ) {
+        self.versionOutputOverrides = versionOutputOverrides
         self.omittedHelpFragment = omittingHelpFragment
     }
 
@@ -159,11 +224,12 @@ private actor DiscoveryProcessRunner: ProcessRunning {
         let output: String
 
         if command.arguments == ["--version"] {
-            output = [
+            output = versionOutputOverrides[name] ?? [
                 "hermes": "Hermes 1.0.0\n",
                 "opencode": "OpenCode 1.18.5\n",
                 "codex": "codex-cli 0.144.6\n",
                 "claude": "2.1.211 (Claude Code)\n",
+                "gemini": "0.5.3\n",
             ][name] ?? ""
         } else if name == "codex", command.arguments == ["--help"] {
             output = helpOutput(
@@ -175,6 +241,7 @@ private actor DiscoveryProcessRunner: ProcessRunning {
                 "opencode": "opencode run [message..]\n--pure\n--file\n--format <format> default json\n",
                 "codex": "Run Codex non-interactively\nresume\n--json\n--image\n--sandbox\n--skip-git-repo-check\n",
                 "claude": "--print\n--verbose\n--output-format text json stream-json\n--include-partial-messages\n--permission-mode\n--session-id\n--resume\n",
+                "gemini": "Gemini CLI\n--ACP\n",
             ][name] ?? "")
         }
 

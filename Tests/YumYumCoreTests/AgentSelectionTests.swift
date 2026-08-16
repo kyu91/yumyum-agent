@@ -1,8 +1,80 @@
+import Foundation
 import Testing
 @testable import YumYumCore
 
 @Suite
 struct AgentSelectionTests {
+    @Test
+    func userDefaultsSelectionRoundTripsModelID() async {
+        let keyPrefix = "YumYumTests.SelectedAgent.\(UUID().uuidString)"
+        defer {
+            UserDefaults.standard.removeObject(forKey: "\(keyPrefix).definitionID")
+            UserDefaults.standard.removeObject(forKey: "\(keyPrefix).path")
+            UserDefaults.standard.removeObject(forKey: "\(keyPrefix).modelID")
+        }
+        let store = UserDefaultsAgentSelectionStore(
+            keyPrefix: keyPrefix
+        )
+        let reference = SelectedAgentReference(
+            definitionID: .hermes,
+            path: "/safe/hermes",
+            modelID: "anthropic:claude-sonnet"
+        )
+
+        await store.save(reference)
+
+        #expect(await store.load() == reference)
+    }
+
+    @Test
+    func nonHermesSelectionIgnoresModelID() async throws {
+        for definitionID in [AgentDefinitionID.codex, .gemini] {
+            let installation = available(
+                definitionID,
+                path: "/safe/\(definitionID.rawValue)"
+            )
+            let persistence = SelectionPersistence()
+            let registry = AgentRegistry(
+                discovery: SelectionDiscovery(scans: [[installation]]),
+                persistence: persistence
+            )
+
+            _ = await registry.refresh(trigger: .appStart)
+            let snapshot = try await registry.select(
+                definitionID,
+                path: installation.path!,
+                modelID: "openai:gpt-5"
+            )
+
+            #expect(snapshot.selectedModelID == nil)
+            #expect(await persistence.storedReference?.modelID == nil)
+        }
+    }
+
+    @Test
+    func selectedModelIDIsExposedAndRemovalClearsModelSelection() async throws {
+        let hermes = available(.hermes, path: "/safe/hermes")
+        let persistence = SelectionPersistence()
+        let registry = AgentRegistry(
+            discovery: SelectionDiscovery(scans: [[hermes]]),
+            persistence: persistence,
+            visibilityPersistence: VisibilityPersistence()
+        )
+
+        _ = await registry.refresh(trigger: .appStart)
+        let selected = try await registry.select(
+            .hermes,
+            path: hermes.path!,
+            modelID: "openai:gpt-5"
+        )
+        #expect(selected.selectedModelID == "openai:gpt-5")
+
+        let removed = await registry.removeInstallation(hermes)
+        #expect(removed.selection == .unselected)
+        #expect(removed.selectedModelID == nil)
+        #expect(await persistence.storedReference == nil)
+    }
+
     @Test
     func unavailableSelectionNeverFallsBackAndRequiresExplicitReselection() async throws {
         let selectedPath = "/known/hermes"

@@ -621,6 +621,7 @@ extension AgentDefinitionID {
         case .openCode: Color(red: 0.16, green: 0.55, blue: 0.82)
         case .codex: Color(red: 0.22, green: 0.66, blue: 0.40)
         case .claudeCode: Color(red: 0.72, green: 0.25, blue: 0.48)
+        case .gemini: Color(red: 0.30, green: 0.22, blue: 0.78)
         }
     }
 
@@ -630,6 +631,7 @@ extension AgentDefinitionID {
         case .openCode: "AgentIcon-OpenCode"
         case .codex: "AgentIcon-Codex"
         case .claudeCode: "AgentIcon-ClaudeCode"
+        case .gemini: "AgentIcon-Gemini"
         }
     }
 }

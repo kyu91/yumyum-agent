@@ -2,6 +2,20 @@ import AppKit
 import SwiftUI
 import YumYumCore
 
+func agentRowDisplayName(
+    definitionID: AgentDefinitionID,
+    hermesModelsState: HermesModelsState,
+    selectedModelID: String?
+) -> String {
+    definitionID.displayName + (
+        definitionID == .hermes
+            && hermesModelsState == .loaded
+            && selectedModelID == nil
+            ? AppText.localized(english: " · Default model", korean: " · 기본 모델")
+            : ""
+    )
+}
+
 @main
 @MainActor
 struct YumYumApplication: App {
@@ -221,6 +235,15 @@ private struct YumYumContentView: View {
                 .accessibilityIdentifier("settings-tab-general")
 
                 settingsScroll { agentSection }
+                    .task(id: viewModel.isDiscoveringAgents) {
+                        guard !viewModel.isDiscoveringAgents,
+                              viewModel.hermesModels.isEmpty,
+                              viewModel.hermesModelsState != .loading,
+                              viewModel.hermesModelsState != .loaded else {
+                            return
+                        }
+                        await viewModel.refreshHermesModels()
+                    }
                     .tabItem { Label(AppText.localized(english: "Agent", korean: "에이전트"), systemImage: "pawprint") }
                     .accessibilityIdentifier("settings-tab-agent")
 
@@ -562,7 +585,14 @@ private struct YumYumContentView: View {
                 agentSetupCard
 
                 ForEach(viewModel.agentSnapshot.installations) { installation in
-                    agentRow(installation)
+                    VStack(alignment: .leading, spacing: 8) {
+                        agentRow(installation)
+                        if installation.definitionID == .hermes,
+                           installation.availability == .available,
+                           installation.path == viewModel.effectiveHermesInstallation?.path {
+                            hermesModelRows(for: installation)
+                        }
+                    }
                     Divider()
                 }
 
@@ -620,7 +650,11 @@ private struct YumYumContentView: View {
                 .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(installation.definitionID.displayName)
+                Text(agentRowDisplayName(
+                    definitionID: installation.definitionID,
+                    hermesModelsState: viewModel.hermesModelsState,
+                    selectedModelID: viewModel.agentSnapshot.selectedModelID
+                ))
                     .font(.callout.weight(.semibold))
                 Text(installation.path ?? AppText.localized("안전한 설치 경로에서 찾지 못함"))
                     .font(.system(.caption, design: .monospaced))
@@ -665,6 +699,146 @@ private struct YumYumContentView: View {
     }
 
     @ViewBuilder
+    private func hermesModelRows(for installation: AgentInstallation) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            switch viewModel.hermesModelsState {
+            case .idle:
+                EmptyView()
+            case .loading:
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(AppText.localized(
+                        english: "Loading Hermes models…",
+                        korean: "Hermes 모델 목록을 불러오는 중…"
+                    ))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+            case .loaded:
+                if viewModel.hermesModels.isEmpty {
+                    Text(AppText.localized(
+                        english: "Model selection is not available in this Hermes build.",
+                        korean: "이 Hermes 빌드에서는 모델 선택을 사용할 수 없습니다."
+                    ))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                Picker(
+                    AppText.localized(english: "Hermes model", korean: "Hermes 모델"),
+                    selection: Binding<String?>(
+                        get: {
+                            viewModel.agentSnapshot.selectedInstallation?.id == installation.id
+                                ? viewModel.agentSnapshot.selectedModelID
+                                : nil
+                        },
+                        set: { modelID in
+                            guard let path = installation.path else { return }
+                            Task {
+                                try? await viewModel.selectAgent(
+                                    installation.definitionID,
+                                    path: path,
+                                    modelID: modelID
+                                )
+                            }
+                        }
+                    )
+                ) {
+                    Text(AppText.localized(english: "Default model", korean: "기본 모델"))
+                        .tag(Optional<String>.none)
+                    ForEach(viewModel.hermesModels) { model in
+                        Text(model.name).tag(Optional(model.id))
+                    }
+                    if let modelID = viewModel.agentSnapshot.selectedModelID,
+                       !viewModel.hermesModels.contains(where: { $0.id == modelID }) {
+                        Text(AppText.localized(
+                            english: "\(modelID) (unverified)",
+                            korean: "\(modelID) (확인되지 않음)"
+                        ))
+                        .tag(Optional(modelID))
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .frame(width: 150)
+                .accessibilityLabel(AppText.localized(
+                    english: "Hermes model selector",
+                    korean: "Hermes 모델 선택"
+                ))
+            case let .failed(message):
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                    Button(AppText.localized(english: "Retry", korean: "다시 시도")) {
+                        Task { await viewModel.refreshHermesModels(force: true) }
+                    }
+                    .buttonStyle(.borderless)
+                }
+                if let modelID = viewModel.agentSnapshot.selectedModelID,
+                   !viewModel.hermesModels.contains(where: { $0.id == modelID }) {
+                    hermesModelRow(
+                        HermesModel(id: modelID, name: modelID),
+                        installation: installation,
+                        isUnverified: true
+                    )
+                }
+            }
+        }
+        .padding(.leading, 30)
+    }
+
+    private func hermesModelRow(
+        _ model: HermesModel,
+        installation: AgentInstallation,
+        isUnverified: Bool = false
+    ) -> some View {
+        let isSelected = viewModel.agentSnapshot.selectedInstallation?.id == installation.id
+            && viewModel.agentSnapshot.selectedModelID == model.id
+        return HStack(alignment: .top, spacing: 10) {
+            Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(isSelected ? .green : .secondary)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(model.name)
+                    .font(.callout.weight(.semibold))
+                Text(model.id)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if isUnverified {
+                    Text(AppText.localized(
+                        english: "Currently unverified",
+                        korean: "현재 확인되지 않음"
+                    ))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+            }
+
+            Spacer()
+
+            Button(
+                isSelected
+                    ? AppText.localized("선택됨")
+                    : AppText.localized(english: "Select model", korean: "모델 선택")
+            ) {
+                guard let path = installation.path else { return }
+                Task {
+                    try? await viewModel.selectAgent(
+                        installation.definitionID,
+                        path: path,
+                        modelID: model.id
+                    )
+                }
+            }
+            .disabled(isSelected)
+        }
+    }
+
+    @ViewBuilder
     private func agentPrimaryAction(for installation: AgentInstallation) -> some View {
         if installation.availability != .available {
             Button(
@@ -693,6 +867,7 @@ private struct YumYumContentView: View {
         } else {
             Button(
                 viewModel.agentSnapshot.selectedInstallation?.id == installation.id
+                    && viewModel.agentSnapshot.selectedModelID == nil
                     ? AppText.localized("선택됨")
                     : AppText.localized("기본으로 선택")
             ) {
@@ -704,7 +879,10 @@ private struct YumYumContentView: View {
                     )
                 }
             }
-            .disabled(viewModel.agentSnapshot.selectedInstallation?.id == installation.id)
+            .disabled(
+                viewModel.agentSnapshot.selectedInstallation?.id == installation.id
+                    && viewModel.agentSnapshot.selectedModelID == nil
+            )
         }
     }
 
@@ -717,6 +895,16 @@ private struct YumYumContentView: View {
                         AppText.localized(english: "Install guide", korean: "설치 안내"),
                         systemImage: "arrow.up.right.square"
                     )
+                }
+            }
+
+            if installation.definitionID == .hermes,
+               installation.availability == .available {
+                Button(AppText.localized(
+                    english: "Refresh models",
+                    korean: "모델 새로 고침"
+                )) {
+                    Task { await viewModel.refreshHermesModels(force: true) }
                 }
             }
 
@@ -863,6 +1051,8 @@ private struct YumYumContentView: View {
             URL(string: "https://learn.chatgpt.com/docs/codex/cli")
         case .claudeCode:
             URL(string: "https://code.claude.com/docs/en/setup")
+        case .gemini:
+            URL(string: "https://geminicli.com/docs/cli/acp-mode/")
         }
     }
 

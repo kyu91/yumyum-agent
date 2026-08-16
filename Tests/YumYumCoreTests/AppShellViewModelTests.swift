@@ -10,6 +10,26 @@ extension AppGlobalStateTests {
 @Suite
 struct AppShellViewModelTests {
     @Test
+    func hermesAgentRowTitleOnlyClaimsDefaultWithoutSpecificModel() {
+        let selectedTitle = agentRowDisplayName(
+            definitionID: .hermes,
+            hermesModelsState: .loaded,
+            selectedModelID: "openai:gpt-5"
+        )
+        let defaultTitle = agentRowDisplayName(
+            definitionID: .hermes,
+            hermesModelsState: .loaded,
+            selectedModelID: nil
+        )
+
+        #expect(!selectedTitle.contains("Default model"))
+        #expect(!selectedTitle.contains("기본 모델"))
+        #expect(
+            defaultTitle.contains("Default model") || defaultTitle.contains("기본 모델")
+        )
+    }
+
+    @Test
     @MainActor
     func soulDraftSurvivesLateLoadAndFlushesNormalizedLatestRevision() async throws {
         let store = ControlledSoulStore(loadedProfile: SoulProfile(name: "stored"))
@@ -185,6 +205,187 @@ struct AppShellViewModelTests {
         #expect(viewModel.agentSnapshot.selection == .unselected)
         #expect(viewModel.agentSnapshot.installations.isEmpty)
         #expect(await connector.resetCount == 2)
+    }
+
+    @Test
+    @MainActor
+    func refreshHermesModelsTracksLoadingAndKeepsPreviousModelsOnEmptyRefetch() async {
+        let hermes = appShellHermesInstallation()
+        let transport = HermesModelCatalogTransport(
+            responses: [.success([])],
+            waitsForFirstRequest: true
+        )
+        let viewModel = YumYumAppViewModel(
+            fixtureProbe: ImmediateFixtureProbe(result: .success("unused")),
+            agentRegistry: AgentRegistry(
+                discovery: StaticAgentDiscovery(installations: [hermes]),
+                persistence: EmptyAgentSelectionPersistence()
+            ),
+            connectors: [ACPConnector(definitionID: .hermes, transport: transport)]
+        )
+        await viewModel.refreshAgents(trigger: .appStart)
+
+        let refreshTask = Task { @MainActor in
+            await viewModel.refreshHermesModels()
+        }
+        await transport.waitForModelRequest()
+        #expect(viewModel.hermesModelsState == .loading)
+        let models = [HermesModel(id: "anthropic:claude", name: "Claude")]
+        await transport.completeFirstRequest(.success(models))
+        await refreshTask.value
+
+        #expect(viewModel.hermesModelsState == .loaded)
+        #expect(viewModel.hermesModels == models)
+
+        await viewModel.refreshHermesModels()
+        #expect(viewModel.hermesModelsState == .loaded)
+        #expect(viewModel.hermesModels == models)
+
+        await transport.setNextResult(.failure(.unavailable))
+        await viewModel.refreshHermesModels()
+        guard case .failed = viewModel.hermesModelsState else {
+            Issue.record("Expected Hermes model refresh to fail")
+            return
+        }
+    }
+
+    @Test
+    @MainActor
+    func refreshHermesModelsDoesNothingWithoutAvailableHermes() async {
+        let codex = AgentInstallation(
+            definitionID: .codex,
+            path: "/safe/codex",
+            version: "1.0.0",
+            runtimeContract: .codexExec,
+            availability: .available
+        )
+        let transport = HermesModelCatalogTransport(responses: [])
+        let viewModel = YumYumAppViewModel(
+            fixtureProbe: ImmediateFixtureProbe(result: .success("unused")),
+            agentRegistry: AgentRegistry(
+                discovery: StaticAgentDiscovery(installations: [codex]),
+                persistence: EmptyAgentSelectionPersistence()
+            ),
+            connectors: [ACPConnector(definitionID: .hermes, transport: transport)]
+        )
+        await viewModel.refreshAgents(trigger: .appStart)
+        await viewModel.refreshHermesModels()
+
+        #expect(await transport.modelRequestCount == 0)
+        #expect(viewModel.hermesModelsState == .idle)
+    }
+
+    @Test
+    @MainActor
+    func refreshHermesModelsTargetsHermesWhenAnotherACPConnectorComesFirst() async {
+        let hermes = appShellHermesInstallation()
+        let geminiTransport = HermesModelCatalogTransport(responses: [])
+        let hermesTransport = HermesModelCatalogTransport(responses: [])
+        let viewModel = YumYumAppViewModel(
+            fixtureProbe: ImmediateFixtureProbe(result: .success("unused")),
+            agentRegistry: AgentRegistry(
+                discovery: StaticAgentDiscovery(installations: [hermes]),
+                persistence: EmptyAgentSelectionPersistence()
+            ),
+            connectors: [
+                ACPConnector(definitionID: .gemini, transport: geminiTransport),
+                ACPConnector(definitionID: .hermes, transport: hermesTransport),
+            ]
+        )
+        await viewModel.refreshAgents(trigger: .appStart)
+        await viewModel.refreshHermesModels()
+
+        #expect(await geminiTransport.modelRequestCount == 0)
+        #expect(await hermesTransport.modelRequestCount == 1)
+    }
+
+    @Test
+    @MainActor
+    func refreshHermesModelsUsesTheSelectedHermesExecutablePath() async throws {
+        let first = appShellHermesInstallation(path: "/safe/hermes-first")
+        let second = appShellHermesInstallation(path: "/safe/hermes-second")
+        let firstModels = [HermesModel(id: "first:model", name: "First")]
+        let secondModels = [HermesModel(id: "second:model", name: "Second")]
+        let transport = HermesModelCatalogTransport(
+            responses: [.success(firstModels), .success(secondModels)]
+        )
+        let viewModel = YumYumAppViewModel(
+            fixtureProbe: ImmediateFixtureProbe(result: .success("unused")),
+            agentRegistry: AgentRegistry(
+                discovery: StaticAgentDiscovery(installations: [first, second]),
+                persistence: EmptyAgentSelectionPersistence()
+            ),
+            connectors: [ACPConnector(definitionID: .hermes, transport: transport)]
+        )
+
+        await viewModel.refreshAgents(trigger: .appStart)
+        await viewModel.refreshHermesModels()
+        #expect(viewModel.hermesModels == firstModels)
+        #expect(viewModel.effectiveHermesInstallation?.path == first.path)
+
+        try await viewModel.selectAgent(.hermes, path: second.path!)
+
+        #expect(viewModel.hermesModels == secondModels)
+        #expect(viewModel.effectiveHermesInstallation?.path == second.path)
+        try await viewModel.selectAgent(
+            .hermes,
+            path: second.path!,
+            modelID: secondModels[0].id
+        )
+        #expect(viewModel.agentSnapshot.selectedInstallation?.path == second.path)
+        #expect(await transport.modelRequestPaths == [first.path!, second.path!])
+    }
+
+    @Test
+    @MainActor
+    func refreshHermesModelsRetriesAfterAnInFlightRequestSkip() async {
+        let hermes = appShellHermesInstallation()
+        let models = [HermesModel(id: "anthropic:claude", name: "Claude")]
+        let transport = BusyThenModelsTransport(models: models)
+        let viewModel = YumYumAppViewModel(
+            fixtureProbe: ImmediateFixtureProbe(result: .success("unused")),
+            agentRegistry: AgentRegistry(
+                discovery: StaticAgentDiscovery(installations: [hermes]),
+                persistence: EmptyAgentSelectionPersistence()
+            ),
+            connectors: [ACPConnector(definitionID: .hermes, transport: transport)]
+        )
+
+        await viewModel.refreshAgents(trigger: .appStart)
+        await viewModel.refreshHermesModels()
+
+        #expect(viewModel.hermesModelsState == .idle)
+        #expect(viewModel.hermesModels.isEmpty)
+
+        await viewModel.refreshHermesModels()
+
+        #expect(viewModel.hermesModelsState == .loaded)
+        #expect(viewModel.hermesModels == models)
+    }
+
+    @Test
+    @MainActor
+    func selectingAnotherHermesModelResetsTheExistingSession() async throws {
+        let hermes = appShellHermesInstallation()
+        let transport = HermesModelCatalogTransport(responses: [])
+        let viewModel = YumYumAppViewModel(
+            fixtureProbe: ImmediateFixtureProbe(result: .success("unused")),
+            agentRegistry: AgentRegistry(
+                discovery: StaticAgentDiscovery(installations: [hermes]),
+                persistence: EmptyAgentSelectionPersistence()
+            ),
+            connectors: [ACPConnector(definitionID: .hermes, transport: transport)]
+        )
+        await viewModel.refreshAgents(trigger: .appStart)
+
+        try await viewModel.selectAgent(.hermes, path: hermes.path!)
+        try await viewModel.selectAgent(
+            .hermes,
+            path: hermes.path!,
+            modelID: "openai:gpt-5"
+        )
+
+        #expect(await transport.closeCount == 2)
     }
 
     @Test
@@ -685,4 +886,124 @@ private actor LifecycleConnector: AgentConnecting {
     func close() {
         closeCount += 1
     }
+}
+
+private func appShellHermesInstallation(path: String = "/safe/hermes") -> AgentInstallation {
+    AgentInstallation(
+        definitionID: .hermes,
+        path: path,
+        version: "Hermes 1.0",
+        runtimeContract: .hermesACP,
+        availability: .available
+    )
+}
+
+private enum HermesModelCatalogError: Error {
+    case unavailable
+}
+
+private actor HermesModelCatalogTransport: ACPTransporting {
+    private var responses: [Result<[HermesModel], HermesModelCatalogError>]
+    private var waitsForFirstRequest: Bool
+    private var firstRequestContinuation: CheckedContinuation<[HermesModel], any Error>?
+    private(set) var modelRequestCount = 0
+    private(set) var modelRequestPaths: [String] = []
+    private(set) var closeCount = 0
+
+    init(
+        responses: [Result<[HermesModel], HermesModelCatalogError>],
+        waitsForFirstRequest: Bool = false
+    ) {
+        self.responses = responses
+        self.waitsForFirstRequest = waitsForFirstRequest
+    }
+
+    func send(
+        _ request: PromptRequest,
+        executableURL: URL,
+        environment: [String: String],
+        timeout: Duration,
+        outputByteLimit: Int
+    ) async throws -> PromptResponse {
+        PromptResponse(text: "unused")
+    }
+
+    func models(
+        executableURL: URL,
+        environment: [String: String],
+        outputByteLimit: Int,
+        modelID: String?,
+        force: Bool
+    ) async throws -> [HermesModel] {
+        modelRequestCount += 1
+        modelRequestPaths.append(executableURL.standardizedFileURL.path)
+        if waitsForFirstRequest {
+            waitsForFirstRequest = false
+            return try await withCheckedThrowingContinuation { continuation in
+                firstRequestContinuation = continuation
+            }
+        }
+        guard !responses.isEmpty else { return [] }
+        return try responses.removeFirst().get()
+    }
+
+    func waitForModelRequest() async {
+        while modelRequestCount == 0 {
+            await Task.yield()
+        }
+    }
+
+    func completeFirstRequest(_ result: Result<[HermesModel], HermesModelCatalogError>) {
+        guard let continuation = firstRequestContinuation else { return }
+        firstRequestContinuation = nil
+        switch result {
+        case let .success(models):
+            continuation.resume(returning: models)
+        case let .failure(error):
+            continuation.resume(throwing: error)
+        }
+    }
+
+    func setNextResult(_ result: Result<[HermesModel], HermesModelCatalogError>) {
+        responses.append(result)
+    }
+
+    func close() {
+        closeCount += 1
+    }
+}
+
+private actor BusyThenModelsTransport: ACPTransporting {
+    private let models: [HermesModel]
+    private var didSkip = false
+
+    init(models: [HermesModel]) {
+        self.models = models
+    }
+
+    func send(
+        _ request: PromptRequest,
+        executableURL: URL,
+        environment: [String: String],
+        timeout: Duration,
+        outputByteLimit: Int
+    ) async throws -> PromptResponse {
+        PromptResponse(text: "unused")
+    }
+
+    func models(
+        executableURL: URL,
+        environment: [String: String],
+        outputByteLimit: Int,
+        modelID: String?,
+        force: Bool
+    ) async throws -> [HermesModel] {
+        if !didSkip {
+            didSkip = true
+            throw ACPProtocolError.requestInFlight
+        }
+        return models
+    }
+
+    func close() {}
 }

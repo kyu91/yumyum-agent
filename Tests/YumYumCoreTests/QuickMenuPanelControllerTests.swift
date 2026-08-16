@@ -463,6 +463,30 @@ struct QuickMenuPanelControllerTests {
 
     @Test
     @MainActor
+    func chatSettingsButtonOpensSettings() throws {
+        _ = NSApplication.shared
+        var didOpenSettings = false
+        let controller = ChatPanelController(
+            petController: FloatingPetWindowController {},
+            viewModel: YumYumAppViewModel(fixtureProbe: UnusedFixtureProbe()),
+            workflow: FeedWorkflow(sender: ControlledPromptSender(), feedback: SilentFeedFeedback()),
+            openSettings: { didOpenSettings = true }
+        )
+        defer { controller.prepareForTermination() }
+        controller.applyLanguage(.english)
+
+        let settings = try #require(buttons(in: controller.panel.contentView).first {
+            $0.accessibilityLabel() == "Open settings"
+        })
+        #expect(settings.accessibilityHelp() == "Opens the app's Settings window")
+
+        settings.performClick(nil)
+
+        #expect(didOpenSettings)
+    }
+
+    @Test
+    @MainActor
     func chatThemeDoesNotChangeRenderedActionThinkingOrResponseSurfaces() throws {
         _ = NSApplication.shared
         let pet = FloatingPetWindowController {}
@@ -596,6 +620,54 @@ struct QuickMenuPanelControllerTests {
         #expect(abs(surfaces[1].frame.minY - surfaces[2].frame.maxY - 8) < 0.5)
         #expect(!surfaces[0].frame.intersects(surfaces[1].frame))
         #expect(!surfaces[1].frame.intersects(surfaces[2].frame))
+    }
+
+    @Test
+    @MainActor
+    func responseBubbleHeaderStaysInsideSurfaceAboveTranscriptAtShortAndMaxHeights() throws {
+        _ = NSApplication.shared
+        let controller = ResponseBubbleViewController()
+        _ = controller.view
+        controller.applyLanguage(.korean)
+        let body = try surface("response-body-surface", in: controller.view)
+        let scroll = try #require(scrollViews(in: body).first)
+        let close = try #require(buttons(in: controller.view).first {
+            $0.accessibilityLabel() == "답변 말풍선 닫기"
+        })
+        let settings = try #require(buttons(in: controller.view).first {
+            $0.accessibilityLabel() == "설정 열기"
+        })
+
+        controller.render(PetResponsePolicy.content(for: "짧은 답변"))
+        controller.view.frame.size = controller.preferredSize
+        controller.view.layoutSubtreeIfNeeded()
+
+        let shortScrollFrame = scroll.convert(scroll.bounds, to: body)
+        #expect(close.isDescendant(of: body))
+        #expect(settings.isDescendant(of: body))
+        #expect(close.convert(close.bounds, to: body).minY >= shortScrollFrame.maxY)
+        #expect(settings.convert(settings.bounds, to: body).minY >= shortScrollFrame.maxY)
+
+        controller.render(PetResponseContent(
+            fullText: String(repeating: "긴 답변\n", count: 500),
+            displayText: String(repeating: "긴 답변\n", count: 500),
+            isExcerpt: false,
+            showsOpenChat: true,
+            showsRetry: true,
+            isError: true
+        ))
+        controller.view.frame.size = controller.preferredSize
+        controller.view.layoutSubtreeIfNeeded()
+
+        let maxScrollFrame = scroll.convert(scroll.bounds, to: body)
+        let retry = try #require(buttons(in: body).first {
+            $0.accessibilityLabel() == "마지막 입력 재시도"
+        })
+        #expect(controller.preferredSize.height == 310)
+        #expect(close.convert(close.bounds, to: body).minY >= maxScrollFrame.maxY)
+        #expect(settings.convert(settings.bounds, to: body).minY >= maxScrollFrame.maxY)
+        #expect(retry.convert(retry.bounds, to: body).maxY <= maxScrollFrame.minY)
+        #expect(retry.convert(retry.bounds, to: body).maxY <= body.bounds.maxY)
     }
 
     @Test

@@ -5,6 +5,7 @@ public enum AgentDefinitionID: String, CaseIterable, Codable, Sendable {
     case openCode = "opencode"
     case codex
     case claudeCode = "claude-code"
+    case gemini
 
     public var displayName: String {
         switch self {
@@ -12,6 +13,7 @@ public enum AgentDefinitionID: String, CaseIterable, Codable, Sendable {
         case .openCode: "OpenCode"
         case .codex: "Codex"
         case .claudeCode: "Claude Code"
+        case .gemini: "Gemini"
         }
     }
 
@@ -21,6 +23,7 @@ public enum AgentDefinitionID: String, CaseIterable, Codable, Sendable {
         case .openCode: "opencode"
         case .codex: "codex"
         case .claudeCode: "claude"
+        case .gemini: "gemini"
         }
     }
 }
@@ -30,6 +33,7 @@ public enum AgentRuntimeContract: String, Equatable, Sendable {
     case openCodeRun
     case codexExec
     case claudePrint
+    case geminiACP
 }
 
 public enum AgentAvailability: Equatable, Sendable {
@@ -100,6 +104,7 @@ public protocol AgentDiscovering: Sendable {
 public struct AgentDiscovery: AgentDiscovering, Sendable {
     public static var defaultKnownExecutableDirectories: [URL] {
         let home = FileManager.default.homeDirectoryForCurrentUser
+        // TODO(verify-before-ship): Gemini CLI's npm-global install location is unconfirmed and may not be covered by these fixed directories; verify it against real installs.
         return [
             URL(fileURLWithPath: "/opt/homebrew/bin", isDirectory: true),
             URL(fileURLWithPath: "/usr/local/bin", isDirectory: true),
@@ -249,7 +254,7 @@ public struct AgentDiscovery: AgentDiscovering, Sendable {
 
             let help = decodedOutput(helpResult)
             guard helpResult.termination == .exited(status: 0),
-                  contract.requiredFragments.allSatisfy(help.contains) else {
+                  contract.requiredFragments.allSatisfy({ help.localizedCaseInsensitiveContains($0) }) else {
                 return unavailable(
                     definitionID,
                     path: executableURL.path,
@@ -309,6 +314,7 @@ private extension AgentDefinitionID {
         case .openCode: .openCodeRun
         case .codex: .codexExec
         case .claudeCode: .claudePrint
+        case .gemini: .geminiACP
         }
     }
 
@@ -348,6 +354,12 @@ private extension AgentDefinitionID {
                     "stream-json", "--include-partial-messages", "--permission-mode",
                     "--session-id", "--resume",
                 ]
+            )]
+        case .gemini:
+            // Confirmed in google-gemini/gemini-cli packages/cli/src/config/config.ts: top-level yargs .option("acp", ...) registration.
+            [AgentHelpContract(
+                arguments: ["--help"],
+                requiredFragments: ["--acp"]
             )]
         }
     }

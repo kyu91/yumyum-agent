@@ -5,6 +5,72 @@ import Testing
 @Suite
 struct AgentConnectorTests {
     @Test
+    func runtimeAttachesSelectedModelOnlyToHermesRequests() async throws {
+        let hermesConnector = RuntimeConnector(definitionID: .hermes)
+        let hermesRuntime = AgentRuntime(
+            selection: RuntimeSelection(
+                installation: testInstallation(.hermes, path: "/safe/hermes"),
+                modelID: "anthropic:claude-sonnet"
+            ),
+            connectors: [hermesConnector]
+        )
+        _ = try await hermesRuntime.send(PromptRequest(text: "Hermes", modelID: "ignored"))
+        #expect(await hermesConnector.requests.first?.modelID == "anthropic:claude-sonnet")
+
+        let openCodeConnector = RuntimeConnector(definitionID: .openCode)
+        let openCodeRuntime = AgentRuntime(
+            selection: RuntimeSelection(
+                installation: testInstallation(.openCode, path: "/safe/opencode"),
+                modelID: "openai:gpt-5"
+            ),
+            connectors: [openCodeConnector]
+        )
+        _ = try await openCodeRuntime.send(PromptRequest(text: "OpenCode", modelID: "ignored"))
+        #expect(await openCodeConnector.requests.first?.modelID == nil)
+
+        for definitionID in [AgentDefinitionID.gemini] {
+            let connector = RuntimeConnector(definitionID: definitionID)
+            let runtime = AgentRuntime(
+                selection: RuntimeSelection(
+                    installation: testInstallation(
+                        definitionID,
+                        path: "/safe/\(definitionID.rawValue)"
+                    ),
+                    modelID: "ignored:model"
+                ),
+                connectors: [connector]
+            )
+            _ = try await runtime.send(PromptRequest(text: definitionID.displayName))
+            #expect(await connector.requests.first?.modelID == nil)
+        }
+    }
+
+    @Test
+    func hermesConnectorForwardsModelCatalogEnvironmentAndSelection() async throws {
+        let transport = RecordingHermesTransport()
+        let connector = ACPConnector(
+            definitionID: .hermes,
+            transport: transport,
+            outputByteLimit: 123
+        )
+        let executableURL = URL(fileURLWithPath: "/safe/bin/hermes")
+
+        _ = try await connector.models(
+            executableURL: executableURL,
+            modelID: "google:gemini"
+        )
+
+        let invocation = try #require(await transport.modelInvocation)
+        #expect(invocation.executableURL == executableURL)
+        #expect(invocation.environment == AgentProcessEnvironment.make(
+            executableDirectory: executableURL.deletingLastPathComponent()
+        ))
+        #expect(invocation.outputByteLimit == 123)
+        #expect(invocation.modelID == "google:gemini")
+        #expect(!invocation.force)
+    }
+
+    @Test
     func runtimeLoadsCurrentSoulAtTheCommonRequestBoundary() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -281,7 +347,10 @@ struct AgentConnectorTests {
         let runner = ConnectorProcessRunner()
         let hermesTransport = RecordingHermesTransport()
 
-        _ = try await HermesACPConnector(transport: hermesTransport).send(
+        _ = try await ACPConnector(
+            definitionID: .hermes,
+            transport: hermesTransport
+        ).send(
             request,
             executableURL: executableDirectory.appendingPathComponent("hermes")
         )
@@ -740,7 +809,7 @@ struct AgentConnectorTests {
                     availability: .available
                 )
             ),
-            connectors: [HermesACPConnector(transport: hermesTransport)],
+            connectors: [ACPConnector(definitionID: .hermes, transport: hermesTransport)],
             soulStore: soulStore
         )
         _ = try await hermesRuntime.send(PromptRequest(text: "Hermes 요청"))
@@ -848,15 +917,21 @@ private func collectConnectorEvents(
 
 private actor RuntimeSelection: AgentSelectionValidating {
     private var result: Result<AgentInstallation, AgentSelectionError>
+    private let modelID: String?
     private(set) var validationCount = 0
 
-    init(installation: AgentInstallation) {
+    init(installation: AgentInstallation, modelID: String? = nil) {
         result = .success(installation)
+        self.modelID = modelID
     }
 
     func validatedSelection() async throws -> AgentInstallation {
         validationCount += 1
         return try result.get()
+    }
+
+    var selectedModelID: String? {
+        modelID
     }
 
     func setResult(_ result: Result<AgentInstallation, AgentSelectionError>) {
@@ -1270,13 +1345,22 @@ private actor ControlledStreamingProcessRunner: ProcessRunning {
     }
 }
 
-private actor RecordingHermesTransport: HermesACPTransporting {
+private actor RecordingHermesTransport: ACPTransporting {
     struct Invocation: Sendable {
         let request: PromptRequest
         let executableURL: URL
     }
 
+    struct ModelInvocation: Sendable {
+        let executableURL: URL
+        let environment: [String: String]
+        let outputByteLimit: Int
+        let modelID: String?
+        let force: Bool
+    }
+
     private(set) var invocation: Invocation?
+    private(set) var modelInvocation: ModelInvocation?
     private(set) var closeCount = 0
 
     func send(
@@ -1290,7 +1374,45 @@ private actor RecordingHermesTransport: HermesACPTransporting {
         return PromptResponse(text: "완료")
     }
 
+    func models(
+        executableURL: URL,
+        environment: [String: String],
+        outputByteLimit: Int,
+        modelID: String?,
+        force: Bool
+    ) async throws -> [HermesModel] {
+        modelInvocation = ModelInvocation(
+            executableURL: executableURL,
+            environment: environment,
+            outputByteLimit: outputByteLimit,
+            modelID: modelID,
+            force: force
+        )
+        return []
+    }
+
     func close() {
         closeCount += 1
     }
+}
+
+private func testInstallation(
+    _ definitionID: AgentDefinitionID,
+    path: String
+) -> AgentInstallation {
+    let runtimeContract: AgentRuntimeContract
+    switch definitionID {
+    case .hermes: runtimeContract = .hermesACP
+    case .openCode: runtimeContract = .openCodeRun
+    case .codex: runtimeContract = .codexExec
+    case .claudeCode: runtimeContract = .claudePrint
+    case .gemini: runtimeContract = .geminiACP
+    }
+    return AgentInstallation(
+        definitionID: definitionID,
+        path: path,
+        version: "1.0.0",
+        runtimeContract: runtimeContract,
+        availability: .available
+    )
 }

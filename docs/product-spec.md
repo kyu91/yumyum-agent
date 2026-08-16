@@ -12,7 +12,7 @@ YumYum Agent is a native macOS floating pet that sends user-selected screen regi
 
 | Status | Scope |
 |---|---|
-| Implemented | Movable always-on-top pet; four-action quick menu; rectangular multi-display capture; multi-file picker and Finder file drop; one active request with busy rejection; streamed response bubble and shared chat transcript; follow-up, cancel, and retry; Hermes, OpenCode, Codex, and Claude Code discovery, explicit selection, and execution; editable app-owned Soul; live English/Korean switching; Light/Dark appearance; release packaging, GitHub workflow, signing, and notarization logic. |
+| Implemented | Movable always-on-top pet; four-action quick menu; rectangular multi-display capture; multi-file picker and Finder file drop; one active request with busy rejection; streamed response bubble and shared chat transcript; follow-up, cancel, and retry; Hermes, OpenCode, Codex, Claude Code, and Gemini discovery, explicit selection, and execution; editable app-owned Soul; live English/Korean switching; Light/Dark appearance; release packaging, GitHub workflow, signing, and notarization logic. |
 | Partial | External-change policy and an in-memory one-time approval model exist, but no approval UI or connector execution wiring exists. Finder drop policy is automated, while actual Finder dispatch and hit testing remain manual checks. Capture cleanup after abnormal termination is best effort. |
 | Not implemented | External state changes, approval execution UI, calendar actions, folders, clipboard paste, URL input, OCR, active-window accessibility context, masking preview/confirmation, FIFO queue, persistent history, answer copy, login item, App Store distribution, automatic updates, and verified Intel support. |
 
@@ -66,6 +66,7 @@ Cancellation, denied permission, empty text with no attachment, invalid attachme
 | OpenCode | `opencode run --pure --format json` | Validated attachments via `--file` |
 | Codex | `codex exec` with read-only sandbox and untrusted approval policy | Images only via `--image` |
 | Claude Code | Structured print execution, plan permission mode, non-persistent process sessions | Prompt contract only; no invented attachment flags |
+| Gemini | `gemini --acp`, shared ACP transport | Validated prompt content and supported file blocks |
 
 All processes use the exact executable URL and argv without a shell. General connector runs have a 120-second timeout and a combined 2 MB stdout/stderr limit. Each CLI owns authentication, network access, model-provider processing, and response quality; YumYum Agent does not read its login files or tokens.
 

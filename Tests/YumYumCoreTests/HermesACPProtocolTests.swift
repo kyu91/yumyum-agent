@@ -5,6 +5,128 @@ import Testing
 @Suite
 struct HermesACPProtocolTests {
     @Test
+    func eachACPConnectorUsesItsDocumentedArgumentVector() async throws {
+        let cases: [(AgentDefinitionID, [String])] = [
+            (.hermes, ["acp"]),
+            (.gemini, ["--acp"]),
+        ]
+
+        for (definitionID, arguments) in cases {
+            let lineTransport = ScriptedACPLineTransport(
+                incoming: [
+                    #"{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":1}}"#,
+                    #"{"jsonrpc":"2.0","id":1,"result":{"sessionId":"session-1"}}"#,
+                    #"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"응답"}}}}"#,
+                    #"{"jsonrpc":"2.0","id":2,"result":{"stopReason":"end_turn"}}"#,
+                ]
+            )
+            let factory = ScriptedACPLineTransportFactory(transport: lineTransport)
+            let transport = ACPProcessTransport(
+                lineTransportFactory: factory,
+                arguments: arguments,
+                workingDirectory: URL(fileURLWithPath: "/private/tmp")
+            )
+            let connector = ACPConnector(definitionID: definitionID, transport: transport)
+
+            let response = try await connector.send(
+                PromptRequest(text: "질문"),
+                executableURL: URL(fileURLWithPath: "/mock/\(definitionID.rawValue)")
+            )
+
+            #expect(response == PromptResponse(text: "응답"))
+            #expect(await factory.madeArguments() == arguments)
+        }
+    }
+
+    @Test
+    func skipsNonJSONLinesBetweenValidJSONRPCMessages() async throws {
+        let transport = ScriptedACPLineTransport(
+            incoming: [
+                "cached credentials loaded",
+                #"{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":1}}"#,
+                "starting ACP session",
+                #"{"jsonrpc":"2.0","id":1,"result":{"sessionId":"session-1"}}"#,
+                "agent log line",
+                #"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"완료"}}}}"#,
+                "done",
+                #"{"jsonrpc":"2.0","id":2,"result":{"stopReason":"end_turn"}}"#,
+            ]
+        )
+        let client = ACPProtocolClient(transport: transport)
+
+        #expect(try await client.send(PromptRequest(text: "질문")) == PromptResponse(text: "완료"))
+    }
+
+    @Test
+    func nonJSONOutputStillStopsAtTheProcessOutputByteLimit() async throws {
+        let transport = try ACPProcessLineTransport(
+            executableURL: URL(fileURLWithPath: "/usr/bin/yes"),
+            arguments: [],
+            environment: ["PATH": "/usr/bin"],
+            workingDirectory: FileManager.default.temporaryDirectory,
+            outputByteLimit: 8
+        )
+        let client = ACPProtocolClient(transport: transport)
+
+        do {
+            _ = try await client.send(PromptRequest(text: "질문"))
+            Issue.record("Expected ACP output limit to stop non-JSON garbage")
+        } catch let error as ACPProtocolError {
+            #expect(error == .outputLimitExceeded)
+        }
+
+        await transport.close()
+    }
+
+    @Test
+    func sharedACPSessionBehaviorWorksForEachDocumentedArgumentVector() async throws {
+        let argumentSets = [["acp"], ["--acp"], ["agent", "stdio"]]
+
+        for arguments in argumentSets {
+            let lineTransport = ScriptedACPLineTransport(
+                incoming: [
+                    #"{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":1}}"#,
+                    #"{"jsonrpc":"2.0","id":1,"result":{"sessionId":"session-1"}}"#,
+                    #"{"jsonrpc":"2.0","id":90,"method":"session/request_permission","params":{"sessionId":"session-1","options":[]}}"#,
+                    #"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"첫 응답"}}}}"#,
+                    #"{"jsonrpc":"2.0","id":2,"result":{"stopReason":"end_turn"}}"#,
+                    #"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"둘째 응답"}}}}"#,
+                    #"{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}"#,
+                ]
+            )
+            let factory = ScriptedACPLineTransportFactory(transport: lineTransport)
+            let transport = ACPProcessTransport(
+                lineTransportFactory: factory,
+                arguments: arguments,
+                workingDirectory: URL(fileURLWithPath: "/private/tmp")
+            )
+
+            let first = try await transport.send(
+                PromptRequest(text: "첫 질문"),
+                executableURL: URL(fileURLWithPath: "/mock/agent"),
+                environment: ["PATH": "/mock"],
+                timeout: .seconds(1),
+                outputByteLimit: 4_096
+            )
+            let second = try await transport.send(
+                PromptRequest(text: "둘째 질문"),
+                executableURL: URL(fileURLWithPath: "/mock/agent"),
+                environment: ["PATH": "/mock"],
+                timeout: .seconds(1),
+                outputByteLimit: 4_096
+            )
+
+            #expect(first == PromptResponse(text: "첫 응답"))
+            #expect(second == PromptResponse(text: "둘째 응답"))
+            #expect(await factory.makeCount() == 1)
+            #expect(await factory.madeArguments() == arguments)
+            #expect(try await decodedMethods(lineTransport.sentLines()) == [
+                "initialize", "session/new", "session/prompt", "session/prompt",
+            ])
+        }
+    }
+
+    @Test
     func stoppingTransportDoesNotWaitForABlockedInputWrite() {
         let writeStarted = DispatchSemaphore(value: 0)
         let releaseWrite = DispatchSemaphore(value: 0)
@@ -51,7 +173,7 @@ struct HermesACPProtocolTests {
                 #"{"jsonrpc":"2.0","id":2,"result":{"stopReason":"end_turn"}}"#,
             ]
         )
-        let client = HermesACPProtocolClient(
+        let client = ACPProtocolClient(
             transport: transport,
             workingDirectory: URL(fileURLWithPath: "/private/tmp", isDirectory: true)
         )
@@ -92,6 +214,124 @@ struct HermesACPProtocolTests {
     }
 
     @Test
+    func selectsRequestedHermesModelOnlyWhenCreatingTheSession() async throws {
+        let transport = ScriptedACPLineTransport(
+            incoming: [
+                #"{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":1}}"#,
+                #"{"jsonrpc":"2.0","id":1,"result":{"sessionId":"session-1","models":{"availableModels":[{"modelId":"anthropic:old","name":"Old"},{"modelId":"openai:gpt-5","name":"GPT-5"}],"currentModelId":"anthropic:old"}}}"#,
+                #"{"jsonrpc":"2.0","id":90,"method":"session/request_permission","params":{"sessionId":"session-1","options":[]}}"#,
+                #"{"jsonrpc":"2.0","id":91,"method":"fs/read_text_file","params":{}}"#,
+                #"{"jsonrpc":"2.0","id":2,"result":{}}"#,
+                #"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"첫 응답"}}}}"#,
+                #"{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}"#,
+                #"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"둘째 응답"}}}}"#,
+                #"{"jsonrpc":"2.0","id":4,"result":{"stopReason":"end_turn"}}"#,
+            ]
+        )
+        let client = ACPProtocolClient(transport: transport)
+
+        _ = try await client.send(PromptRequest(text: "첫 질문", modelID: "openai:gpt-5"))
+        _ = try await client.send(PromptRequest(text: "둘째 질문", modelID: "openai:gpt-5"))
+
+        let sent = try await transport.sentLines().map { data in
+            try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        }
+        let methods = sent.compactMap { $0["method"] as? String }
+        #expect(methods == [
+            "initialize",
+            "session/new",
+            "session/set_model",
+            "session/prompt",
+            "session/prompt",
+        ])
+        let setModel = try #require(sent.first { $0["method"] as? String == "session/set_model" })
+        #expect(setModel["id"] as? Int == 2)
+        let setParams = try #require(setModel["params"] as? [String: Any])
+        #expect(setParams["sessionId"] as? String == "session-1")
+        #expect(setParams["modelId"] as? String == "openai:gpt-5")
+        #expect(sent.filter { $0["method"] as? String == "session/prompt" }.count == 2)
+        #expect(sent.contains { message in
+            (message["id"] as? Int) == 90
+                && (message["result"] as? [String: Any])?["outcome"] as? [String: Any] != nil
+        })
+        #expect(sent.contains { message in
+            (message["id"] as? Int) == 91
+                && (message["error"] as? [String: Any])?["code"] as? Int == -32_601
+        })
+    }
+
+    @Test
+    func setModelErrorStopsPromptAndPropagatesRequestFailure() async throws {
+        let transport = ScriptedACPLineTransport(
+            incoming: [
+                #"{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":1}}"#,
+                #"{"jsonrpc":"2.0","id":1,"result":{"sessionId":"session-1","models":{"availableModels":[],"currentModelId":"anthropic:old"}}}"#,
+                #"{"jsonrpc":"2.0","id":2,"error":{"code":-32000,"message":"model unavailable"}}"#,
+            ]
+        )
+        let client = ACPProtocolClient(transport: transport)
+
+        do {
+            _ = try await client.send(PromptRequest(text: "질문", modelID: "openai:gpt-5"))
+            Issue.record("Expected session/set_model to fail")
+        } catch let error as ACPProtocolError {
+            #expect(error == .requestFailed("model unavailable"))
+        }
+
+        let sent = try await transport.sentLines().map { data in
+            try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        }
+        #expect(sent.compactMap { $0["method"] as? String } == [
+            "initialize", "session/new", "session/set_model",
+        ])
+    }
+
+    @Test
+    func missingModelsFieldStillReturnsEmptyCatalogAndAttemptsSelection() async throws {
+        let transport = ScriptedACPLineTransport(
+            incoming: [
+                #"{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":1}}"#,
+                #"{"jsonrpc":"2.0","id":1,"result":{"sessionId":"session-1"}}"#,
+                #"{"jsonrpc":"2.0","id":2,"result":null}"#,
+            ]
+        )
+        let client = ACPProtocolClient(transport: transport)
+
+        #expect(try await client.modelCatalog(modelID: "openai:gpt-5").isEmpty)
+        let sent = try await transport.sentLines().map { data in
+            try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        }
+        #expect(sent.compactMap { $0["method"] as? String } == [
+            "initialize", "session/new", "session/set_model",
+        ])
+    }
+
+    @Test
+    func modelCatalogFiltersProvidersButFallsBackWhenFilteringWouldBeEmpty() async throws {
+        let filteredTransport = ScriptedACPLineTransport(
+            incoming: [
+                #"{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":1}}"#,
+                #"{"jsonrpc":"2.0","id":1,"result":{"sessionId":"session-1","models":{"availableModels":[{"modelId":"openai-codex:gpt-5.6-sol","name":"GPT-5.6 Sol"},{"modelId":"anthropic-claude:opus-5","name":"Opus 5"},{"modelId":"kimi:moonshot-v2","name":"Moonshot V2"},{"modelId":"openaifoo:model","name":"OpenAI Foo"}],"currentModelId":"openai-codex:gpt-5.6-sol"}}}"#,
+            ]
+        )
+        let filteredClient = ACPProtocolClient(transport: filteredTransport)
+        #expect(try await filteredClient.modelCatalog(modelID: nil).map(\.id) == [
+            "openai-codex:gpt-5.6-sol", "anthropic-claude:opus-5",
+        ])
+
+        let fallbackTransport = ScriptedACPLineTransport(
+            incoming: [
+                #"{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":1}}"#,
+                #"{"jsonrpc":"2.0","id":1,"result":{"sessionId":"session-1","models":{"availableModels":[{"modelId":"groq:llama","name":"Llama"},{"modelId":"mistral:large","name":"Mistral"}],"currentModelId":"groq:llama"}}}"#,
+            ]
+        )
+        let fallbackClient = ACPProtocolClient(transport: fallbackTransport)
+        #expect(try await fallbackClient.modelCatalog(modelID: nil).map(\.id) == [
+            "groq:llama", "mistral:large",
+        ])
+    }
+
+    @Test
     func reusesInitializationAndSessionAcrossTurnsWhileStreamingDeltas() async throws {
         let transport = ScriptedACPLineTransport(
             incoming: [
@@ -104,7 +344,7 @@ struct HermesACPProtocolTests {
                 #"{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}"#,
             ]
         )
-        let client = HermesACPProtocolClient(
+        let client = ACPProtocolClient(
             transport: transport,
             workingDirectory: URL(fileURLWithPath: "/private/tmp", isDirectory: true)
         )
@@ -174,7 +414,7 @@ struct HermesACPProtocolTests {
                 #"{"jsonrpc":"2.0","id":2,"result":{"stopReason":"end_turn"}}"#,
             ]
         )
-        let client = HermesACPProtocolClient(
+        let client = ACPProtocolClient(
             transport: transport,
             workingDirectory: URL(fileURLWithPath: "/private/tmp", isDirectory: true)
         )
@@ -204,6 +444,7 @@ struct HermesACPProtocolTests {
         let factory = ScriptedACPLineTransportFactory(transport: lineTransport)
         let transport = ACPProcessTransport(
             lineTransportFactory: factory,
+            arguments: ["acp"],
             workingDirectory: URL(fileURLWithPath: "/private/tmp", isDirectory: true)
         )
         let executable = URL(fileURLWithPath: "/mock/hermes")
@@ -236,6 +477,251 @@ struct HermesACPProtocolTests {
     }
 
     @Test
+    func modelCatalogWarmsTheConnectionForTheFollowingPrompt() async throws {
+        let lineTransport = ScriptedACPLineTransport(
+            incoming: [
+                #"{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":1}}"#,
+                #"{"jsonrpc":"2.0","id":1,"result":{"sessionId":"session-1","models":{"availableModels":[{"modelId":"anthropic:claude","name":"Claude"}],"currentModelId":"anthropic:claude"}}}"#,
+                #"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"응답"}}}}"#,
+                #"{"jsonrpc":"2.0","id":2,"result":{"stopReason":"end_turn"}}"#,
+            ]
+        )
+        let factory = ScriptedACPLineTransportFactory(transport: lineTransport)
+        let transport = ACPProcessTransport(
+            lineTransportFactory: factory,
+            arguments: ["acp"],
+            workingDirectory: URL(fileURLWithPath: "/private/tmp")
+        )
+        let executable = URL(fileURLWithPath: "/mock/hermes")
+
+        #expect(try await transport.models(
+            executableURL: executable,
+            environment: ["PATH": "/mock"],
+            outputByteLimit: 4_096,
+            modelID: nil
+        ).map(\.id) == ["anthropic:claude"])
+        _ = try await transport.send(
+            PromptRequest(text: "질문"),
+            executableURL: executable,
+            environment: ["PATH": "/mock"],
+            timeout: .seconds(1),
+            outputByteLimit: 4_096
+        )
+
+        #expect(await factory.makeCount() == 1)
+        #expect(try await decodedMethods(lineTransport.sentLines()) == [
+            "initialize", "session/new", "session/prompt",
+        ])
+    }
+
+    @Test
+    func forcedModelCatalogRefreshRecreatesAnExistingSession() async throws {
+        let first = ScriptedACPLineTransport(
+            incoming: [
+                #"{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":1}}"#,
+                #"{"jsonrpc":"2.0","id":1,"result":{"sessionId":"session-1","models":{"availableModels":[{"modelId":"anthropic:old","name":"Old"}]}}}"#,
+            ]
+        )
+        let second = ScriptedACPLineTransport(
+            incoming: [
+                #"{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":1}}"#,
+                #"{"jsonrpc":"2.0","id":1,"result":{"sessionId":"session-2","models":{"availableModels":[{"modelId":"openai:new","name":"New"}]}}}"#,
+            ]
+        )
+        let factory = SequencedACPLineTransportFactory(transports: [first, second])
+        let transport = ACPProcessTransport(
+            lineTransportFactory: factory,
+            arguments: ["acp"],
+            workingDirectory: URL(fileURLWithPath: "/private/tmp")
+        )
+        let executable = URL(fileURLWithPath: "/mock/hermes")
+        let parameters = (
+            executableURL: executable,
+            environment: ["PATH": "/mock"],
+            outputByteLimit: 4_096
+        )
+
+        #expect(try await transport.models(
+            executableURL: parameters.executableURL,
+            environment: parameters.environment,
+            outputByteLimit: parameters.outputByteLimit,
+            modelID: nil
+        ).map(\.id) == ["anthropic:old"])
+        #expect(try await transport.models(
+            executableURL: parameters.executableURL,
+            environment: parameters.environment,
+            outputByteLimit: parameters.outputByteLimit,
+            modelID: nil
+        ).map(\.id) == ["anthropic:old"])
+        #expect(try await transport.models(
+            executableURL: parameters.executableURL,
+            environment: parameters.environment,
+            outputByteLimit: parameters.outputByteLimit,
+            modelID: nil,
+            force: true
+        ).map(\.id) == ["openai:new"])
+
+        #expect(await factory.makeCount() == 2)
+        #expect(await first.isClosed())
+        #expect(try await decodedMethods(first.sentLines()) == [
+            "initialize", "session/new",
+        ])
+        #expect(try await decodedMethods(second.sentLines()) == [
+            "initialize", "session/new",
+        ])
+        let firstMessages = try await first.sentLines().map { line in
+            try #require(JSONSerialization.jsonObject(with: line) as? [String: Any])
+        }
+        let secondMessages = try await second.sentLines().map { line in
+            try #require(JSONSerialization.jsonObject(with: line) as? [String: Any])
+        }
+        let firstIDs = firstMessages.compactMap { $0["id"] as? Int }
+        let secondIDs = secondMessages.compactMap { $0["id"] as? Int }
+        #expect(firstIDs == [0, 1])
+        #expect(secondIDs == [0, 1])
+    }
+
+    @Test
+    func modelCatalogThrowsWithoutIOWhilePromptIsInFlight() async throws {
+        let lineTransport = BlockingACPLineTransport(
+            incoming: [
+                #"{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":1}}"#,
+                #"{"jsonrpc":"2.0","id":1,"result":{"sessionId":"session-1"}}"#,
+            ]
+        )
+        let factory = ScriptedACPLineTransportFactory(transport: lineTransport)
+        let transport = ACPProcessTransport(
+            lineTransportFactory: factory,
+            arguments: ["acp"],
+            workingDirectory: URL(fileURLWithPath: "/private/tmp")
+        )
+        let promptTask = Task {
+            try await transport.send(
+                PromptRequest(text: "진행 중인 질문"),
+                executableURL: URL(fileURLWithPath: "/mock/hermes"),
+                environment: ["PATH": "/mock"],
+                timeout: .seconds(1),
+                outputByteLimit: 4_096
+            )
+        }
+        await lineTransport.waitUntilSent(method: "session/prompt")
+
+        do {
+            _ = try await transport.models(
+                executableURL: URL(fileURLWithPath: "/mock/hermes"),
+                environment: ["PATH": "/mock"],
+                outputByteLimit: 4_096,
+                modelID: nil
+            )
+            Issue.record("Expected model catalog to report an in-flight prompt")
+        } catch let error as ACPProtocolError {
+            #expect(error == .requestInFlight)
+        }
+        #expect(await factory.makeCount() == 1)
+
+        promptTask.cancel()
+        _ = try? await promptTask.value
+        await transport.close()
+    }
+
+    @Test
+    func modelCatalogTimeoutResetsConnectionBeforeTheFollowingPrompt() async throws {
+        let first = BlockingACPLineTransport(
+            incoming: [
+                #"{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":1}}"#,
+            ]
+        )
+        let second = ScriptedACPLineTransport(
+            incoming: [
+                #"{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":1}}"#,
+                #"{"jsonrpc":"2.0","id":1,"result":{"sessionId":"session-2"}}"#,
+                #"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-2","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"복구"}}}}"#,
+                #"{"jsonrpc":"2.0","id":2,"result":{"stopReason":"end_turn"}}"#,
+            ]
+        )
+        let factory = SequencedACPLineTransportFactory(transports: [first, second])
+        let transport = ACPProcessTransport(
+            lineTransportFactory: factory,
+            arguments: ["acp"],
+            workingDirectory: URL(fileURLWithPath: "/private/tmp")
+        )
+        let executable = URL(fileURLWithPath: "/mock/hermes")
+
+        do {
+            _ = try await transport.models(
+                executableURL: executable,
+                environment: ["PATH": "/mock"],
+                outputByteLimit: 4_096,
+                modelID: nil
+            )
+            Issue.record("Expected model catalog to time out")
+        } catch let error as AgentConnectorError {
+            #expect(error == .timedOut)
+        }
+
+        #expect(await first.isClosed())
+        let response = try await transport.send(
+            PromptRequest(text: "타임아웃 후 질문"),
+            executableURL: executable,
+            environment: ["PATH": "/mock"],
+            timeout: .seconds(1),
+            outputByteLimit: 4_096
+        )
+        #expect(response.text == "복구")
+        #expect(await factory.makeCount() == 2)
+        #expect(try await decodedMethods(second.sentLines()) == [
+            "initialize", "session/new", "session/prompt",
+        ])
+    }
+
+    @Test
+    func failedModelBindingResetsTheConnectionBeforeTheNextPrompt() async throws {
+        let first = ScriptedACPLineTransport(
+            incoming: [
+                #"{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":1}}"#,
+                #"{"jsonrpc":"2.0","id":1,"result":{"sessionId":"session-1","models":{"availableModels":[],"currentModelId":"anthropic:old"}}}"#,
+                #"{"jsonrpc":"2.0","id":2,"error":{"code":-32000,"message":"model unavailable"}}"#,
+            ]
+        )
+        let second = ScriptedACPLineTransport(
+            incoming: [
+                #"{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":1}}"#,
+                #"{"jsonrpc":"2.0","id":1,"result":{"sessionId":"session-2"}}"#,
+                #"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-2","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"복구"}}}}"#,
+                #"{"jsonrpc":"2.0","id":2,"result":{"stopReason":"end_turn"}}"#,
+            ]
+        )
+        let factory = SequencedACPLineTransportFactory(transports: [first, second])
+        let transport = ACPProcessTransport(
+            lineTransportFactory: factory,
+            arguments: ["acp"],
+            workingDirectory: URL(fileURLWithPath: "/private/tmp")
+        )
+        let executable = URL(fileURLWithPath: "/mock/hermes")
+
+        #expect(try await transport.models(
+            executableURL: executable,
+            environment: ["PATH": "/mock"],
+            outputByteLimit: 4_096,
+            modelID: "openai:gpt-5"
+        ).isEmpty)
+        let response = try await transport.send(
+            PromptRequest(text: "복구 후 질문"),
+            executableURL: executable,
+            environment: ["PATH": "/mock"],
+            timeout: .seconds(1),
+            outputByteLimit: 4_096
+        )
+
+        #expect(response.text == "복구")
+        #expect(await first.isClosed())
+        #expect(await factory.makeCount() == 2)
+        #expect(try await decodedMethods(second.sentLines()) == [
+            "initialize", "session/new", "session/prompt",
+        ])
+    }
+
+    @Test
     func cancellationNotifiesHermesClosesTheConnectionAndReconnects() async throws {
         let first = BlockingACPLineTransport(
             incoming: [
@@ -255,6 +741,7 @@ struct HermesACPProtocolTests {
         let factory = SequencedACPLineTransportFactory(transports: [first, second])
         let transport = ACPProcessTransport(
             lineTransportFactory: factory,
+            arguments: ["acp"],
             workingDirectory: URL(fileURLWithPath: "/private/tmp", isDirectory: true)
         )
         let executable = URL(fileURLWithPath: "/mock/hermes")
@@ -331,6 +818,7 @@ struct HermesACPProtocolTests {
         let factory = SequencedACPLineTransportFactory(transports: [first, second])
         let transport = ACPProcessTransport(
             lineTransportFactory: factory,
+            arguments: ["acp"],
             workingDirectory: URL(fileURLWithPath: "/private/tmp", isDirectory: true)
         )
         let completion = AsyncTestFlag()
@@ -392,6 +880,7 @@ struct HermesACPProtocolTests {
     func realProcessReadRespondsToCancellationBeforeExplicitClose() async throws {
         let transport = try ACPProcessLineTransport(
             executableURL: fixtureURL,
+            arguments: ["acp"],
             environment: ProcessInfo.processInfo.environment,
             workingDirectory: FileManager.default.temporaryDirectory,
             outputByteLimit: 4_096
@@ -545,6 +1034,7 @@ private actor ScriptedACPLineTransport: ACPLineTransporting {
 private actor ScriptedACPLineTransportFactory: ACPLineTransportFactory {
     private let transport: any ACPLineTransporting
     private var count = 0
+    private var arguments: [String]?
 
     init(transport: any ACPLineTransporting) {
         self.transport = transport
@@ -554,14 +1044,20 @@ private actor ScriptedACPLineTransportFactory: ACPLineTransportFactory {
         executableURL: URL,
         environment: [String: String],
         workingDirectory: URL,
-        outputByteLimit: Int
+        outputByteLimit: Int,
+        arguments: [String]
     ) async throws -> any ACPLineTransporting {
         count += 1
+        self.arguments = arguments
         return transport
     }
 
     func makeCount() -> Int {
         count
+    }
+
+    func madeArguments() -> [String]? {
+        arguments
     }
 }
 
@@ -648,7 +1144,8 @@ private actor SequencedACPLineTransportFactory: ACPLineTransportFactory {
         executableURL: URL,
         environment: [String: String],
         workingDirectory: URL,
-        outputByteLimit: Int
+        outputByteLimit: Int,
+        arguments: [String]
     ) async throws -> any ACPLineTransporting {
         count += 1
         return transports.removeFirst()

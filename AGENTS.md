@@ -4,7 +4,7 @@ This document is a work instruction that applies to the entire repository.
 
 ## Project purpose and product safety principles
 
-YumYum Agent is a Swift/AppKit app that "feeds" the user's selected screen area or local file to the macOS floating pet and displays the response of a verified local CLI agent (Hermes, OpenCode, Codex, Claude Code) as a native speech bubble and chat transcript.
+YumYum Agent is a Swift/AppKit app that "feeds" the user's selected screen area or local file to the macOS floating pet and displays the response of a verified local CLI agent (Hermes, OpenCode, Codex, Claude Code, Gemini) as a native speech bubble and chat transcript.
 
 - The user must explicitly approve the action of changing the external state separately from the task just before execution. Previous approvals, comprehensive approvals, and approvals from other Task·approval·toolsets cannot be reused.
 - The current product does not execute external changes. `ExternalChangeToolsetPolicy` is a default rejection, and `TaskApprovalGate` only implements a one-time approval model in memory and is not connected to the UI and Connector execution flow.
@@ -67,7 +67,8 @@ The transmission route is as follows.
 
 `FeedWorkflow` → `AgentRuntime` → `AgentRegistry.validatedSelection()` → Implementation of selected `AgentConnecting` → `ProcessRunner` or `ACPProcessTransport`
 
-- Hermes: `HermesACPConnector` → Long-term connection `ACPProcessTransport` → `HermesACPProtocolClient`; Use `initialize`, `session/new`, `session/prompt` and cancel the authorization request.
+- Hermes: `ACPConnector` → Long-term connection `ACPProcessTransport` → `ACPProtocolClient`; Use `initialize`, `session/new`, `session/prompt` and cancel the authorization request.
+- Gemini: `ACPConnector` → `ACPProcessTransport(["--acp"])` → `ACPProtocolClient`.
 - OpenCode: Structured `opencode run --pure --format json`; The confirmed attachment is forwarded as `--file`.
 - Codex: structured `codex exec` with read-only sandbox and untrusted approval policy. Images use `--image`; confirmed non-image attachments are listed only as local paths in standard input. Codex requires a verified signed-in state before selection and transmission.
 - Claude Code: structured print execution of plan permission mode. Its logical session ID is held for the current runtime, starts with `--session-id`, and follows up with `--resume`; cancellation, failure, selection change, reset, or shutdown discards it.
@@ -154,7 +155,7 @@ If you change the app bundle or package settings, `swift build` and `./scripts/b
 - `CodexLoginService`, `AppLocalization`, `LegacyPreferencesMigration`: Keep authentication actions behind their own fresh confirmation and exact-path revalidation. Preserve live language/theme state and the one-time, known-key-only migration boundary.
 - `PermissionOnboardingView`: Keep the auto-show gate computed fresh from live permission state on every appearance, not from a persisted "already shown" flag. Do not weaken the Screen Recording/Accessibility/Input Monitoring row checks, their System Settings deep links, or the "권한 확인" manual reopen path in Settings.
 - `GlobalShortcutController`, `ClipboardFeedShortcut`, `ShortcutRecorderField`: The recorder must reject a combo with no modifier from ⌃/⌥/⌘ (Shift-only or bare key). Do not reintroduce a fixed-preset-only picker; preserve legacy raw-value migration in `ClipboardFeedShortcut.load(defaults:)` so existing users' saved shortcut still resolves.
-- `HermesACPTransport`: ACP v1 JSON-RPC order, connection/session reuse, permission `cancelled`, 2MB budget reset, preserves process termination and reconnection to the next request in case of timeout/cancel.
+- `ACP transport`: ACP v1 JSON-RPC order, connection/session reuse, permission `cancelled`, 2MB budget reset, preserves process termination and reconnection to the next request in case of timeout/cancel.
 - `ProcessRunner`: Continuously drain stdout/stderr at the same time and prevent child deadlock even after reaching the output limit. When timeout/cancel, terminate and kill if necessary. Even if a descendant grabs the pipe, it does not wait for the child to terminate directly.
 - `ScreenCaptureCoordinator`, `CaptureRegionPolicy`: Maintains API branch by macOS version and AppKit/ScreenCaptureKit coordinate system conversion. Hides all YumYum Agent surfaces before capturing and keeps the source rect of the result as the starting point of the preview.
 - `FloatingPetWindowController`, panel controller: Corrects the pet drag position and all speech bubbles within the display `visibleFrame`. Preserves the order of the action four rows, 248pt width, keyboard movement, and VoiceOver label; staged draft attachments stay removable from the response bubble and show a real image thumbnail when the file decodes. The compact bubble's transcript must keep surviving close/reopen and only clear on an explicit new session — do not make `prepareForTermination`/close paths reset `ChatBubbleState`.

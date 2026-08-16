@@ -33,6 +33,7 @@ public struct PromptRequest: Equatable, Sendable {
     public let attachments: [PromptAttachment]
     public let soulMarkdown: String?
     public let responseLanguage: AppLanguage?
+    public let modelID: String?
 
     public init(
         id: UUID = UUID(),
@@ -40,7 +41,8 @@ public struct PromptRequest: Equatable, Sendable {
         currentTurnText: String? = nil,
         attachments: [PromptAttachment] = [],
         soulMarkdown: String? = nil,
-        responseLanguage: AppLanguage? = nil
+        responseLanguage: AppLanguage? = nil,
+        modelID: String? = nil
     ) {
         self.id = id
         self.text = text
@@ -48,6 +50,7 @@ public struct PromptRequest: Equatable, Sendable {
         self.attachments = attachments
         self.soulMarkdown = soulMarkdown
         self.responseLanguage = responseLanguage
+        self.modelID = modelID
     }
 }
 
@@ -143,7 +146,7 @@ public extension AgentConnecting {
     }
 }
 
-public protocol HermesACPTransporting: Sendable {
+public protocol ACPTransporting: Sendable {
     func send(
         _ request: PromptRequest,
         executableURL: URL,
@@ -151,6 +154,14 @@ public protocol HermesACPTransporting: Sendable {
         timeout: Duration,
         outputByteLimit: Int
     ) async throws -> PromptResponse
+
+    func models(
+        executableURL: URL,
+        environment: [String: String],
+        outputByteLimit: Int,
+        modelID: String?,
+        force: Bool
+    ) async throws -> [HermesModel]
 
     func sendEvents(
         _ request: PromptRequest,
@@ -163,7 +174,17 @@ public protocol HermesACPTransporting: Sendable {
     func close() async
 }
 
-public extension HermesACPTransporting {
+public extension ACPTransporting {
+    func models(
+        executableURL: URL,
+        environment: [String: String],
+        outputByteLimit: Int,
+        modelID: String?,
+        force: Bool
+    ) async throws -> [HermesModel] {
+        []
+    }
+
     func sendEvents(
         _ request: PromptRequest,
         executableURL: URL,
@@ -239,7 +260,7 @@ public struct AgentRuntime: Sendable {
         try await requireCodexAuthentication(ifNeeded: installation)
         do {
             return try await connector.send(
-                await preparedRequest(request),
+                await preparedRequest(request, installation: installation),
                 executableURL: URL(fileURLWithPath: path).standardizedFileURL
             )
         } catch {
@@ -263,7 +284,7 @@ public struct AgentRuntime: Sendable {
                     }
                     try await requireCodexAuthentication(ifNeeded: installation)
                     let events = connector.sendEvents(
-                        await preparedRequest(request),
+                        await preparedRequest(request, installation: installation),
                         executableURL: URL(fileURLWithPath: path).standardizedFileURL
                     )
                     do {
@@ -294,14 +315,20 @@ public struct AgentRuntime: Sendable {
         }
     }
 
-    private func preparedRequest(_ request: PromptRequest) async -> PromptRequest {
+    private func preparedRequest(
+        _ request: PromptRequest,
+        installation: AgentInstallation
+    ) async -> PromptRequest {
         PromptRequest(
             id: request.id,
             text: request.text,
             currentTurnText: request.currentTurnText,
             attachments: request.attachments,
             soulMarkdown: await soulStore?.load().promptMarkdown ?? request.soulMarkdown,
-            responseLanguage: AppText.language
+            responseLanguage: AppText.language,
+            modelID: installation.definitionID == .hermes
+                ? await selection.selectedModelID
+                : nil
         )
     }
 
@@ -324,18 +351,20 @@ public struct AgentRuntime: Sendable {
     }
 }
 
-public struct HermesACPConnector: AgentConnecting, Sendable {
-    public let definitionID = AgentDefinitionID.hermes
+public struct ACPConnector: AgentConnecting, Sendable {
+    public let definitionID: AgentDefinitionID
 
-    private let transport: any HermesACPTransporting
+    private let transport: any ACPTransporting
     private let timeout: Duration
     private let outputByteLimit: Int
 
     public init(
-        transport: any HermesACPTransporting,
+        definitionID: AgentDefinitionID,
+        transport: any ACPTransporting,
         timeout: Duration = .seconds(120),
         outputByteLimit: Int = 2_097_152
     ) {
+        self.definitionID = definitionID
         self.transport = transport
         self.timeout = timeout
         self.outputByteLimit = outputByteLimit
@@ -368,6 +397,22 @@ public struct HermesACPConnector: AgentConnecting, Sendable {
             ),
             timeout: timeout,
             outputByteLimit: outputByteLimit
+        )
+    }
+
+    public func models(
+        executableURL: URL,
+        modelID: String?,
+        force: Bool = false
+    ) async throws -> [HermesModel] {
+        try await transport.models(
+            executableURL: executableURL,
+            environment: AgentProcessEnvironment.make(
+                executableDirectory: executableURL.deletingLastPathComponent()
+            ),
+            outputByteLimit: outputByteLimit,
+            modelID: modelID,
+            force: force
         )
     }
 
@@ -588,7 +633,7 @@ func promptText(
     if !visibleAttachments.isEmpty {
         prompt += "\n\nThese are paths to local attachments explicitly selected by the user. Use only these paths as input:"
         for attachment in visibleAttachments {
-            prompt += "\n- \(attachment.url.path)"
+            prompt += "\n- `\(attachment.url.path)`"
         }
     }
     if let directive = responseLanguageDirective(for: request.responseLanguage) {

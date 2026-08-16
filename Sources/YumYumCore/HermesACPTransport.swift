@@ -12,33 +12,56 @@ public extension ACPLineTransporting {
     func resetOutputBudget() async {}
 }
 
-public enum HermesACPProtocolError: Error, Equatable, LocalizedError, Sendable {
+private let hermesAllowedModelProviders: Set<String> = [
+    "anthropic",
+    "openai",
+    "google",
+    "gemini",
+    "vertex",
+    "xai",
+    "bedrock",
+]
+
+public struct HermesModel: Identifiable, Equatable, Sendable {
+    public let id: String
+    public let name: String
+
+    public init(id: String, name: String) {
+        self.id = id
+        self.name = name
+    }
+}
+
+public enum ACPProtocolError: Error, Equatable, LocalizedError, Sendable {
     case connectionClosed
     case invalidMessage
     case incompatibleProtocolVersion(Int)
     case requestFailed(String)
+    case requestInFlight
     case missingSessionID
     case outputLimitExceeded
 
     public var errorDescription: String? {
         switch self {
         case .connectionClosed:
-            AppText.localized("Hermes ACP 연결이 응답 전에 종료되었습니다.")
+            AppText.localized("ACP 연결이 응답 전에 종료되었습니다.")
         case .invalidMessage:
-            AppText.localized("Hermes ACP가 유효한 JSON-RPC 메시지를 반환하지 않았습니다.")
+            AppText.localized("ACP가 유효한 JSON-RPC 메시지를 반환하지 않았습니다.")
         case let .incompatibleProtocolVersion(version):
-            AppText.localized(english: "Hermes ACP protocol version \(version) is unsupported.", korean: "Hermes ACP 프로토콜 버전 \(version)은 지원되지 않습니다.")
+            AppText.localized(english: "ACP protocol version \(version) is unsupported.", korean: "ACP 프로토콜 버전 \(version)은 지원되지 않습니다.")
         case let .requestFailed(message):
-            AppText.localized(english: "Hermes ACP request failed: \(message)", korean: "Hermes ACP 요청이 실패했습니다: \(message)")
+            AppText.localized(english: "ACP request failed: \(message)", korean: "ACP 요청이 실패했습니다: \(message)")
+        case .requestInFlight:
+            AppText.localized(english: "An ACP request is already in flight.", korean: "ACP 요청이 이미 진행 중입니다.")
         case .missingSessionID:
-            AppText.localized("Hermes ACP가 세션 ID를 반환하지 않았습니다.")
+            AppText.localized("ACP가 세션 ID를 반환하지 않았습니다.")
         case .outputLimitExceeded:
-            AppText.localized("Hermes ACP 출력이 안전 제한을 초과했습니다.")
+            AppText.localized("ACP 출력이 안전 제한을 초과했습니다.")
         }
     }
 }
 
-public actor HermesACPProtocolClient {
+public actor ACPProtocolClient {
     private struct ActivePrompt {
         let requestID: Int
         let sessionID: String
@@ -49,6 +72,9 @@ public actor HermesACPProtocolClient {
     private var sessionID: String?
     private var nextRequestID = 0
     private var activePrompt: ActivePrompt?
+    public private(set) var availableModels: [HermesModel] = []
+    public private(set) var currentModelID: String?
+    private var modelSelectionFailed = false
 
     public init(
         transport: any ACPLineTransporting,
@@ -63,7 +89,7 @@ public actor HermesACPProtocolClient {
         onEvent: @escaping @Sendable (PromptResponseEvent) -> Void = { _ in }
     ) async throws -> PromptResponse {
         let isResumingSession = sessionID != nil
-        let sessionID = try await prepareSessionIfNeeded()
+        let sessionID = try await prepareSessionIfNeeded(modelID: request.modelID)
         await transport.resetOutputBudget()
         let promptRequestID = nextRequestID
         nextRequestID += 1
@@ -131,7 +157,29 @@ public actor HermesACPProtocolClient {
         )
     }
 
-    private func prepareSessionIfNeeded() async throws -> String {
+    func modelCatalog(modelID: String?, force: Bool = false) async throws -> [HermesModel] {
+        if force, sessionID != nil {
+            sessionID = nil
+            await transport.close()
+        }
+        modelSelectionFailed = false
+        do {
+            _ = try await prepareSessionIfNeeded(modelID: modelID)
+            return availableModels
+        } catch {
+            guard modelSelectionFailed, !(error is CancellationError) else { throw error }
+            modelSelectionFailed = false
+            sessionID = nil
+            await transport.close()
+            return availableModels
+        }
+    }
+
+    func hasSession() -> Bool {
+        sessionID != nil
+    }
+
+    private func prepareSessionIfNeeded(modelID: String?) async throws -> String {
         if let sessionID {
             return sessionID
         }
@@ -154,8 +202,9 @@ public actor HermesACPProtocolClient {
         let initialize = try await response(for: initializeRequestID)
         let initializeResult = try resultDictionary(in: initialize)
         let protocolVersion = initializeResult["protocolVersion"] as? Int ?? -1
+        // TODO(verify-before-ship): Gemini가 실제로 협상하는 ACP protocol version은 문서만으로 확인되지 않았습니다. 버전 1을 거부하면 안전하게 실패하도록 둡니다.
         guard protocolVersion == 1 else {
-            throw HermesACPProtocolError.incompatibleProtocolVersion(protocolVersion)
+            throw ACPProtocolError.incompatibleProtocolVersion(protocolVersion)
         }
 
         let sessionRequestID = nextRequestID
@@ -172,10 +221,60 @@ public actor HermesACPProtocolClient {
         let sessionResult = try resultDictionary(in: session)
         guard let newSessionID = sessionResult["sessionId"] as? String,
               !newSessionID.isEmpty else {
-            throw HermesACPProtocolError.missingSessionID
+            throw ACPProtocolError.missingSessionID
+        }
+        _ = parseModels(from: sessionResult)
+        if let modelID, modelID != currentModelID {
+            let setModelRequestID = nextRequestID
+            nextRequestID += 1
+            do {
+                try await sendMessage(
+                    id: setModelRequestID,
+                    method: "session/set_model",
+                    params: [
+                        "sessionId": newSessionID,
+                        "modelId": modelID,
+                    ]
+                )
+                _ = try await response(for: setModelRequestID)
+            } catch {
+                modelSelectionFailed = true
+                throw error
+            }
+            currentModelID = modelID
         }
         sessionID = newSessionID
         return newSessionID
+    }
+
+    private func parseModels(from sessionResult: [String: Any]) -> [HermesModel] {
+        guard let models = sessionResult["models"] as? [String: Any],
+              let availableModels = models["availableModels"] as? [[String: Any]] else {
+            self.availableModels = []
+            currentModelID = nil
+            return []
+        }
+        let allModels = availableModels.compactMap { model -> HermesModel? in
+            guard let id = model["modelId"] as? String,
+                  let name = model["name"] as? String else {
+                return nil
+            }
+            return HermesModel(id: id, name: name)
+        }
+        let filteredModels = allModels.filter { model in
+            let providerSegment = model.id
+                .split(separator: ":", maxSplits: 1)
+                .first
+                .map(String.init)?
+                .lowercased() ?? ""
+            return hermesAllowedModelProviders.contains(providerSegment)
+                || hermesAllowedModelProviders.contains { providerSegment.hasPrefix($0 + "-") }
+        }
+        self.availableModels = filteredModels.isEmpty && !allModels.isEmpty
+            ? allModels
+            : filteredModels
+        currentModelID = models["currentModelId"] as? String
+        return self.availableModels
     }
 
     private func response(for expectedID: Int) async throws -> [String: Any] {
@@ -223,29 +322,32 @@ public actor HermesACPProtocolClient {
 
     private func sendJSON(_ object: [String: Any]) async throws {
         guard JSONSerialization.isValidJSONObject(object) else {
-            throw HermesACPProtocolError.invalidMessage
+            throw ACPProtocolError.invalidMessage
         }
         let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
         try await transport.sendLine(data)
     }
 
     private func receiveMessage() async throws -> [String: Any] {
-        let data = try await transport.receiveLine()
-        try Task.checkCancellation()
-        guard let data else {
-            throw HermesACPProtocolError.connectionClosed
+        // TODO(verify-before-ship): This assumes Gemini credential-cache noise is confined to whole lines; embedded noise would require a different parser.
+        while true {
+            let data = try await transport.receiveLine()
+            try Task.checkCancellation()
+            guard let data else {
+                throw ACPProtocolError.connectionClosed
+            }
+            guard let message = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  message["jsonrpc"] as? String == "2.0" else {
+                continue
+            }
+            return message
         }
-        guard let message = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              message["jsonrpc"] as? String == "2.0" else {
-            throw HermesACPProtocolError.invalidMessage
-        }
-        return message
     }
 
     private func resultDictionary(in message: [String: Any]) throws -> [String: Any] {
         try throwIfError(in: message)
         guard let result = message["result"] as? [String: Any] else {
-            throw HermesACPProtocolError.invalidMessage
+            throw ACPProtocolError.invalidMessage
         }
         return result
     }
@@ -254,7 +356,7 @@ public actor HermesACPProtocolClient {
         guard let error = message["error"] as? [String: Any] else {
             return
         }
-        throw HermesACPProtocolError.requestFailed(
+        throw ACPProtocolError.requestFailed(
             error["message"] as? String ?? AppText.localized("알 수 없는 오류")
         )
     }
@@ -358,7 +460,8 @@ protocol ACPLineTransportFactory: Sendable {
         executableURL: URL,
         environment: [String: String],
         workingDirectory: URL,
-        outputByteLimit: Int
+        outputByteLimit: Int,
+        arguments: [String]
     ) async throws -> any ACPLineTransporting
 }
 
@@ -367,10 +470,12 @@ private struct ACPProcessLineTransportFactory: ACPLineTransportFactory {
         executableURL: URL,
         environment: [String: String],
         workingDirectory: URL,
-        outputByteLimit: Int
+        outputByteLimit: Int,
+        arguments: [String]
     ) async throws -> any ACPLineTransporting {
         try ACPProcessLineTransport(
             executableURL: executableURL,
+            arguments: arguments,
             environment: environment,
             workingDirectory: workingDirectory,
             outputByteLimit: outputByteLimit
@@ -378,28 +483,32 @@ private struct ACPProcessLineTransportFactory: ACPLineTransportFactory {
     }
 }
 
-public actor ACPProcessTransport: HermesACPTransporting {
+public actor ACPProcessTransport: ACPTransporting {
     private struct Connection {
         let generation: UUID
         let executableURL: URL
         let lineTransport: any ACPLineTransporting
-        let client: HermesACPProtocolClient
+        let client: ACPProtocolClient
     }
 
     private let lineTransportFactory: any ACPLineTransportFactory
     private let workingDirectory: URL
+    private let arguments: [String]
     private var connection: Connection?
     private var activeRequestGeneration: UUID?
 
-    public init() {
+    public init(arguments: [String]) {
         lineTransportFactory = ACPProcessLineTransportFactory()
         workingDirectory = FileManager.default.temporaryDirectory.standardizedFileURL
+        self.arguments = arguments
     }
 
     init(
         lineTransportFactory: any ACPLineTransportFactory,
+        arguments: [String],
         workingDirectory: URL
     ) {
+        self.arguments = arguments
         self.lineTransportFactory = lineTransportFactory
         self.workingDirectory = workingDirectory.standardizedFileURL
     }
@@ -419,6 +528,69 @@ public actor ACPProcessTransport: HermesACPTransporting {
             outputByteLimit: outputByteLimit,
             onEvent: { _ in }
         )
+    }
+
+    public func models(
+        executableURL: URL,
+        environment: [String: String],
+        outputByteLimit: Int,
+        modelID: String?,
+        force: Bool = false
+    ) async throws -> [HermesModel] {
+        guard activeRequestGeneration == nil else {
+            throw ACPProtocolError.requestInFlight
+        }
+        if force {
+            await resetConnection()
+        }
+        let connection = try await connectionForSend(
+            executableURL: executableURL,
+            environment: environment,
+            outputByteLimit: outputByteLimit
+        )
+        let generation = connection.generation
+        let timeoutState = ACPRequestTimeoutState()
+        defer {
+            if activeRequestGeneration == generation {
+                activeRequestGeneration = nil
+            }
+        }
+
+        do {
+            return try await withTaskCancellationHandler {
+                try await withThrowingTaskGroup(of: [HermesModel].self) { group in
+                    group.addTask {
+                        let models = try await connection.client.modelCatalog(
+                            modelID: modelID,
+                            force: force
+                        )
+                        if !(await connection.client.hasSession()) {
+                            await self.resetConnection(generation: generation)
+                        }
+                        return models
+                    }
+                    group.addTask {
+                        try await Task.sleep(for: .seconds(20))
+                        timeoutState.markTriggered()
+                        await self.resetConnection(generation: generation)
+                        throw AgentConnectorError.timedOut
+                    }
+                    let models = try await group.next()!
+                    group.cancelAll()
+                    return models
+                }
+            } onCancel: {
+                Task {
+                    await self.resetConnection(generation: generation)
+                }
+            }
+        } catch {
+            await resetConnection(generation: generation)
+            if timeoutState.wasTriggered {
+                throw AgentConnectorError.timedOut
+            }
+            throw error
+        }
     }
 
     public nonisolated func sendEvents(
@@ -548,7 +720,8 @@ public actor ACPProcessTransport: HermesACPTransporting {
                 executableURL: standardizedExecutable,
                 environment: environment,
                 workingDirectory: workingDirectory,
-                outputByteLimit: outputByteLimit
+                outputByteLimit: outputByteLimit,
+                arguments: arguments
             )
         } catch {
             throw AgentConnectorError.launchFailed(String(describing: error))
@@ -557,7 +730,7 @@ public actor ACPProcessTransport: HermesACPTransporting {
             generation: UUID(),
             executableURL: standardizedExecutable,
             lineTransport: lineTransport,
-            client: HermesACPProtocolClient(
+            client: ACPProtocolClient(
                 transport: lineTransport,
                 workingDirectory: workingDirectory
             )
@@ -613,7 +786,7 @@ final class ACPProcessLifecycle: @unchecked Sendable {
         let canWrite = !stopped
         stateLock.unlock()
         guard canWrite else {
-            throw HermesACPProtocolError.connectionClosed
+            throw ACPProtocolError.connectionClosed
         }
         try writeAction(data)
     }
@@ -642,6 +815,7 @@ final class ACPProcessLineTransport: ACPLineTransporting, @unchecked Sendable {
 
     init(
         executableURL: URL,
+        arguments: [String],
         environment: [String: String],
         workingDirectory: URL,
         outputByteLimit: Int
@@ -686,7 +860,7 @@ final class ACPProcessLineTransport: ACPLineTransporting, @unchecked Sendable {
             }
         )
         process.executableURL = executableURL
-        process.arguments = ["acp"]
+        process.arguments = arguments
         process.environment = environment
         process.currentDirectoryURL = workingDirectory
         process.standardInput = inputPipe
@@ -723,7 +897,7 @@ final class ACPProcessLineTransport: ACPLineTransporting, @unchecked Sendable {
                 bytesReceived += 1
                 guard bytesReceived <= outputByteLimit else {
                     stop()
-                    throw HermesACPProtocolError.outputLimitExceeded
+                    throw ACPProtocolError.outputLimitExceeded
                 }
                 if byte == 0x0A {
                     return line

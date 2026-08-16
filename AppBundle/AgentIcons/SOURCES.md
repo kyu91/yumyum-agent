@@ -6,3 +6,4 @@ Used on the floating pet's headband to show which agent is connected. These are 
 - `AgentIcon-Codex.png` — OpenAI symbol mark, via [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:OpenAI_logo_2025_(symbol).svg) (public domain; trademark rights reserved by OpenAI).
 - `AgentIcon-OpenCode.png` — OpenCode favicon, from the [opencode GitHub repo](https://github.com/sst/opencode) (MIT-licensed repository).
 - `AgentIcon-Hermes.png` — Hermes Agent site icon, from [hermes-agent.nousresearch.com](https://hermes-agent.nousresearch.com).
+- `AgentIcon-Gemini.png` — Google Gemini icon, via [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Google-gemini-icon.svg) (CC0).

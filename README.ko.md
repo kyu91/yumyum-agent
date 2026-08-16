@@ -92,6 +92,7 @@ swift test \
 | OpenCode | `opencode run --pure --format json` |
 | Codex | `codex exec`, read-only sandbox, untrusted approval |
 | Claude Code | structured print 실행, plan permission mode |
+| Gemini | `gemini --acp` |
 
 이 이름들은 호환성을 설명하기 위해서만 사용된 상표입니다. YumYum Agent는 해당 벤더들과 독립적이며 후원이나 보증을 주장하지 않습니다. 로그인, 네트워크 요청, 모델 제공자 처리 및 결과는 각 CLI가 담당합니다.
 
