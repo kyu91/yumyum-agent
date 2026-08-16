@@ -80,7 +80,7 @@ All processes use the exact executable URL and argv without a shell. General con
 
 ## Chat and session behavior
 
-The response stream carries snapshot, delta, and completion events. The UI keeps one shared transcript plus the current streaming response, renders incomplete Markdown defensively, and renders completed Markdown with its final structure and line breaks. Long responses scroll inside the document surface.
+The response stream carries snapshot, delta, and completion events. The UI keeps one shared transcript plus the current streaming response, renders incomplete Markdown defensively, and renders completed Markdown with its final structure and line breaks. Long responses scroll inside the document surface. The compact response bubble (opened by left-click or the clipboard-feed shortcut) also renders the full multi-turn transcript, not only the latest reply; it persists across close/reopen and clears only when the user starts a new session from the detailed chat window.
 
 Hermes keeps an ACP connection and logical session while valid. Codex and Claude preserve their verified logical-session behavior across follow-ups. Cancellation, timeout, or invalid session state resets the affected connector as required, and generation checks suppress late events from stale requests. A new logical session receives Soul once; ordinary follow-ups do not duplicate it.
 
@@ -102,6 +102,7 @@ The interface supports English and Korean. The language selector displays `Engli
 - `ExternalChangeToolsetPolicy` denies external-change toolsets by default. `TaskApprovalGate` is only an in-memory one-time model and is not connected to UI or connector execution.
 - Hermes `session/request_permission` always returns `cancelled`. Current connectors are analysis-only and cannot perform YumYum Agent-authorized external changes.
 - Any future external change requires a separate execution-time approval bound to the exact task, approval, and toolset, consumed once. Previous, blanket, or cross-task approval must never be reused.
+- Screen Recording, Accessibility, and Input Monitoring are the three macOS privacy permissions the app uses (capture, and the global clipboard-feed shortcut respectively). The onboarding sheet checks all three live on every launch and reappears whenever one is still missing, rather than showing only once; it can also be reopened on demand from Settings.
 
 ## Current architecture and main paths
 
@@ -137,7 +138,7 @@ Tests cover policy and state transitions, exact CLI executable/argv contracts, d
 
 ### Manual current gate
 
-On real supported macOS hardware, verify pet drag and visible-frame containment, keyboard navigation and VoiceOver labels, no unexpected focus theft, Reduce Motion, Light/Dark appearance, capture permission and cancellation, mixed-scale multi-display capture, actual Finder drop dispatch/hit testing, global shortcut behavior, live language switching and persistence, file-panel behavior, long-response scrolling, and supported CLIs using real installed paths and their own sign-in/network state.
+On real supported macOS hardware, verify pet drag and visible-frame containment, keyboard navigation and VoiceOver labels, no unexpected focus theft, Reduce Motion, Light/Dark appearance, capture permission and cancellation, mixed-scale multi-display capture, actual Finder drop dispatch/hit testing, recordable global shortcut behavior (including that it still fires with another app frontmost once Accessibility and Input Monitoring are granted), the permission sheet reappearing until all three permissions are granted, live language switching and persistence, file-panel behavior, long-response scrolling in both the compact bubble and the detailed chat window, and supported CLIs using real installed paths and their own sign-in/network state.
 
 The implemented release scripts do not constitute evidence of actual Developer ID signing/notarization. A signed/notarized artifact, GitHub publication, Intel hardware execution, Gatekeeper assessment, and clean-machine verification remain blocking release gates. App Store delivery and automatic updates are distinct future distribution work.
 
