@@ -89,8 +89,11 @@ actor CodexStreamingSession {
         }
         activeGeneration = generation
         let resumedSessionID = sessionID
+        // Codex CLI forks a new thread_id when `--image` is combined with `resume`,
+        // even though it correctly continues the resumed conversation; don't reject it.
+        let hasImageAttachment = request.attachments.contains { $0.kind == .image }
         let parser = CodexJSONStreamParser(
-            expectedSessionID: resumedSessionID,
+            expectedSessionID: hasImageAttachment ? nil : resumedSessionID,
             onEvent: onEvent
         )
 

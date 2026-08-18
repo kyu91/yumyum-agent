@@ -459,6 +459,18 @@ struct AgentConnectorTests {
                 executableURL: executable
             )
         )
+        // Codex CLI forks a new thread_id whenever an image is attached to a
+        // resumed turn; the third, image-free turn must still resume cleanly
+        // from that forked id rather than the original one.
+        let third = try await collectConnectorEvents(
+            connector.sendEvents(
+                PromptRequest(
+                    text: "사용자: 첫 질문\n어시스턴트: 첫 응답\n사용자: 둘째 질문\n어시스턴트: 둘째 응답\n사용자: 셋째 질문",
+                    currentTurnText: "셋째 질문"
+                ),
+                executableURL: executable
+            )
+        )
 
         #expect(first == [
             .textSnapshot("안녕"),
@@ -471,9 +483,10 @@ struct AgentConnectorTests {
         ])
         #expect(first.filter(\.isCompletion).count == 1)
         #expect(second.filter(\.isCompletion).count == 1)
+        #expect(third.filter(\.isCompletion).count == 1)
 
         let commands = await runner.commands(for: "codex")
-        #expect(commands.count == 2)
+        #expect(commands.count == 3)
         #expect(commands[0].arguments.contains("--json"))
         #expect(commands[0].arguments.contains("exec"))
         #expect(!commands[0].arguments.contains("resume"))
@@ -487,6 +500,12 @@ struct AgentConnectorTests {
         ])
         #expect(!commands[1].arguments.contains("--ephemeral"))
         #expect(commands[1].standardInput == Data("둘째 질문".utf8))
+        #expect(commands[2].arguments == [
+            "--ask-for-approval", "untrusted", "exec",
+            "--json", "--sandbox", "read-only", "--skip-git-repo-check",
+            "resume", "codex-session-1-forked",
+        ])
+        #expect(commands[2].standardInput == Data("셋째 질문".utf8))
     }
 
     @Test
@@ -1071,7 +1090,7 @@ private actor StructuredConnectorProcessRunner: ProcessRunning {
         case "opencode":
             return openCodeOutput(invocation: invocation)
         case "codex":
-            return codexOutput(invocation: invocation)
+            return codexOutput(command: command, invocation: invocation)
         case "claude":
             return claudeOutput(command: command, invocation: invocation)
         default:
@@ -1104,7 +1123,7 @@ private actor StructuredConnectorProcessRunner: ProcessRunning {
         return Data((lines.joined(separator: "\n") + "\n").utf8)
     }
 
-    private func codexOutput(invocation: Int) -> Data {
+    private func codexOutput(command: ProcessCommand, invocation: Int) -> Data {
         let lines: [String]
         if invocation == 0 {
             lines = [
@@ -1115,8 +1134,16 @@ private actor StructuredConnectorProcessRunner: ProcessRunning {
                 #"{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":2}}"#,
             ]
         } else {
+            // Real Codex CLI forks a new thread_id when `--image` is combined
+            // with `resume`, instead of continuing the resumed thread_id.
+            let resumedID = command.arguments.firstIndex(of: "resume").map {
+                command.arguments[command.arguments.index(after: $0)]
+            } ?? "codex-session-1"
+            let threadID = command.arguments.contains("--image")
+                ? "\(resumedID)-forked"
+                : resumedID
             lines = [
-                #"{"type":"thread.started","thread_id":"codex-session-1"}"#,
+                #"{"type":"thread.started","thread_id":"\#(threadID)"}"#,
                 #"{"type":"item.completed","item":{"id":"item-2","type":"agent_message","text":"둘째 응답"}}"#,
                 #"{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":2}}"#,
             ]
