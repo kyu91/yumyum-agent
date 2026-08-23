@@ -177,6 +177,18 @@ Keep every result in the repository, not in the conversation. A conclusion that 
 
 When asked to hand off, write `docs/handoff.md`: current state, decisions already settled, and remaining work — written so the next session can continue from that file alone, not as a transcript summary. It is a scratch file; do not commit it.
 
+## Coding orchestration pipeline
+
+For multi-file changes, new features, or architectural decisions in this repository, follow this role split:
+
+1. **Orchestrator (current session)** — clarifies the request and prepares the prompt/context for delegation, sequences the steps, and performs the final git commit. Does not explore the codebase or edit code directly.
+2. **Planner (Opus)** — owns codebase investigation and the implementation plan end to end, delegated via the Agent tool with `model: opus`.
+3. **Implementer** — takes the planner's output and is delegated via the Agent tool to a separate subagent (default model) to write the change; the orchestrator does not edit files directly, so it stays free to take further instructions while the subagent works.
+4. **Reviewer** — runs `/code-review` after implementation; loop on any findings.
+5. **Orchestrator** — commits once review passes; pushes only on explicit request.
+
+A single-file typo/wording/obvious bug fix does not need this pipeline — handle it directly.
+
 ## Git work rules
 
 - Work in the current work tree and do not create a separate worktree.
