@@ -72,6 +72,52 @@ struct QuickMenuLayoutTests {
     }
 
     @Test
+    @MainActor
+    func completedMarkdownKeepsTableRowsAndColumnsTogether() throws {
+        let rendered = AssistantMarkdownRenderer.render(
+            "| 항목 | Codex | Claude |\n| --- | --- | --- |\n| 가격 | 유료 | 유료 |\n| 속도 | 빠름 | 보통 |",
+            font: .systemFont(ofSize: 13),
+            textColor: .labelColor,
+            isStreaming: false
+        )
+
+        #expect(rendered.string.contains("항목 | Codex | Claude"))
+        #expect(!rendered.string.contains("\n\n"))
+        #expect(rendered.string.split(separator: "\n").count == 3)
+    }
+
+    @Test
+    @MainActor
+    func completedMarkdownAttachesLinkAttribute() throws {
+        let rendered = AssistantMarkdownRenderer.render(
+            "See [Docs](https://example.com/a) here.",
+            font: .systemFont(ofSize: 13),
+            textColor: .labelColor,
+            isStreaming: false
+        )
+
+        let range = (rendered.string as NSString).range(of: "Docs")
+        let link = rendered.attribute(.link, at: range.location, effectiveRange: nil) as? URL
+        #expect(link == URL(string: "https://example.com/a"))
+        #expect(!rendered.string.contains("]("))
+
+        let nested = AssistantMarkdownRenderer.render(
+            "[Swift](https://en.wikipedia.org/wiki/Swift_(programming_language))",
+            font: .systemFont(ofSize: 13),
+            textColor: .labelColor,
+            isStreaming: false
+        )
+        let nestedRange = (nested.string as NSString).range(of: "Swift")
+        let nestedLink = nested.attribute(.link, at: nestedRange.location, effectiveRange: nil) as? URL
+        #expect(
+            nestedLink == URL(
+                string: "https://en.wikipedia.org/wiki/Swift_(programming_language)"
+            )
+        )
+        #expect(!nested.string.contains("]("))
+    }
+
+    @Test
     func menuStateEnablesInputOnlyForAnAvailableExplicitSelection() {
         let available = AgentInstallation(
             definitionID: .codex,

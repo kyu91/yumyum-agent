@@ -138,6 +138,7 @@ enum AssistantMarkdownRenderer {
             case orderedItem(Int)
             case quote
             case code
+            case tableCell(column: Int, isHeader: Bool)
         }
 
         let identity: Int?
@@ -162,6 +163,8 @@ enum AssistantMarkdownRenderer {
                 indentation + "\(ordinal). "
             case .quote:
                 "> "
+            case let .tableCell(column, _):
+                column == 0 ? "" : " | "
             default:
                 ""
             }
@@ -178,6 +181,8 @@ enum AssistantMarkdownRenderer {
         var listOrdinal: Int?
         var nearestListIsUnordered: Bool?
         var listDepth = 0
+        var tableColumn: Int?
+        var isTableHeaderRow = false
         for component in intent.components {
             switch component.kind {
             case let .header(level):
@@ -198,6 +203,10 @@ enum AssistantMarkdownRenderer {
                 kind = .quote
             case .codeBlock:
                 kind = .code
+            case let .tableCell(columnIndex):
+                tableColumn = columnIndex
+            case .tableHeaderRow:
+                isTableHeaderRow = true
             default:
                 break
             }
@@ -206,6 +215,9 @@ enum AssistantMarkdownRenderer {
             kind = nearestListIsUnordered == true
                 ? .unorderedItem
                 : .orderedItem(listOrdinal)
+        }
+        if let tableColumn {
+            kind = .tableCell(column: tableColumn, isHeader: isTableHeaderRow)
         }
         return MarkdownBlock(
             identity: leaf.identity,
@@ -219,7 +231,7 @@ enum AssistantMarkdownRenderer {
         case let .heading(level):
             let increment = max(1, 6 - CGFloat(level) * 1.25)
             return .systemFont(ofSize: base.pointSize + increment, weight: .bold)
-        case .code:
+        case .code, .tableCell:
             return .monospacedSystemFont(ofSize: base.pointSize, weight: .regular)
         default:
             return base
@@ -233,7 +245,12 @@ enum AssistantMarkdownRenderer {
         font: NSFont,
         textColor: NSColor
     ) {
-        let desiredCount = previous.isListItem && next.isListItem ? 1 : 2
+        let desiredCount: Int
+        if case .tableCell = previous.kind, case let .tableCell(nextColumn, _) = next.kind {
+            desiredCount = nextColumn == 0 ? 1 : 0
+        } else {
+            desiredCount = previous.isListItem && next.isListItem ? 1 : 2
+        }
         let existingCount = rendered.string.reversed().prefix { $0 == "\n" }.count
         guard existingCount < desiredCount else { return }
         rendered.append(
@@ -1863,6 +1880,7 @@ final class ChatMessageRowView: NSStackView {
             label.font = .systemFont(ofSize: 13)
             label.maximumNumberOfLines = 0
             label.isSelectable = true
+            label.allowsEditingTextAttributes = true
             if message.role == .assistant {
                 label.attributedStringValue = AssistantMarkdownRenderer.render(
                     message.visibleText,

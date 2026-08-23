@@ -155,6 +155,33 @@ struct QuickMenuPanelControllerTests {
 
     @Test
     @MainActor
+    func assistantMessageLabelEnablesClickableLinkAttributes() async throws {
+        _ = NSApplication.shared
+        let sender = ControlledPromptSender()
+        let controller = ChatPanelController(
+            petController: FloatingPetWindowController {},
+            viewModel: YumYumAppViewModel(fixtureProbe: UnusedFixtureProbe()),
+            workflow: FeedWorkflow(sender: sender, feedback: SilentFeedFeedback())
+        )
+        defer {
+            controller.panel.orderOut(nil)
+            controller.panel.contentViewController = nil
+        }
+        controller.setDraftText("질문")
+        #expect(controller.sendDraftFromResponse())
+        try #require(await sender.waitForRequestCount(1))
+
+        await sender.completeRequest(at: 0)
+        await controller.waitForSendForTesting()
+
+        let view = try #require(controller.panel.contentView)
+        let assistantLabel = try #require(textFields(in: view).first { $0.stringValue == "완료" })
+        #expect(assistantLabel.isSelectable)
+        #expect(assistantLabel.allowsEditingTextAttributes)
+    }
+
+    @Test
+    @MainActor
     func completedChatEnablesNewSession() async throws {
         _ = NSApplication.shared
         let sender = ControlledPromptSender()

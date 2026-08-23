@@ -1610,6 +1610,8 @@ final class ResponseBubbleViewController: NSViewController, NSTextFieldDelegate 
         statusLabel.maximumNumberOfLines = 0
         statusLabel.lineBreakMode = .byWordWrapping
         statusLabel.setContentCompressionResistancePriority(.required, for: .vertical)
+        statusLabel.isSelectable = true
+        statusLabel.allowsEditingTextAttributes = true
 
         let document = FlippedDocumentView()
         document.translatesAutoresizingMaskIntoConstraints = false
