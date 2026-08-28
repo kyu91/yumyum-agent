@@ -334,7 +334,8 @@ public struct AgentRuntime: Sendable {
 
     private func requireCodexAuthentication(ifNeeded installation: AgentInstallation) async throws {
         guard installation.definitionID == .codex else { return }
-        guard try await codexLoginService.status(for: installation) else {
+        // validatedSelection() already verified this exact path in this same send.
+        guard try await codexLoginService.status(for: installation, revalidatingExecutable: false) else {
             throw AgentRuntimeError.codexAuthenticationRequired
         }
     }

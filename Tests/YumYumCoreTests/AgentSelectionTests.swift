@@ -216,21 +216,98 @@ struct AgentSelectionTests {
         #expect(restored.installations == [hermes])
         #expect(restored.hiddenDefinitionIDs == [.codex])
     }
+
+    @Test
+    func sendingDoesNotRescanAndVerifiesOnlyTheSelectedPath() async throws {
+        let selectedPath = "/known/hermes"
+        let otherPath = "/known/codex"
+        let hermes = available(.hermes, path: selectedPath)
+        let codex = available(.codex, path: otherPath)
+        let discovery = SelectionDiscovery(scans: [[hermes, codex]])
+        let registry = AgentRegistry(discovery: discovery, persistence: SelectionPersistence())
+
+        _ = await registry.refresh(trigger: .appStart)
+        _ = try await registry.select(.hermes, path: selectedPath)
+
+        let scanCountAfterSelect = await discovery.scanCount
+
+        for _ in 0..<3 {
+            _ = try await registry.validatedSelection()
+        }
+
+        #expect(await discovery.scanCount == scanCountAfterSelect)
+        #expect(await discovery.verifyCalls == Array(repeating: "hermes:\(selectedPath)", count: 3))
+    }
+
+    @Test
+    func sendVerificationFailureInvalidatesSelectionWithoutFallback() async throws {
+        let selectedPath = "/known/hermes"
+        let fallbackPath = "/known/hermes-fallback"
+        let hermes = available(.hermes, path: selectedPath)
+        let fallback = available(.hermes, path: fallbackPath)
+        let discovery = SelectionDiscovery(scans: [[hermes, fallback]])
+        let persistence = SelectionPersistence()
+        let registry = AgentRegistry(discovery: discovery, persistence: persistence)
+
+        _ = await registry.refresh(trigger: .appStart)
+        _ = try await registry.select(.hermes, path: selectedPath)
+
+        await discovery.setForcedVerifyResult(
+            unavailable(.hermes, path: selectedPath, reason: "vanished")
+        )
+
+        do {
+            _ = try await registry.validatedSelection()
+            Issue.record("Expected verification failure to block sending")
+        } catch {
+            #expect(error as? AgentSelectionError == .explicitReselectionRequired)
+        }
+
+        #expect(await persistence.storedReference == nil)
+        #expect(await discovery.verifyCalls.filter { $0.hasPrefix("hermes:\(fallbackPath)") }.isEmpty)
+    }
 }
 
 private actor SelectionDiscovery: AgentDiscovering {
     private var scans: [[AgentInstallation]]
     private var lastScan: [AgentInstallation] = []
+    private(set) var scanCount = 0
+    private(set) var verifyCalls: [String] = []
+    private var forcedVerifyResult: AgentInstallation?
 
     init(scans: [[AgentInstallation]]) {
         self.scans = scans
     }
 
     func scan(explicitPaths: [AgentDefinitionID: String]) async -> [AgentInstallation] {
+        scanCount += 1
         if !scans.isEmpty {
             lastScan = scans.removeFirst()
         }
         return lastScan
+    }
+
+    func setForcedVerifyResult(_ installation: AgentInstallation?) {
+        forcedVerifyResult = installation
+    }
+
+    func verify(_ definitionID: AgentDefinitionID, at executableURL: URL) async -> AgentInstallation {
+        verifyCalls.append("\(definitionID.rawValue):\(executableURL.path)")
+        if let forced = forcedVerifyResult,
+           forced.definitionID == definitionID,
+           forced.path == executableURL.path {
+            return forced
+        }
+        if let match = lastScan.first(where: { $0.definitionID == definitionID && $0.path == executableURL.path }) {
+            return match
+        }
+        return AgentInstallation(
+            definitionID: definitionID,
+            path: executableURL.path,
+            version: nil,
+            runtimeContract: .hermesACP,
+            availability: .unavailable(reason: "not found")
+        )
     }
 }
 

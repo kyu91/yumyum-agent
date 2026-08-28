@@ -56,8 +56,6 @@ public protocol AgentInstallationVerifying: Sendable {
     func verify(_ definitionID: AgentDefinitionID, at executableURL: URL) async -> AgentInstallation
 }
 
-extension AgentDiscovery: AgentInstallationVerifying {}
-
 public actor CodexLoginService {
     public static let statusTimeout: Duration = .seconds(5)
     public static let loginTimeout: Duration = .seconds(600)
@@ -79,9 +77,14 @@ public actor CodexLoginService {
         self.homeDirectory = homeDirectory.standardizedFileURL
     }
 
-    public func status(for installation: AgentInstallation) async throws -> Bool {
+    public func status(
+        for installation: AgentInstallation,
+        revalidatingExecutable: Bool = true
+    ) async throws -> Bool {
         try await withOperation {
-            try await runStatus(executableURL: revalidatedExecutableURL(installation))
+            try await runStatus(
+                executableURL: revalidatedExecutableURL(installation, revalidating: revalidatingExecutable)
+            )
         }
     }
 
@@ -146,7 +149,8 @@ public actor CodexLoginService {
     }
 
     private func revalidatedExecutableURL(
-        _ installation: AgentInstallation
+        _ installation: AgentInstallation,
+        revalidating: Bool = true
     ) async throws -> URL {
         guard installation.definitionID == .codex,
               installation.availability == .available,
@@ -155,6 +159,7 @@ public actor CodexLoginService {
         }
         let executableURL = URL(fileURLWithPath: path).standardizedFileURL
         guard executableURL.path == path else { throw CodexLoginError.unavailable }
+        guard revalidating else { return executableURL }
         let verified = await verifier.verify(.codex, at: executableURL)
         guard verified.definitionID == .codex,
               verified.path == path,

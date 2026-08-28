@@ -400,6 +400,37 @@ struct CodexLoginServiceTests {
     }
 
     @Test
+    func runtimeSendSkipsExecutableRevalidationAndRunsOnlyLoginStatus() async throws {
+        let verifier = CountingInstallationVerifier(installation: codex)
+        let runner = RecordingCodexProcessRunner(results: [result(status: 0)])
+        let service = CodexLoginService(verifier: verifier, processRunner: runner)
+        let runtime = AgentRuntime(
+            selection: RuntimeCodexSelection(installation: codex),
+            connectors: [RuntimeCodexConnector()],
+            codexLoginService: service
+        )
+
+        _ = try await runtime.send(PromptRequest(text: "hi"))
+
+        #expect(await verifier.callCount == 0)
+        #expect(await runner.calls.map(\.command.arguments) == [["login", "status"]])
+    }
+
+    @Test
+    func directStatusAndLoginCallsStillRevalidateTheExecutable() async throws {
+        let verifier = CountingInstallationVerifier(installation: codex)
+        let runner = RecordingCodexProcessRunner(results: [
+            result(status: 0), result(status: 0), result(status: 0),
+        ])
+        let service = CodexLoginService(verifier: verifier, processRunner: runner)
+
+        #expect(try await service.status(for: codex))
+        try await service.login(using: codex)
+
+        #expect(await verifier.callCount == 2)
+    }
+
+    @Test
     func runtimeBlocksUnauthenticatedCodexBeforeConnectorSend() async throws {
         let connector = RuntimeCodexConnector()
         let service = CodexLoginService(
@@ -468,6 +499,20 @@ private actor MatchingInstallationVerifier: AgentInstallationVerifying {
             runtimeContract: .codexExec,
             availability: .available
         )
+    }
+}
+
+private actor CountingInstallationVerifier: AgentInstallationVerifying {
+    let installation: AgentInstallation
+    private(set) var callCount = 0
+
+    init(installation: AgentInstallation) {
+        self.installation = installation
+    }
+
+    func verify(_ definitionID: AgentDefinitionID, at executableURL: URL) -> AgentInstallation {
+        callCount += 1
+        return installation
     }
 }
 
@@ -541,6 +586,19 @@ private actor SingleCodexDiscovery: AgentDiscovering {
     func scan(explicitPaths: [AgentDefinitionID: String]) -> [AgentInstallation] {
         [installation]
     }
+
+    func verify(_ definitionID: AgentDefinitionID, at executableURL: URL) -> AgentInstallation {
+        guard installation.definitionID == definitionID, installation.path == executableURL.path else {
+            return AgentInstallation(
+                definitionID: definitionID,
+                path: executableURL.path,
+                version: nil,
+                runtimeContract: .codexExec,
+                availability: .unavailable(reason: "not found")
+            )
+        }
+        return installation
+    }
 }
 
 private actor StaticLoginAgentDiscovery: AgentDiscovering {
@@ -552,6 +610,19 @@ private actor StaticLoginAgentDiscovery: AgentDiscovering {
 
     func scan(explicitPaths: [AgentDefinitionID: String]) -> [AgentInstallation] {
         installations
+    }
+
+    func verify(_ definitionID: AgentDefinitionID, at executableURL: URL) -> AgentInstallation {
+        if let match = installations.first(where: { $0.definitionID == definitionID && $0.path == executableURL.path }) {
+            return match
+        }
+        return AgentInstallation(
+            definitionID: definitionID,
+            path: executableURL.path,
+            version: nil,
+            runtimeContract: .claudePrint,
+            availability: .unavailable(reason: "not found")
+        )
     }
 }
 
@@ -568,6 +639,19 @@ private actor MutableCodexDiscovery: AgentDiscovering {
 
     func setInstallations(_ installations: [AgentInstallation]) {
         self.installations = installations
+    }
+
+    func verify(_ definitionID: AgentDefinitionID, at executableURL: URL) -> AgentInstallation {
+        if let match = installations.first(where: { $0.definitionID == definitionID && $0.path == executableURL.path }) {
+            return match
+        }
+        return AgentInstallation(
+            definitionID: definitionID,
+            path: executableURL.path,
+            version: nil,
+            runtimeContract: .codexExec,
+            availability: .unavailable(reason: "not found")
+        )
     }
 }
 

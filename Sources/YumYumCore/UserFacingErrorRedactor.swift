@@ -82,6 +82,24 @@ public enum UserFacingErrorRedactor {
             return error == .codexAuthenticationRequired
                 ? UserFacingErrorCategory.codexAuthenticationRequired.message
                 : UserFacingErrorCategory.agentUnavailable.message
+        case let error as HermesConnectionError:
+            switch error {
+            case .pathMustBeAbsolute, .executableUnavailable:
+                return UserFacingErrorCategory.agentUnavailable.message
+            case .timedOut:
+                return UserFacingErrorCategory.agentTimedOut.message
+            case .executionFailed, .emptyVersionOutput, .launchFailed:
+                return UserFacingErrorCategory.agentFailure.message
+            }
+        case let error as FixtureProbeError:
+            switch error {
+            case .unsafeFixturePath, .fixtureUnavailable:
+                return UserFacingErrorCategory.agentUnavailable.message
+            case .timedOut:
+                return UserFacingErrorCategory.agentTimedOut.message
+            case .failed, .emptyVersionOutput, .launchFailed:
+                return UserFacingErrorCategory.agentFailure.message
+            }
         case is FeedWorkflowError:
             return UserFacingErrorCategory.busy.message
         default:

@@ -69,6 +69,55 @@ struct AgentDiscoveryTests {
     }
 
     @Test
+    func sendingRevalidatesOnlyTheSelectedAgentWithItsExactExpectedProcessCount() async throws {
+        for definitionID in AgentDefinitionID.allCases {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            try FileManager.default.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true
+            )
+            defer { try? FileManager.default.removeItem(at: directory) }
+
+            for name in ["hermes", "opencode", "codex", "claude", "gemini"] {
+                let executable = directory.appendingPathComponent(name)
+                try Data(name.utf8).write(to: executable)
+                try FileManager.default.setAttributes(
+                    [.posixPermissions: 0o755],
+                    ofItemAtPath: executable.path
+                )
+            }
+
+            let runner = DiscoveryProcessRunner()
+            let discovery = AgentDiscovery(
+                knownExecutableDirectories: [directory],
+                processRunner: runner
+            )
+            let registry = AgentRegistry(
+                discovery: discovery,
+                persistence: UserDefaultsAgentSelectionStore(
+                    keyPrefix: "YumYumTests.SelectedAgent.\(UUID().uuidString)"
+                )
+            )
+
+            _ = await registry.refresh(trigger: .appStart)
+            let path = directory.appendingPathComponent(definitionID.executableName).path
+            _ = try await registry.select(definitionID, path: path)
+
+            let countBeforeSend = await runner.invocations.count
+            _ = try await registry.validatedSelection()
+            let invocationsDuringSend = await runner.invocations.suffix(from: countBeforeSend)
+
+            let expectedProcessCount = definitionID == .codex ? 3 : 2
+            #expect(
+                invocationsDuringSend.count == expectedProcessCount,
+                "\(definitionID) should launch exactly \(expectedProcessCount) processes when re-verified before sending"
+            )
+            #expect(invocationsDuringSend.allSatisfy { $0.command.executableURL.path == path })
+        }
+    }
+
+    @Test
     func acceptsGeminiWithBareSemverWhenHelpContainsACP() async throws {
         let executable = try makeExecutable(named: "gemini")
         defer { try? FileManager.default.removeItem(at: executable.deletingLastPathComponent()) }

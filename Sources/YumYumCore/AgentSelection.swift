@@ -106,7 +106,6 @@ public enum AgentRefreshTrigger: Equatable, Sendable {
     case appStart
     case manualRescan
     case quickMenuOpened
-    case beforeSend
 }
 
 public enum AgentSelectionState: Equatable, Sendable {
@@ -341,14 +340,29 @@ public actor AgentRegistry: AgentSelectionValidating {
     }
 
     public func validatedSelection() async throws -> AgentInstallation {
-        let refreshed = await refresh(trigger: .beforeSend)
-        if selectionWasInvalidated {
+        await loadPreferencesIfNeeded()
+        guard !selectionWasInvalidated else {
             throw AgentSelectionError.explicitReselectionRequired
         }
-        guard let installation = refreshed.selectedInstallation else {
+        guard let selectedReference else {
             throw AgentSelectionError.noSelection
         }
-        return installation
+        let verified = await discovery.verify(
+            selectedReference.definitionID,
+            at: URL(fileURLWithPath: selectedReference.path)
+        )
+        if let index = installations.firstIndex(where: {
+            $0.definitionID == verified.definitionID && $0.path == verified.path
+        }) {
+            installations[index] = verified
+        }
+        guard verified.path == selectedReference.path,
+              verified.availability == .available else {
+            selectionWasInvalidated = true
+            await persistence.save(nil)
+            throw AgentSelectionError.explicitReselectionRequired
+        }
+        return verified
     }
 
     public var selectedModelID: String? {

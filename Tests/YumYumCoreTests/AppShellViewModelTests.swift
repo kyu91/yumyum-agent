@@ -572,9 +572,13 @@ struct AppShellViewModelTests {
         let expectedState: HermesConnectionState
         switch error {
         case .pathMustBeAbsolute, .executableUnavailable:
-            expectedState = .pathError(message: error.errorDescription!)
+            expectedState = .pathError(
+                message: UserFacingErrorCategory.agentUnavailable.message
+            )
         case .executionFailed, .emptyVersionOutput:
-            expectedState = .executionError(message: error.errorDescription!)
+            expectedState = .executionError(
+                message: UserFacingErrorCategory.agentFailure.message
+            )
         case .timedOut, .launchFailed:
             Issue.record("Unexpected test argument: \(error)")
             return
@@ -664,8 +668,54 @@ struct AppShellViewModelTests {
 
         #expect(
             viewModel.probeState
-                == .failure(message: "안전한 fixture가 제한 시간 안에 응답하지 않았습니다.")
+                == .failure(message: UserFacingErrorCategory.agentTimedOut.message)
         )
+    }
+
+    @Test
+    @MainActor
+    func connectionFailureNeverShowsTheSelectedPathOrStderr() async {
+        let viewModel = YumYumAppViewModel(
+            fixtureProbe: ImmediateFixtureProbe(result: .success("unused")),
+            connectionChecker: ImmediateHermesConnectionChecker(
+                result: .failure(
+                    .executionFailed(
+                        exitStatus: 23,
+                        standardError: "token=TEST_ONLY_TOKEN_VALUE at /Users/example/bin/hermes"
+                    )
+                )
+            )
+        )
+        viewModel.hermesPath = "/Users/example/bin/hermes"
+
+        await viewModel.checkHermesConnection()
+
+        guard case let .executionError(message) = viewModel.connectionState else {
+            Issue.record("Expected an execution error state")
+            return
+        }
+        #expect(!message.contains("/Users/example"))
+        #expect(!message.contains("TEST_ONLY_TOKEN_VALUE"))
+    }
+
+    @Test
+    @MainActor
+    func fixtureProbeFailureNeverShowsTheFixturePath() async {
+        let viewModel = YumYumAppViewModel(
+            fixtureProbe: ImmediateFixtureProbe(
+                result: .failure(
+                    .fixtureUnavailable("/Users/example/bin/yumyum-process-fixture")
+                )
+            )
+        )
+
+        await viewModel.runFixtureProbe()
+
+        guard case let .failure(message) = viewModel.probeState else {
+            Issue.record("Expected a fixture probe failure state")
+            return
+        }
+        #expect(!message.contains("/Users/example"))
     }
 }
 }
@@ -765,6 +815,19 @@ private actor StaticAgentDiscovery: AgentDiscovering {
 
     func scan(explicitPaths: [AgentDefinitionID: String]) async -> [AgentInstallation] {
         installations
+    }
+
+    func verify(_ definitionID: AgentDefinitionID, at executableURL: URL) async -> AgentInstallation {
+        if let match = installations.first(where: { $0.definitionID == definitionID && $0.path == executableURL.path }) {
+            return match
+        }
+        return AgentInstallation(
+            definitionID: definitionID,
+            path: executableURL.path,
+            version: nil,
+            runtimeContract: .hermesACP,
+            availability: .unavailable(reason: "not found")
+        )
     }
 }
 

@@ -95,7 +95,7 @@ public enum AgentProcessEnvironment {
     }
 }
 
-public protocol AgentDiscovering: Sendable {
+public protocol AgentDiscovering: AgentInstallationVerifying {
     func scan(
         explicitPaths: [AgentDefinitionID: String]
     ) async -> [AgentInstallation]

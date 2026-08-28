@@ -421,6 +421,47 @@ struct UserFacingErrorRedactorTests {
 
         #expect(message == "입력을 처리하지 못했습니다. 다시 시도해 주세요.")
     }
+
+    @Test
+    func diagnosticProbeErrorsNeverCarryPathsOrStderr() {
+        let leakyErrors: [any Error] = [
+            HermesConnectionError.pathMustBeAbsolute("Users/example/bin/hermes"),
+            HermesConnectionError.executableUnavailable("/Users/example/bin/hermes"),
+            HermesConnectionError.executionFailed(
+                exitStatus: 23,
+                standardError: "token=TEST_ONLY_TOKEN_VALUE at /Users/example/bin/hermes"
+            ),
+            HermesConnectionError.launchFailed(
+                String(
+                    describing: ProcessRunnerError.launchFailed(
+                        executablePath: "/Users/example/bin/hermes",
+                        reason: "No such file"
+                    )
+                )
+            ),
+            HermesConnectionError.timedOut,
+            HermesConnectionError.emptyVersionOutput,
+            FixtureProbeError.unsafeFixturePath("/Users/example/tmp/hermes"),
+            FixtureProbeError.fixtureUnavailable("/Users/example/bin/yumyum-process-fixture"),
+            FixtureProbeError.failed(
+                exitStatus: 9,
+                standardError: "token=TEST_ONLY_TOKEN_VALUE at /Users/example/bin"
+            ),
+            FixtureProbeError.launchFailed("/Users/example/bin/yumyum-process-fixture"),
+            FixtureProbeError.timedOut,
+            FixtureProbeError.emptyVersionOutput,
+        ]
+
+        for error in leakyErrors {
+            let message = UserFacingErrorRedactor.message(for: error)
+            #expect(!message.contains("/Users/example"))
+            #expect(!message.contains("TEST_ONLY_TOKEN_VALUE"))
+            #expect(!message.contains("exitStatus"))
+            #expect(
+                UserFacingErrorRedactor.category(forSafeMessage: message).message == message
+            )
+        }
+    }
 }
 
 @Suite
