@@ -6,6 +6,9 @@ YumYum Agent is a Swift/AppKit macOS app that lets you “feed” a selected scr
 
 > **Unsigned developer preview:** the [latest Unsigned Preview release](https://github.com/kyu91/yumyum-agent/releases/latest) is available as a public prerelease. It is **not Developer ID signed or Apple notarized**.
 
+- Website: [yumyum-agent homepage](https://10yumyum-homepage.vercel.app)
+- Build notes: [why this app exists and how it was built](https://haas.kr/posts/yumyum-agent-open-source-launch)
+
 ## Features
 
 - One validated flow for staging the clipboard into chat drafts, screen captures, file selection, Finder drops, and chat input

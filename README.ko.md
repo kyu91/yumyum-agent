@@ -6,6 +6,9 @@ YumYum Agent는 선택한 화면 영역이나 로컬 파일을 플로팅 펫에�
 
 > **미서명 개발자 프리뷰:** [최신 Unsigned Preview 릴리스](https://github.com/kyu91/yumyum-agent/releases/latest)는 공개 prerelease로 제공됩니다. **Developer ID 서명 또는 Apple 공증을 받지 않았습니다.**
 
+- 웹사이트: [yumyum-agent 홈페이지](https://10yumyum-homepage.vercel.app)
+- 만든 이야기: [이 앱을 왜, 어떻게 만들었는지](https://haas.kr/posts/yumyum-agent-open-source-launch)
+
 ## 기능
 
 - 클립보드를 채팅 초안에 담기, 화면 캡처, 파일 선택, Finder 드롭, 채팅 입력을 위한 하나의 검증된 흐름
